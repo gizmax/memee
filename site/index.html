@@ -97,6 +97,8 @@ main, header, footer, section { position: relative; z-index: 1; }
   color: var(--ink-60);
 }
 .eyebrow .mark { color: var(--orange); margin-right: 8px; }
+.eyebrow a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--orange); }
+.eyebrow a:hover { color: var(--orange); }
 
 section { padding-block: clamp(72px, 9vw, 140px); }
 
@@ -1152,7 +1154,12 @@ body::before { display: none; }
     <section class="hero shell">
       <div class="hero-eyebrow eyebrow reveal">
         <span><span class="dot"></span>Shared memory for AI agent teams</span>
-        <span><span class="mark">·</span> MIT-licensed core on GitHub</span>
+        <span>
+          <span class="mark">·</span>
+          <a href="https://github.com/gizmax/memee" rel="external">v1.0.0 on GitHub</a>
+          <span class="mark">·</span>
+          <a href="https://pypi.org/project/memee/" rel="external">PyPI</a>
+        </span>
       </div>
 
       <h1 class="hero-head display reveal">
@@ -1414,7 +1421,7 @@ body::before { display: none; }
           <em>These are internal simulations, not customer case studies.</em>
           Full methodology + reproducibility:
           <code>memee benchmark</code> &middot;
-          <a href="https://github.com/gizmax-cz/memee/blob/main/docs/benchmarks.md"
+          <a href="https://github.com/gizmax/memee/blob/main/docs/benchmarks.md"
              rel="external">docs/benchmarks.md</a>.
         </div>
       </div>
@@ -1558,9 +1565,9 @@ body::before { display: none; }
           <a href="#value">Why</a>
           <a href="#share">How it works</a>
           <a href="#pricing">Pricing</a>
-          <a href="https://github.com/gizmax-cz/memee" rel="external">Docs</a>
-          <a href="https://github.com/gizmax-cz/memee" rel="external">GitHub</a>
-          <a href="https://github.com/gizmax-cz/memee/blob/main/CHANGELOG.md" rel="external">Changelog</a>
+          <a href="https://github.com/gizmax/memee" rel="external">Docs</a>
+          <a href="https://github.com/gizmax/memee" rel="external">GitHub</a>
+          <a href="https://github.com/gizmax/memee/blob/main/CHANGELOG.md" rel="external">Changelog</a>
         </nav>
         <div class="foot-meta">
           © 2026 Memee<br />
