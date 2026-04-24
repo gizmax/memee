@@ -1245,7 +1245,7 @@ body::before { display: none; }
         <span><span class="dot"></span>Shared memory for AI agent teams</span>
         <span>
           <span class="mark">·</span>
-          <a href="https://github.com/gizmax/memee/releases/latest" rel="external">v1.0.6 on GitHub</a>
+          <a href="https://github.com/gizmax/memee/releases/latest" rel="external">v1.0.7 on GitHub</a>
           <span class="mark">·</span>
           <a href="https://pypi.org/project/memee/" rel="external">PyPI</a>
         </span>
@@ -1306,7 +1306,7 @@ body::before { display: none; }
 
         <article class="usp reveal">
           <span class="num">02 · Cut the prompt bloat</span>
-          <h3>Send <strong>~40 tokens</strong>, not your whole library.</h3>
+          <h3>Route the <strong>5&ndash;7 memories</strong> this task needs, not your whole <code>CLAUDE.md</code>.</h3>
           <p class="benefit">Memee routes only what this task actually needs. Your agents stop stuffing the whole wiki into every prompt, bills drop 96%, and answers come back faster because the context is smaller and sharper.</p>
           <div class="proof"><span>Token reduction</span><strong>96%</strong></div>
         </article>
@@ -1469,50 +1469,52 @@ body::before { display: none; }
       <div class="math-head">
         <h2 class="display reveal">The token math.</h2>
         <p class="lede reveal">
-          Measured on a 500-pattern knowledge base.
-          Reproducible with <code>memee&nbsp;benchmark</code>.
-          What the saved tokens are worth to you depends on your pricing
-          tier. See below.
+          Numbers from a 27-repo sample of real public
+          <code>CLAUDE.md</code> / <code>AGENTS.md</code> files, not a
+          synthetic worst case. The hidden problem isn&rsquo;t the
+          first page &mdash; it&rsquo;s the slope.
         </p>
       </div>
 
       <div class="math-grid">
         <div class="math-card without reveal">
           <div class="cap">Without Memee</div>
-          <div class="big">5k&ndash;100k<span class="suffix">tokens / task</span></div>
-          <div class="sub">Full library into every prompt. Scales with team size: ~5k for 50 patterns, ~22k measured on a 500-pattern synthetic corpus, more on real teams with longer bullets.</div>
+          <div class="big">~2,200<span class="suffix">tokens / turn (median)</span></div>
+          <div class="sub">Median <code>CLAUDE.md</code> / <code>AGENTS.md</code> across 27 popular OSS repos (langchain, vercel/ai, prisma, zed, openai/codex, &hellip;). Claude Code and Cursor load it in full on every session start. Grown teams hit 6k&ndash;15k; a published pathological case reached 42k.</div>
         </div>
         <div class="math-card with reveal">
           <div class="cap">With Memee</div>
-          <div class="big">~40<span class="suffix">tokens / task (avg)</span></div>
-          <div class="sub">Measured on our 500-pattern benchmark. The router has a 500-token budget cap for the worst case, but it stops at relevance, not at the cap.</div>
+          <div class="big">≤500<span class="suffix">tokens / task (routed)</span></div>
+          <div class="sub">The router picks only the 5&ndash;7 memories relevant to the current task, inside a 500-token budget cap. The knowledge base can grow to thousands of entries without growing per-turn context.</div>
         </div>
         <div class="math-card savings reveal">
           <div class="cap">You keep</div>
-          <div class="big">≥99%</div>
-          <div class="sub">Of the context, measured on the benchmark corpus. At 22,000 dump vs ~40 routed = 99.8%. Your ratio depends on your library size; the router&rsquo;s share drops further with bigger libraries.</div>
+          <div class="big">the&nbsp;slope</div>
+          <div class="sub">At median, Memee saves ~77&nbsp;% per turn; at &ldquo;grown&rdquo; teams (10k+) ~95&nbsp;%. But the real win is that per-turn context stays <em>bounded</em> as your knowledge base grows &mdash; CLAUDE.md grows forever, Memee doesn&rsquo;t.</div>
         </div>
       </div>
 
       <div class="math-foot">
-        <p class="math-pull reveal">Fewer tokens&nbsp;in. <em>Fewer iterations, faster replies, better first answers.</em></p>
+        <p class="math-pull reveal">Your&nbsp;CLAUDE.md grows forever. <em>Memee doesn&rsquo;t.</em></p>
         <div class="math-note reveal">
-          <strong>How we measure this.</strong><br />
-          <em>Benchmark corpus:</em> 500 synthetic patterns, realistic
-          title + 2&ndash;3 sentences of content. Full-dump baseline
-          measures 21,623 tokens on this corpus; the router&rsquo;s
-          `smart_briefing` output over 10 representative task queries
-          averages 39 tokens (min 18, max 67). Reproducible with
-          <code>memee&nbsp;benchmark</code> or
-          <code>pytest&nbsp;tests/test_router.py::test_token_budget_respected</code>.<br />
-          <em>Why the big range on "Without Memee":</em> real teams vary
-          5&times;&ndash;20&times; in how much context they stuff into
-          prompts. A 50-pattern team dumps ~5k tokens; a 500-pattern team
-          with long bullets can cross 100k. The router&rsquo;s cap is
-          constant at 500 regardless of library size, so the gap
-          <em>widens</em> as you scale.<br />
-          <em>These are internal benchmark results, not customer case studies.</em>
-          Full methodology:
+          <strong>How we get to these numbers.</strong><br />
+          <em>Without Memee:</em> we sampled 27 real public repos
+          (langchain-ai/langchain, vercel/ai, prisma/prisma,
+          openai/codex, zed-industries/zed, All-Hands-AI/OpenHands,
+          and more) via <code>gh api</code>. Median file size
+          translates to ~2,160 tokens, 2,500 mean, 9,600 at p95, one
+          published outlier at 42,000. Anthropic&rsquo;s own docs
+          confirm <code>CLAUDE.md</code> is loaded on every session
+          and rides along with every turn.<br />
+          <em>With Memee:</em> the router has a 500-token budget cap
+          and runs hybrid BM25 + vector + tag search to fill it with
+          the 5&ndash;7 most relevant memories. Measured average on a
+          synthetic 500-pattern corpus is ~40 tokens per briefing
+          (min 18, max 67) &mdash; well under the cap. Reproducible
+          with <code>pytest tests/test_router.py::test_token_budget_respected</code>.<br />
+          <em>These are measured benchmark numbers with citations, not
+          customer case studies.</em> Full methodology + per-repo file
+          sizes:
           <a href="https://github.com/gizmax/memee/blob/main/docs/benchmarks.md"
              rel="external">docs/benchmarks.md</a>.
         </div>

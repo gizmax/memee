@@ -28,7 +28,7 @@ python3 -m pip install memee  # if you don't have pipx
 ## Why Memee
 
 - **Your agents stop repeating mistakes.** One agent hits a bug, records it, every other agent (in every other project) is warned before it happens again.
-- **Send ~40 tokens, not your whole library.** A smart router picks the memories relevant to the current task inside a 500-token budget cap. Measured average on a 500-pattern benchmark corpus: 39 tokens (min 18, max 67). Full-library dump baseline on the same corpus: 21,623 tokens. ≥99% context reduction.
+- **Your `CLAUDE.md` grows forever. Memee doesn't.** Typical AGENTS.md / CLAUDE.md across 27 popular OSS repos: ~2,200 tokens (median), 10k+ at grown teams, one published outlier at 42k — reloaded in full on every Claude Code / Cursor session. Memee routes only the 5–7 memories relevant to the current task (≤500 tokens) and keeps per-turn context bounded as the knowledge base grows.
 - **Every model reads from one canon.** Claude, GPT, Gemini, Llama all record into, and pull from, the same memory. Cross-model agreement raises confidence; single-model claims stay provisional.
 
 ## Install and first use (60 seconds)
@@ -72,7 +72,8 @@ Deeper architecture doc: [CLAUDE.md](CLAUDE.md). CMAM specifics: [docs/cmam.md](
 
 > All numbers below are **internal simulations and benchmarks**, not independent third-party evaluations. They describe system behaviour under synthetic workloads. Treat them as suggestive, not conclusive.
 
-- **Token savings per task:** on a 500-pattern synthetic corpus, full-library dump measures **21,623 tokens**; router output averages **39 tokens** (min 18, max 67) across 10 representative task queries, bounded by a 500-token budget cap. **≥99.8% reduction** at that corpus size; reduction widens further as the library grows (cap is constant).
+- **Per-turn context baseline:** median `CLAUDE.md` / `AGENTS.md` across 27 popular OSS repos (langchain, vercel/ai, prisma, zed, openai/codex, …) is **~2,160 tokens**; mean 2,500; p95 ~9,600; a published outlier at 42,000. Both Claude Code and Cursor load this file in full on every session start.
+- **Router output:** budget-capped at 500 tokens, measured average of 39 tokens (min 18, max 67) across 10 task queries on a 500-pattern synthetic corpus. The cap holds regardless of library size, so the gap to the baseline *widens* as your knowledge grows.
 - **OrgMemEval v1.0:** 92.4/100, across propagation, avoidance, maturity, onboarding, recovery, calibration, synthesis, and research. Competitor baselines on the same scenarios range from 0.9/100 (MemPalace) to 3.5/100 (Mem0, the closest); see [docs/benchmarks.md](docs/benchmarks.md).
 - **7-task A/B (with vs. without Memee):** time –71%, iterations –65%, quality 56% → 93%, impact-DB ROI ≈ 10.7× at the current $49/mo Team tier. GigaCorp sim (100 projects, 100 agents, 18 months): incidents 12/mo → 3/mo, annual ROI ≈ 3× at the same flat Team tier.
 - **Retrieval:** hit@1 = 100% on a 12-memory routing benchmark after the recent ranking fix.

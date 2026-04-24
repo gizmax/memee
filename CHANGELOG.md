@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.7] — 2026-04-24
+
+Second token-math honesty pass. The 1.0.6 framing ("5k–100k tokens
+depending on library size") was still a strawman — it assumed a team
+dumps its entire pattern library into every prompt, which nobody
+does. The real no-memory baseline is the size of a project's
+`CLAUDE.md` / `AGENTS.md`, which Claude Code and Cursor both load
+in full on every session start.
+
+### Changed
+
+- **Site + README baseline is now anchored to real data**: median
+  CLAUDE.md / AGENTS.md token count across **27 popular public
+  repositories** (langchain, vercel/ai, prisma, zed, openai/codex,
+  OpenHands, pydantic-ai, ClickHouse, cal.com, deno, and 17 more)
+  measured via `gh api` and `bytes / 4`. Median ~2,160 tokens, mean
+  2,510, p95 ~9,600, published outlier 42,000.
+- Math section cards now read:
+    - *Without Memee*: **~2,200 tokens / turn (median)** with the
+      p95 and pathological outlier called out in the sub-line.
+    - *With Memee*: **≤500 tokens / task (routed)** — same cap, new
+      framing ("5–7 memories relevant to the current task").
+    - *You keep*: **the slope** — 77% at median, 95% at grown teams,
+      but the real point is that per-turn context stays *bounded*
+      as your knowledge base grows.
+- Hero bullet: "Route the **5–7 memories** this task needs, not your
+  whole `CLAUDE.md`."
+- Pull-quote: "Your `CLAUDE.md` grows forever. *Memee doesn't.*"
+- `docs/benchmarks.md` gains a new "Without-Memee baseline: real
+  CLAUDE.md / AGENTS.md sizes" section with the full 7-percentile
+  table + named sampled repos + links to Anthropic's docs confirming
+  CLAUDE.md rides along on every turn.
+- Three illustrative reduction scenarios in the docs (median, p95,
+  pathological) — all above 98%, but the point of the copy is the
+  *shape*, not the single percentage.
+
+Pure copy + docs truthiness. Engine + tests untouched. 260 passing,
+ruff clean.
+
 ## [1.0.6] — 2026-04-24
 
 Token-math honesty follow-up. After 1.0.5 fixed the router's fake token

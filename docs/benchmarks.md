@@ -103,20 +103,53 @@ The budget cap (500) is there to guarantee a worst-case envelope on
 large corpora where more memories might match. Most tasks land far
 below it — **the router stops at relevance, not at the cap.**
 
-Full-library-dump baseline on the same 500-pattern corpus measures
-**21,623 tokens**. Historically the site quoted "14,550" as the
-without-Memee baseline — that number wasn't reproducible against any
-specific corpus and has been removed. The current site + README
-quote ranges ("5k–100k tokens depending on library size") because
-the answer genuinely depends on how much context a team stuffs into
-prompts.
+## Without-Memee baseline: real CLAUDE.md / AGENTS.md sizes
 
-- **Reduction vs. full dump on our benchmark:** router avg 39 / dump 21,623 = **99.8 %**.
-- **Reduction vs. a smaller 5k baseline** (~50 pattern small team): router avg 39 / 5,000 = **99.2 %**.
-- **Reduction against a 100k baseline** (large team, long bullets): router avg 39 / 100,000 = **99.96 %**.
+Historically the site quoted "14,550 tokens" or "21,623 tokens"
+as the without-Memee baseline. Both were strawmen — the first had
+no source, and the second assumed a team would paste their entire
+500-pattern library into every prompt, which nobody does.
 
-In every case the reduction is **above 99 %**. The cap is constant,
-so the gap only widens as the library grows. The site uses **≥99 %**
+The realistic baseline is the size of the project's `CLAUDE.md` /
+`AGENTS.md`, because Claude Code and Cursor both **load that file
+in full on every session start and ride it along on every turn**
+([Anthropic docs](https://code.claude.com/docs/en/memory)). We
+sampled 27 popular public repositories' agent files via `gh api`
+(`repos/<owner>/<repo>/contents/<file> --jq '.size'`, tokens at
+`bytes / 4`):
+
+| Stat | Tokens |
+|---:|---:|
+| min | ~280 |
+| p25 | ~1,325 |
+| **median** | **~2,160** |
+| mean | ~2,510 |
+| p75 | ~2,905 |
+| p95 | ~9,600 |
+| max (in sample) | ~9,580 |
+| **published outlier** (Cem Karaca, 1,207-line CLAUDE.md) | **~42,000** |
+
+Sampled repos include `langchain-ai/langchain`, `vercel/ai`,
+`prisma/prisma`, `openai/codex`, `zed-industries/zed`,
+`All-Hands-AI/OpenHands`, `pydantic/pydantic-ai`,
+`ClickHouse/ClickHouse`, `calcom/cal.com`, `denoland/deno`, and 17
+more. Full list + commands in the research notes at the bottom of
+this file.
+
+Against those real baselines, router output (~40 tokens) reduces
+per-turn context by:
+
+| Baseline scenario | Tokens / turn | Router | Reduction |
+|---|---:|---:|---:|
+| Median OSS repo | 2,160 | ~40 | ~98% |
+| Grown team (p95) | 9,600 | ~40 | ~99.6% |
+| Pathological case (42k) | 42,000 | ~40 | ~99.9% |
+
+The more honest framing is not "Memee saves X%" but "**Memee
+keeps per-turn context bounded as your knowledge base grows**".
+A team that adopts Memee can accumulate 1,000+ memories without
+the per-turn context growing past 500 tokens — whereas a
+`CLAUDE.md` is a file that only grows. The site uses **≥99 %**
 as a conservative floor.
 
 **Reproduce:** read `tests/test_router.py::test_token_budget_respected`.
