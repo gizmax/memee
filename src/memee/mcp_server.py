@@ -23,11 +23,25 @@ mcp = FastMCP(
 )
 
 
-def _get_session():
-    from memee.storage.database import get_session, init_db
+_cached_engine = None
 
-    init_db()
-    return get_session()
+
+def _get_session():
+    """Return a new SQLAlchemy session bound to the cached engine.
+
+    The engine + schema init are a per-process one-time cost. Previously
+    every MCP tool call re-ran ``init_db()`` (new engine, CREATE IF NOT
+    EXISTS on FTS triggers, alembic-version check) which added 20–50 ms
+    of overhead to every invocation. Engine is cached at the module level;
+    the caller still gets a fresh Session per call.
+    """
+    from memee.storage.database import get_engine, get_session, init_db
+
+    global _cached_engine
+    if _cached_engine is None:
+        _cached_engine = get_engine()
+        init_db(_cached_engine)
+    return get_session(_cached_engine)
 
 
 def _parse_tags(tags: str) -> list[str]:
@@ -184,30 +198,26 @@ async def memory_search(
     ``search_feedback`` once you pick a result so Memee can track hit@k.
     """
     from memee.engine.search import search_memories
-    from memee.storage.models import SearchEvent
 
     session = _get_session()
     tag_list = _parse_tags(tags) or None
     limit = _clamp_limit(limit, default=10, maxv=200)
 
-    results = search_memories(
+    # Ask search_memories to hand back the exact event id it just wrote.
+    # Pulling "latest SearchEvent" here instead races with concurrent callers
+    # and can hand the wrong id to search_feedback → corrupted hit@k metrics.
+    results, query_event_id = search_memories(
         session,
         query,
         tags=tag_list,
         memory_type=type or None,
         limit=limit,
-    )
-
-    # Grab the most recent SearchEvent row for this session — telemetry just
-    # wrote it. This is a cheap way to expose the id to the caller without
-    # changing search_memories' signature.
-    latest_event = (
-        session.query(SearchEvent).order_by(SearchEvent.created_at.desc()).first()
+        return_event_id=True,
     )
 
     return json.dumps({
         "count": len(results),
-        "query_event_id": latest_event.id if latest_event else None,
+        "query_event_id": query_event_id,
         "results": [
             {
                 **_memory_to_dict(r["memory"]),
@@ -400,7 +410,7 @@ async def decision_record(
     it sees the full history of what was chosen before and why.
     Alternatives is JSON array: [{"name": "X", "reason_rejected": "..."}]
     """
-    from memee.engine.quality_gate import run_quality_gate
+    from memee.engine.quality_gate import merge_duplicate, run_quality_gate
     from memee.storage.models import Decision, Memory, MemoryType, Project, ProjectMemory
 
     session = _get_session()
@@ -414,13 +424,31 @@ async def decision_record(
     content = f"Chose {chosen}. Alternatives: {alternatives}"
 
     gate = run_quality_gate(session, title, content, ["decision"], "decision", source="llm")
-    if not gate.accepted and not gate.merged:
+    # Dedup hit — fold into the existing memory instead of creating a twin.
+    if not gate.accepted and gate.merged:
+        existing = session.get(Memory, gate.merged_id)
+        if existing:
+            merge_duplicate(
+                session, existing, content, ["decision"],
+                new_title=title, similarity=gate.dedup_similarity,
+            )
+            return json.dumps({
+                "status": "merged",
+                "existing_id": existing.id,
+                "title": existing.title,
+            })
+    if not gate.accepted:
         return json.dumps({"status": "rejected", "issues": gate.issues})
 
+    # Persist the "decision" tag so future decision_record calls with the
+    # same title+tag signature can be detected by the fingerprint gate.
+    # Without this the second call can't match the first and we create a
+    # twin row (this was the P2 dedup bug before the April 2026 fix).
     memory = Memory(
         type=MemoryType.DECISION.value,
         title=title,
         content=content,
+        tags=["decision"],
         confidence_score=gate.initial_confidence,
         source_type=gate.source_type,
         quality_score=gate.quality_score,
@@ -473,7 +501,7 @@ async def antipattern_record(
     Severity: low, medium, high, critical.
     Other agents will be warned when their approach matches this anti-pattern.
     """
-    from memee.engine.quality_gate import run_quality_gate
+    from memee.engine.quality_gate import merge_duplicate, run_quality_gate
     from memee.storage.models import AntiPattern, Memory, MemoryType
 
     session = _get_session()
@@ -481,7 +509,20 @@ async def antipattern_record(
     content = f"Trigger: {trigger}\nConsequence: {consequence}\nAlternative: {alternative}"
 
     gate = run_quality_gate(session, title, content, tag_list, "anti_pattern", source="llm")
-    if not gate.accepted and not gate.merged:
+    # Dedup hit — fold into the existing anti-pattern instead of creating a twin.
+    if not gate.accepted and gate.merged:
+        existing = session.get(Memory, gate.merged_id)
+        if existing:
+            merge_duplicate(
+                session, existing, content, tag_list,
+                new_title=title, similarity=gate.dedup_similarity,
+            )
+            return json.dumps({
+                "status": "merged",
+                "existing_id": existing.id,
+                "title": existing.title,
+            })
+    if not gate.accepted:
         return json.dumps({"status": "rejected", "issues": gate.issues})
 
     memory = Memory(

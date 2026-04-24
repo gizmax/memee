@@ -362,11 +362,18 @@ def merge_duplicate(
     if new_content and new_content not in (existing.content or ""):
         existing.content = f"{existing.content}\n\nAlso: {new_content}"
 
-    # Merge tags
+    # Merge tags — and re-sync the normalized MemoryTag index so propagation
+    # and predictive scans see the newly-merged tags. Without this the JSON
+    # column and the MemoryTag table drift apart and tag-indexed lookups
+    # silently miss the merged tags.
+    tags_changed = False
     if new_tags:
         existing_tags = set(existing.tags or [])
+        before = set(existing_tags)
         existing_tags.update(new_tags)
-        existing.tags = list(existing_tags)
+        if existing_tags != before:
+            existing.tags = list(existing_tags)
+            tags_changed = True
 
     # Evidence of merge — JSON list column, so we reassign a new list to force
     # SQLAlchemy to notice the change (in-place append is easy to miss).
@@ -382,6 +389,11 @@ def merge_duplicate(
 
     # Cluster-size accounting
     existing.merge_count = int(existing.merge_count or 0) + 1
+
+    if tags_changed:
+        from memee.engine.tag_index import sync_memory_tags
+        session.flush()  # ensure existing.id is resolved and updates are visible
+        sync_memory_tags(session, existing)
 
     session.commit()
     logger.info(

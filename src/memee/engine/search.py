@@ -68,12 +68,19 @@ def search_memories(
     use_vectors: bool = True,
     scope: str | None = None,
     user_id: str | None = None,
-) -> list[dict]:
+    return_event_id: bool = False,
+):
     """Hybrid search: BM25 + vector + tags + confidence.
 
     `scope` and `user_id` are honoured when `memee-team` is installed and
     has registered the `visible_memories` plugin hook. In OSS they are
     accepted but ignored (single-user product).
+
+    If ``return_event_id`` is True, returns ``(results, event_id | None)`` so
+    callers (e.g. the MCP `memory_search` tool) can pass the id back to
+    ``mark_event_accepted`` without racing on "latest SearchEvent" lookups
+    under concurrent traffic. Default False preserves the historical
+    list-returning signature for every other caller.
     """
     _t0 = time.perf_counter()
     # Stage 1: BM25 search
@@ -105,7 +112,9 @@ def search_memories(
     all_ids = set(bm25_by_id.keys()) | set(vector_results.keys())
     if not all_ids:
         fb = _fallback_search(session, query, tags, memory_type, maturity, limit)
-        _record_telemetry(session, query, fb, _t0)
+        fb_event_id = _record_telemetry(session, query, fb, _t0)
+        if return_event_id:
+            return fb, fb_event_id
         return fb
 
     # Stage 4: Batch load memories (ONE query for all candidates)
@@ -173,18 +182,22 @@ def search_memories(
 
     results.sort(key=lambda r: r["total_score"], reverse=True)
     final = results[:limit]
-    _record_telemetry(session, query, final, _t0)
+    event_id = _record_telemetry(session, query, final, _t0)
+    if return_event_id:
+        return final, event_id
     return final
 
 
-def _record_telemetry(session: Session, query: str, results: list, t0: float) -> None:
-    """Best-effort: persist a SearchEvent. Never raises."""
+def _record_telemetry(session: Session, query: str, results: list, t0: float) -> str | None:
+    """Best-effort: persist a SearchEvent. Returns the new event id (or None
+    on error / disabled telemetry). Never raises."""
     try:
         from memee.engine.telemetry import record_search_event
         latency_ms = (time.perf_counter() - t0) * 1000.0
-        record_search_event(session, query, results, latency_ms)
+        return record_search_event(session, query, results, latency_ms)
     except Exception as e:  # pragma: no cover
         logger.debug("telemetry wrapper failed: %s", e)
+        return None
 
 
 def search_anti_patterns(

@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.8] — 2026-04-25
+
+R6 review round. Two P1 scope leaks in `memee-team`, three P2 dedup/
+telemetry drifts in OSS, and a per-call init_db cost in the MCP server.
+
+### Security (memee-team scoping)
+
+- **`promote_to_org` now enforces scope, not just role.** A lead from
+  team A could previously promote team B's memory to org by virtue of
+  their "lead" role alone. Leads are now constrained to their own
+  team; admins stay org-wide; personal memories must go through
+  `promote_to_team` first.
+- **`onboard_user` no longer leaks team memories to no-team users.**
+  When `user.team_id` was unset, the team-filter branch was skipped
+  entirely and the onboarding query returned every team's memories.
+  Users without a team now see only `scope == "org"` entries.
+
+### Fixed (OSS)
+
+- **MCP `decision_record` / `antipattern_record` honour the dedup
+  gate.** When the quality gate reported `merged=True`, both tools
+  used to fall through and create a twin row instead of folding into
+  the existing memory. Repeat calls now return `{"status": "merged"}`
+  and point at the canonical id.
+- **`decision_record` persists `tags=["decision"]`** so the
+  fingerprint-based dedup can find the prior decision on subsequent
+  calls (without this the first call's memory had no tags and could
+  never match).
+- **`merge_duplicate` re-syncs the `MemoryTag` index** via
+  `sync_memory_tags` after merging new tags. The JSON column and the
+  normalized index used to drift apart; propagation and predictive
+  lookups then silently missed merged tags.
+- **`memory_search` returns an exact `query_event_id`** instead of
+  querying the globally-latest `SearchEvent`. Under concurrent MCP
+  traffic the latest-row lookup handed callers each other's ids and
+  corrupted hit@k metrics. `search_memories` gains a backward-
+  compatible `return_event_id=True` kwarg used by the MCP wrapper.
+
+### Performance
+
+- **MCP `_get_session()` caches the engine + `init_db()` per process.**
+  Every tool call used to rebuild the engine and re-run FTS trigger
+  DDL (~20–50 ms of overhead per call). Session is still fresh per
+  call; engine and schema init are one-time.
+
+### Infra
+
+- **`memee-team/tests/conftest.py`** so `pytest memee-team/tests/`
+  picks up `session` / `org` fixtures without polluting pytest's
+  rootdir. The review surfaced 12 collection errors before any logic
+  ran; this fixes them.
+
+### Tests
+
+- New regressions for every fix:
+    - `test_lead_cannot_promote_other_team_memory`
+    - `test_admin_can_promote_any_team_memory`
+    - `test_onboard_no_team_user_sees_only_org`
+    - `test_antipattern_record_merges_duplicate`
+    - `test_decision_record_merges_duplicate`
+    - `test_merge_resyncs_memory_tag_index`
+
 ## [1.0.7] — 2026-04-24
 
 Second token-math honesty pass. The 1.0.6 framing ("5k–100k tokens

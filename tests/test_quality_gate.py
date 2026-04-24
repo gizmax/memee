@@ -394,3 +394,39 @@ class TestMergeEvidenceChain:
         assert len(seed.evidence_chain) == 2
         assert [e["from_title"] for e in seed.evidence_chain] == ["first", "second"]
         assert seed.merge_count == 2
+
+    def test_merge_resyncs_memory_tag_index(self, session):
+        """After a merge adds new tags, the MemoryTag index must reflect them.
+
+        Regression: merge used to update only the JSON column, leaving the
+        normalized MemoryTag table stale; tag-indexed lookups (propagation,
+        predictive) would silently miss the merged tags.
+        """
+        from memee.engine.tag_index import sync_memory_tags
+        from memee.storage.models import MemoryTag
+
+        seed = Memory(
+            type=MemoryType.PATTERN.value,
+            title="Always use timeout on HTTP requests",
+            content="Original",
+            tags=["python"],
+        )
+        session.add(seed)
+        session.commit()
+        # Initial index state
+        sync_memory_tags(session, seed)
+        session.commit()
+        assert {t.tag for t in session.query(MemoryTag).filter_by(memory_id=seed.id)} == {"python"}
+
+        merge_duplicate(
+            session, seed,
+            new_content="Also applies to outbound HTTP",
+            new_tags=["fastapi"],
+            new_title="Always use timeout (fastapi)",
+            similarity=0.95,
+        )
+
+        # JSON column has both tags AND the index was re-synced.
+        assert set(seed.tags) == {"python", "fastapi"}
+        indexed = {t.tag for t in session.query(MemoryTag).filter_by(memory_id=seed.id)}
+        assert indexed == {"python", "fastapi"}
