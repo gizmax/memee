@@ -703,6 +703,21 @@ def research_complete_cmd(experiment_id, status):
         click.echo("  Lesson recorded to organizational memory.")
 
 
+@research.command("reset-zombies")
+@click.option("--stale-hours", type=int, default=24,
+              help="Minimum age (hours) of a running experiment before it's considered stale.")
+def research_reset_zombies_cmd(stale_hours):
+    """Reset stale 'running' experiments (crashed/killed) to 'failed'."""
+    from memee.engine.research import reset_zombie_experiments
+    from memee.storage.database import get_session, init_db
+
+    engine = init_db()
+    session = get_session(engine)
+
+    count = reset_zombie_experiments(session, stale_after_hours=stale_hours)
+    click.echo(f"Reset {count} zombie experiment{'s' if count != 1 else ''}.")
+
+
 # ── Project Commands ──
 
 

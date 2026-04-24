@@ -10,8 +10,12 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP(
     "memee",
-    version="0.1.0",
-    description=(
+    # Note: ``version=`` was removed — some mcp library versions reject it as
+    # an unexpected kwarg (TypeError). FastMCP now surfaces version via tool
+    # metadata rather than the constructor. Current FastMCP accepts
+    # ``instructions=`` for the human-readable blurb; ``description=`` is
+    # rejected on current releases.
+    instructions=(
         "Institutional memory for AI agent teams. "
         "Record, search, and share knowledge across projects. "
         "Your agents forget. Memee doesn't."
@@ -31,10 +35,14 @@ def _parse_tags(tags: str) -> list[str]:
 
 
 def _clamp_limit(value, default: int = 10, maxv: int = 200) -> int:
-    """Bound a caller-supplied limit. Protects against ``limit=999999``."""
+    """Bound a caller-supplied limit. Protects against ``limit=999999``.
+
+    Also handles ``float('inf')`` (OverflowError on int()) and string floats
+    like ``"5.5"`` (which would ValueError under a direct ``int(...)``).
+    """
     try:
-        return max(1, min(int(value), maxv))
-    except (TypeError, ValueError):
+        return max(1, min(int(float(value)), maxv))
+    except (TypeError, ValueError, OverflowError):
         return default
 
 

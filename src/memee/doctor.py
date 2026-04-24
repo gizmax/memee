@@ -16,7 +16,9 @@ Auto-fixes:
 from __future__ import annotations
 
 import json
+import os
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 # ── ANSI ──
@@ -128,7 +130,16 @@ def detect_ai_tools() -> list[dict]:
 
 
 def configure_tool(tool_id: str) -> bool:
-    """Write MCP configuration for a specific AI tool."""
+    """Write MCP configuration for a specific AI tool.
+
+    Safety rails:
+    - On JSONDecodeError we MUST NOT overwrite: the existing file may hold
+      hooks/permissions/env/enabledPlugins the user still needs. We back the
+      broken file up to ``settings.json.bak.<timestamp>`` and raise — the
+      user fixes the syntax and reruns.
+    - Writes are atomic: tmp file + os.replace so Ctrl-C mid-write can't
+      leave the original truncated.
+    """
     tool_def = next((t for t in AI_TOOLS if t["id"] == tool_id), None)
     if not tool_def:
         return False
@@ -142,17 +153,39 @@ def configure_tool(tool_id: str) -> bool:
     if config_path.exists():
         try:
             config = json.loads(config_path.read_text())
-        except json.JSONDecodeError:
-            config = {}
+        except json.JSONDecodeError as e:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = config_path.with_suffix(
+                config_path.suffix + f".bak.{ts}"
+            )
+            try:
+                config_path.replace(backup_path)
+            except OSError:
+                # If we can't even move it, bail out without overwriting.
+                raise RuntimeError(
+                    f"{config_path} has invalid JSON and could not be backed up: {e}. "
+                    "Fix the syntax manually and rerun."
+                ) from e
+            print(
+                f"  {C.BYELLOW}!{C.RESET} {config_path.name} had invalid JSON. "
+                f"Backed up to {backup_path.name}."
+            )
+            raise RuntimeError(
+                f"{config_path} had invalid JSON (backed up to {backup_path}). "
+                "Fix the syntax and rerun `memee doctor`."
+            ) from e
 
     # Add memee to mcpServers
     if config_key not in config:
         config[config_key] = {}
     config[config_key].update(mcp_entry)
 
-    # Write back
+    # Write back atomically: tmp + os.replace. Ctrl-C mid-write can't corrupt
+    # the user's existing settings.json.
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(json.dumps(config, indent=2) + "\n")
+    tmp_path = config_path.with_suffix(config_path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(config, indent=2) + "\n")
+    os.replace(tmp_path, config_path)
     return True
 
 
@@ -163,7 +196,13 @@ def configure_all_detected() -> list[dict]:
 
     for tool in tools:
         if tool.get("can_auto_fix") and not tool["configured"]:
-            success = configure_tool(tool["id"])
+            try:
+                success = configure_tool(tool["id"])
+            except RuntimeError:
+                # configure_tool bails out on invalid JSON — don't crash the
+                # whole auto-configure pass; the user saw the warning/backup
+                # message already. Skip and move on.
+                continue
             if success:
                 tool["configured"] = True
                 configured.append(tool)
@@ -297,9 +336,32 @@ def run_doctor(auto_fix: bool = True) -> dict:
     if auto_fix:
         for issue in results["issues"]:
             if issue["type"] == "tool_not_configured":
-                success = configure_tool(issue["tool_id"])
+                try:
+                    success = configure_tool(issue["tool_id"])
+                except RuntimeError as e:
+                    # Invalid JSON → configure_tool already backed up + warned.
+                    # Attach the issue so the caller can display it.
+                    issue["message"] = f"{issue['message']}: {e}"
+                    continue
                 if success:
                     results["fixed"].append(issue["tool"])
+
+        # Sweep zombie research experiments left by Ctrl-C / crash.
+        try:
+            from memee.engine.research import reset_zombie_experiments
+            from memee.storage.database import get_session, init_db
+
+            session = get_session(init_db())
+            zombie_count = reset_zombie_experiments(session)
+            session.close()
+            if zombie_count:
+                results["fixed"].append(
+                    f"reset {zombie_count} zombie experiment"
+                    f"{'s' if zombie_count != 1 else ''}"
+                )
+        except Exception:
+            # Non-critical; don't break doctor over this.
+            pass
 
     return results
 
@@ -324,6 +386,8 @@ def print_doctor_report(results: dict):
 
     # AI Tools
     print(f"\n  {C.BOLD}AI Tools:{C.RESET}")
+    mcp_tool_ids = {t["id"] for t in AI_TOOLS}
+    any_mcp_detected = False
     for tool in results["tools"]:
         if tool["configured"]:
             icon = f"{C.GREEN}✓{C.RESET}"
@@ -337,11 +401,23 @@ def print_doctor_report(results: dict):
             icon = f"{C.DIM}-{C.RESET}"
             status = f"{C.DIM}not installed{C.RESET}"
 
+        if tool["detected"] and tool["id"] in mcp_tool_ids:
+            any_mcp_detected = True
+
         config_hint = ""
         if tool.get("config_path") and tool["configured"]:
             config_hint = f"  {C.DIM}{tool['config_path']}{C.RESET}"
 
         print(f"    {icon} {tool['name']:<18s} {status}{config_hint}")
+
+    # Show the manual snippet when no MCP client was detected — mirrors the
+    # installer behaviour, so an agent running in an unsupported client still
+    # learns how to wire Memee in. (CLI-only tools like ollama don't count.)
+    if not any_mcp_detected:
+        print()
+        print(f"    {C.DIM}No MCP client detected. If you use one not auto-configured,{C.RESET}")
+        print(f"    {C.DIM}add this to its settings file:{C.RESET}")
+        print(f'      {C.BCYAN}{{"mcpServers": {{"memee": {{"command": "memee", "args": ["serve"]}}}}}}{C.RESET}')
 
     # Knowledge Health
     kh = results["knowledge"]

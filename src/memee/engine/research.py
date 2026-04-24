@@ -15,6 +15,7 @@ from __future__ import annotations
 import subprocess
 import re
 from collections import defaultdict
+from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
@@ -280,6 +281,37 @@ def complete_experiment(
 
     session.commit()
     return experiment
+
+
+def reset_zombie_experiments(session: Session, stale_after_hours: int = 24) -> int:
+    """Mark stale ``running`` experiments as ``failed``.
+
+    Ctrl-C / crash / killed processes leave an experiment with
+    ``status="running"`` forever. ``get_meta_learning`` counts those in
+    totals but not in completed, which permanently skews keep-rate
+    aggregates. Rescuing them is safe: a real still-running experiment
+    should log iterations within an hour.
+
+    Returns the number of experiments reset.
+    """
+    cutoff = utcnow() - timedelta(hours=stale_after_hours)
+    running_status = ResearchStatus.RUNNING.value
+    zombies = (
+        session.query(ResearchExperiment)
+        .filter(
+            ResearchExperiment.status == running_status,
+            ResearchExperiment.started_at < cutoff,
+        )
+        .all()
+    )
+    count = 0
+    for exp in zombies:
+        exp.status = ResearchStatus.FAILED.value
+        exp.completed_at = utcnow()
+        count += 1
+    if count:
+        session.commit()
+    return count
 
 
 def get_experiment_status(

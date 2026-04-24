@@ -12,6 +12,14 @@ from memee.storage.models import Base
 def get_engine(db_path: Path | None = None):
     """Create SQLAlchemy engine with WAL mode and FK enforcement."""
     path = db_path or config.settings.db_path
+    # Guard: if the parent exists but is a regular file (user accidentally
+    # created ~/.memee as a file), mkdir would raise a raw FileExistsError.
+    # Surface a clean, actionable click exception instead.
+    if path.parent.exists() and not path.parent.is_dir():
+        import click
+        raise click.ClickException(
+            f"{path.parent} exists but is a file — move or delete it and rerun."
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{path}", echo=False)
 
@@ -78,6 +86,34 @@ def init_db(engine=None):
         """))
 
         conn.commit()
+
+    # Stamp alembic head if the version table is empty / missing. This keeps
+    # both paths (init_db-only and alembic-only) interoperable — without this
+    # stamp a later `alembic upgrade head` would fail with "table already exists".
+    # Guarded: pipx installs don't ship alembic.ini, and that's fine.
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name='alembic_version'")
+            ).fetchone()
+            needs_stamp = row is None
+            if not needs_stamp:
+                count = conn.execute(text("SELECT COUNT(*) FROM alembic_version")).scalar()
+                needs_stamp = (count or 0) == 0
+
+        if needs_stamp:
+            from alembic import command
+            from alembic.config import Config
+
+            # alembic.ini lives at the project root (two parents up from src/memee/storage/)
+            ini_path = Path(__file__).resolve().parents[3] / "alembic.ini"
+            if ini_path.exists():
+                cfg = Config(str(ini_path))
+                command.stamp(cfg, "head")
+    except Exception:
+        # Best-effort; a missing alembic.ini or any stamp error must not break
+        # regular init_db() usage in production installs.
+        pass
 
     return engine
 

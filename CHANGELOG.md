@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] — 2026-04-24
+
+Bootstrap safety, data-loss prevention, and MCP library compatibility.
+
+### Fixed
+
+- **Alembic / init_db now agree on canonical schema.** FTS5 DDL moved
+  into the initial migration (`alembic/versions/843e414a0596_initial_schema.py`)
+  so users who bootstrap via `alembic upgrade head` get a working search
+  index. `init_db()` now additionally `alembic stamp head`s when the
+  version table is empty, so users who bootstrap via the CLI first can
+  still run alembic later without "table already exists". Both paths
+  converge. (Previously: alembic-only users hit `no such table:
+  memories_fts` on the first search.)
+- **Claude Code `settings.json` is no longer silently clobbered on
+  malformed JSON.** `doctor.configure_tool` now moves the broken file
+  to `settings.json.bak.<timestamp>` and surfaces a yellow warning
+  instead of resetting the config dictionary and writing a fresh file.
+  A user's existing `hooks`, `permissions`, `enabledPlugins`, `env`
+  blocks are preserved through syntax errors.
+- `~/.memee` existing as a regular file (instead of a directory) now
+  emits a clean `ClickException` telling the user what to do, instead
+  of an `FileExistsError` traceback from the middle of `path.parent.mkdir`.
+- **Zombie `ResearchExperiment` rows are now reset.** A new
+  `reset_zombie_experiments(session, stale_after_hours=24)` marks any
+  `status="running"` experiment older than the window as `failed`.
+  Exposed via `memee research reset-zombies [--stale-hours N]` and
+  auto-invoked by `memee doctor` in its fix pass.
+- `_clamp_limit` in the MCP layer handles `OverflowError` (from
+  `float('inf')`) and string floats (`"5.5"`) gracefully.
+- `doctor.configure_tool` writes the settings file atomically
+  (`.tmp` sibling + `os.replace`) so a Ctrl-C mid-write can no
+  longer leave a truncated JSON file on disk.
+- `doctor` prints the manual MCP JSON snippet when no supported MCP
+  client was detected, matching the installer's behaviour on that
+  path. Previously the doctor silently reported "ALL HEALTHY" with
+  zero actionable guidance for users running a non-detected tool.
+
+### Compatibility
+
+- `FastMCP` init signature update: the `mcp` library now rejects
+  `version=` AND `description=` kwargs. `description=` is now
+  `instructions=`, and `version=` has been dropped. Memee's MCP
+  server module is importable again on current `mcp` releases.
+
 ## [1.0.3] — 2026-04-24
 
 Correctness, performance, and API hygiene pass. Fourteen findings from
