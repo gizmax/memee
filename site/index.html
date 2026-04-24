@@ -257,6 +257,13 @@ section { padding-block: clamp(72px, 9vw, 140px); }
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink-60);
+  line-height: 1.5;
+}
+.stat .lbl code {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.95em;
+  color: var(--orange);
 }
 
 /* ============================================================
@@ -1271,20 +1278,20 @@ body::before { display: none; }
 
       <div class="stats reveal" aria-label="Key figures">
         <div class="stat">
-          <div class="num">≤500</div>
-          <div class="lbl">Tokens per turn (router cap)</div>
-        </div>
-        <div class="stat">
-          <div class="num">100<span class="unit">%</span></div>
-          <div class="lbl">Hit@1 on routing benchmark</div>
-        </div>
-        <div class="stat">
           <div class="num orange">4</div>
-          <div class="lbl">Model families, one canon</div>
+          <div class="lbl">Model families,<br />one canon</div>
+        </div>
+        <div class="stat">
+          <div class="num">1</div>
+          <div class="lbl">Canon, not scattered<br /><code>CLAUDE.md</code> files</div>
+        </div>
+        <div class="stat">
+          <div class="num">∞</div>
+          <div class="lbl">Sessions the<br />memory outlives</div>
         </div>
         <div class="stat">
           <div class="num">$0</div>
-          <div class="lbl">To start. Forever.</div>
+          <div class="lbl">To start.<br />Forever.</div>
         </div>
       </div>
     </section>
