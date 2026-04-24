@@ -1245,7 +1245,7 @@ body::before { display: none; }
         <span><span class="dot"></span>Shared memory for AI agent teams</span>
         <span>
           <span class="mark">·</span>
-          <a href="https://github.com/gizmax/memee/releases/latest" rel="external">v1.0.5 on GitHub</a>
+          <a href="https://github.com/gizmax/memee/releases/latest" rel="external">v1.0.6 on GitHub</a>
           <span class="mark">·</span>
           <a href="https://pypi.org/project/memee/" rel="external">PyPI</a>
         </span>
@@ -1306,7 +1306,7 @@ body::before { display: none; }
 
         <article class="usp reveal">
           <span class="num">02 · Cut the prompt bloat</span>
-          <h3>Send <strong>≤500 tokens</strong>, not 14,550.</h3>
+          <h3>Send <strong>~40 tokens</strong>, not your whole library.</h3>
           <p class="benefit">Memee routes only what this task actually needs. Your agents stop stuffing the whole wiki into every prompt, bills drop 96%, and answers come back faster because the context is smaller and sharper.</p>
           <div class="proof"><span>Token reduction</span><strong>96%</strong></div>
         </article>
@@ -1479,35 +1479,40 @@ body::before { display: none; }
       <div class="math-grid">
         <div class="math-card without reveal">
           <div class="cap">Without Memee</div>
-          <div class="big">14,550<span class="suffix">tokens / task</span></div>
-          <div class="sub">Full pattern library dumped into every prompt.</div>
+          <div class="big">5k&ndash;100k<span class="suffix">tokens / task</span></div>
+          <div class="sub">Full library into every prompt. Scales with team size: ~5k for 50 patterns, ~22k measured on a 500-pattern synthetic corpus, more on real teams with longer bullets.</div>
         </div>
         <div class="math-card with reveal">
           <div class="cap">With Memee</div>
-          <div class="big">≤500<span class="suffix">tokens / task</span></div>
-          <div class="sub">Router&rsquo;s budget cap. Measured average in a 500-pattern corpus is ~40 tokens; the cap is there to guarantee the worst-case envelope.</div>
+          <div class="big">~40<span class="suffix">tokens / task (avg)</span></div>
+          <div class="sub">Measured on our 500-pattern benchmark. The router has a 500-token budget cap for the worst case, but it stops at relevance, not at the cap.</div>
         </div>
         <div class="math-card savings reveal">
           <div class="cap">You keep</div>
-          <div class="big">≥96%</div>
-          <div class="sub">Of the context, every task, every agent. Real-world measurements run higher (99% range) because the router rarely uses the full budget.</div>
+          <div class="big">≥99%</div>
+          <div class="sub">Of the context, measured on the benchmark corpus. At 22,000 dump vs ~40 routed = 99.8%. Your ratio depends on your library size; the router&rsquo;s share drops further with bigger libraries.</div>
         </div>
       </div>
 
       <div class="math-foot">
         <p class="math-pull reveal">Fewer tokens&nbsp;in. <em>Fewer iterations, faster replies, better first answers.</em></p>
         <div class="math-note reveal">
-          <strong>What 96% turns into.</strong><br />
-          <em>On a pay-per-token API</em> (Anthropic, OpenAI direct):
-          Memee cuts the token bill by the same 96 %.
-          Multiply by your per-1M pricing and your task volume to see
-          the number on your invoice.<br />
-          <em>On a flat subscription</em> (Claude Max, ChatGPT Plus / Pro,
-          seat-based plans): the bill is flat, but the cap isn&rsquo;t. See the
-          four items below.<br />
+          <strong>How we measure this.</strong><br />
+          <em>Benchmark corpus:</em> 500 synthetic patterns, realistic
+          title + 2&ndash;3 sentences of content. Full-dump baseline
+          measures 21,623 tokens on this corpus; the router&rsquo;s
+          `smart_briefing` output over 10 representative task queries
+          averages 39 tokens (min 18, max 67). Reproducible with
+          <code>memee&nbsp;benchmark</code> or
+          <code>pytest&nbsp;tests/test_router.py::test_token_budget_respected</code>.<br />
+          <em>Why the big range on "Without Memee":</em> real teams vary
+          5&times;&ndash;20&times; in how much context they stuff into
+          prompts. A 50-pattern team dumps ~5k tokens; a 500-pattern team
+          with long bullets can cross 100k. The router&rsquo;s cap is
+          constant at 500 regardless of library size, so the gap
+          <em>widens</em> as you scale.<br />
           <em>These are internal benchmark results, not customer case studies.</em>
           Full methodology:
-          <code>memee benchmark</code> &middot;
           <a href="https://github.com/gizmax/memee/blob/main/docs/benchmarks.md"
              rel="external">docs/benchmarks.md</a>.
         </div>

@@ -23,6 +23,8 @@ The 7× figure came from an earlier variant of the simulation that double-counte
 | Competitor baseline on OrgMemEval | 2.3 / 100 (Avoidance scenario only) | same |
 | Retrieval hit@1 (12-memory bench) | **100 %** (gate: ≥50 %) | `tests/test_search_ranking.py` |
 | Retrieval hit@3 | **100 %** (gate: ≥90 %) | same |
+| Router token avg per task | **39** tokens (min 18, max 67, cap 500) | `docs/benchmarks.md#router-output-measured` |
+| Router vs full-dump reduction (500-pattern corpus) | **99.8 %** (39 / 21,623) | same |
 | A/B time saved across 7 tasks | **71 %** (1,470 → 430 min) | `tests/test_real_impact.py` |
 | A/B iterations saved | 65 % (43 → 15) | same |
 | A/B quality | 56 % → 93 % (+36 pp) | same |
@@ -102,18 +104,20 @@ large corpora where more memories might match. Most tasks land far
 below it — **the router stops at relevance, not at the cap.**
 
 Full-library-dump baseline on the same 500-pattern corpus measures
-**21,623 tokens** (bigger than the site's "14,550" assumption because
-our synthetic bullets are longer than the site's implicit per-pattern
-average).
+**21,623 tokens**. Historically the site quoted "14,550" as the
+without-Memee baseline — that number wasn't reproducible against any
+specific corpus and has been removed. The current site + README
+quote ranges ("5k–100k tokens depending on library size") because
+the answer genuinely depends on how much context a team stuffs into
+prompts.
 
-- **Reduction vs. full dump:** router avg 39 / dump 21,623 = **99.8 %**.
-- **Reduction vs. 14,550 site baseline:** router avg 39 / 14,550 = **99.7 %**.
+- **Reduction vs. full dump on our benchmark:** router avg 39 / dump 21,623 = **99.8 %**.
+- **Reduction vs. a smaller 5k baseline** (~50 pattern small team): router avg 39 / 5,000 = **99.2 %**.
+- **Reduction against a 100k baseline** (large team, long bullets): router avg 39 / 100,000 = **99.96 %**.
 
-Both figures are meaningfully above the "96 %" site claim. We left
-"96 %" on the site as a conservative floor because the measured
-reduction depends heavily on the actual pattern library size + query
-relevance; under a smaller corpus or fuzzier queries the cap is what
-kicks in, not relevance-based truncation.
+In every case the reduction is **above 99 %**. The cap is constant,
+so the gap only widens as the library grows. The site uses **≥99 %**
+as a conservative floor.
 
 **Reproduce:** read `tests/test_router.py::test_token_budget_respected`.
 The test wires 500 seeded memories and asserts `_count_tokens(briefing) ≤
@@ -258,7 +262,7 @@ Things we want to be loud about so you don't feel misled later:
 
 2. **Task distribution is Python-API-heavy.** The A/B suite covers HTTP clients, DB pooling, React components, ML serving, CI/CD, payments, and new microservice bootstrap. If your work is 90 % iOS or 90 % data science, expect different shape on time-saved. The pattern/anti-pattern hit rate is what matters, and that's stack-dependent.
 
-3. **Token and dollar savings depend on model pricing.** GigaCorp's $3,911/yr uses Claude Sonnet-4 rates (April 2026). Cheaper models → smaller savings → smaller ROI multiplier. Bigger models → bigger. The 96 % token reduction claim is based on 500 tokens routed vs 14,550 full-dump, which is framework-independent but agent-prompt-dependent.
+3. **Token and dollar savings depend on model pricing.** GigaCorp's $3,911/yr uses Claude Sonnet-4 rates (April 2026). Cheaper models → smaller savings → smaller ROI multiplier. Bigger models → bigger. The ≥99 % token reduction claim is based on router output (avg 39 tokens) vs the 21,623-token full-dump baseline on the 500-pattern benchmark corpus; reduction widens as a real team's library grows.
 
 4. **"Warnings delivered" ≠ "mistakes avoided".** GigaCorp reports 3,893 warnings delivered across 174 incidents. Only 14 incidents are counted as avoided (memory existed with confidence >0.5 when the incident would have fired). The other deliveries are the system doing its job even when no incident was pending. We split these counters in the April 2026 review ([review-fixes.md](./review-fixes.md) §3) to stop the dishonesty.
 

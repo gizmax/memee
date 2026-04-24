@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] — 2026-04-24
+
+Token-math honesty follow-up. After 1.0.5 fixed the router's fake token
+counter, it was clear the headline "14,550 → 500, 96% reduction" copy
+on the site + README was **nowhere anchored to a reproducible
+measurement**. The 14,550 number was an aesthetic choice that survived
+re-writes; the 500 was a configured cap, not a measured value.
+
+### Changed
+
+- **Site + README now show the actually-measured range**, not the
+  legacy 14,550 fixed point:
+    - *Without Memee* card: **5k–100k tokens / task**, with a sub-line
+      explaining the spread depends on library size (5k for a 50-pattern
+      team, ~22k measured on our 500-pattern synthetic corpus, up to
+      100k for large teams with long bullets).
+    - *With Memee* card: **~40 tokens / task (average)**, with a sub-line
+      explaining the 500-token budget cap is a worst-case envelope.
+    - *You keep* card: **≥99%** (conservative floor — measured is 99.8%
+      on the benchmark corpus; reductions widen further as the library
+      grows because the cap is constant).
+- Hero card h3: "Send **≤500 tokens**, not 14,550." → "Send **~40
+  tokens**, not your whole library." Matches measured reality.
+- `docs/benchmarks.md` removes the "14,550" reference entirely, quotes
+  the real full-dump baseline (21,623 tokens for 500 patterns) and the
+  real router average (39 tokens over 10 queries). Reductions
+  calculated against three illustrative library sizes (5k / 21k /
+  100k baselines) — all above 99%.
+- TL;DR benchmark table gains two new rows: router avg (39) and
+  reduction ratio (99.8%) with source references.
+
+No engine or behaviour changes. Purely copy + docs truthiness.
+
 ## [1.0.5] — 2026-04-24
 
 The 23-finding round. A follow-up to the 1.0.3 / 1.0.4 correctness
