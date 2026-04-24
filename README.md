@@ -5,89 +5,115 @@
 [![python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
 [![pypi](https://img.shields.io/badge/pypi-memee-orange)](https://pypi.org/project/memee/)
 
-**Institutional memory for AI agent teams. Your agents stop re-solving problems.**
+**One lesson. Every agent. Every team. Every model.**
 
-Memee sits between your agents and the work. It records what worked, flags what didn't, and hands each agent only the 5–7 memories it actually needs for the task in front of it — instead of re-stuffing 500 patterns into every prompt.
+Your agents forget. Every session, every project, every vendor swap: gone. Memee writes it down once. Claude proves it. GPT confirms it. Tomorrow Gemini opens a different repo on a different team and starts already knowing.
 
 ```bash
-pipx install memee            # recommended for a CLI tool
-# or:
-python3 -m pip install memee  # if you don't have pipx
+pipx install memee         # recommended for a CLI tool
+# already installed? pipx upgrade memee
 ```
 
-> **For teams and companies.** This OSS release is single-user and
-> self-hosted. If you want the same memory shared across your whole
-> team, with cross-developer / cross-agent / cross-project / cross-model
-> canon building into **company-wide institutional knowledge**, there's
-> a paid Team edition at [memee.eu](https://memee.eu). Same engine,
-> plus SSO, audit log, and shared scope. From $49 / month flat (up to
-> 15 seats), $12k / year Enterprise with SOC 2 + air-gap.
+> **For teams and companies.** This OSS release is single-user and self-hosted. If you want the same memory shared across a whole team — with cross-developer, cross-agent, cross-project, cross-model canon building into **company-wide institutional knowledge** — there's a paid Team edition at [memee.eu](https://memee.eu). Same engine, plus SSO, audit log, and shared scope. Flat **$49 / month** for up to fifteen seats, or **$12k / year** Enterprise with SOC 2 and air-gap.
 
 ---
 
-## Why Memee
+## What Memee actually does
 
-- **Your agents stop repeating mistakes.** One agent hits a bug, records it, every other agent (in every other project) is warned before it happens again.
-- **Your `CLAUDE.md` grows forever. Memee doesn't.** Typical AGENTS.md / CLAUDE.md across 27 popular OSS repos: ~2,200 tokens (median), 10k+ at grown teams, one published outlier at 42k — reloaded in full on every Claude Code / Cursor session. Memee routes only the 5–7 memories relevant to the current task (≤500 tokens) and keeps per-turn context bounded as the knowledge base grows.
-- **Every model reads from one canon.** Claude, GPT, Gemini, Llama all record into, and pull from, the same memory. Cross-model agreement raises confidence; single-model claims stay provisional.
+Three jobs. Executed relentlessly.
 
-## Install and first use (60 seconds)
+### Records.
+Every pattern, every decision, every near-miss. One turn at a time, across every agent on every project.
+
+> *7-task A/B: time −71 %, iterations −65 %, mistakes 0.*
+
+### Routes.
+Not a dump. A briefing. At task start, the router picks the 5–7 memories the agent actually needs — inside a hard 500-token budget. Your `CLAUDE.md` grows forever. Memee doesn't.
+
+> *Measured ~40 tokens per task against a ~2,160-token median baseline.*
+
+### Scores.
+A lesson earns trust by surviving. A second model family agrees: confidence ×1.3. A second project re-uses it: ×1.5. Earn both and it climbs the ladder — hypothesis, tested, validated, canon.
+
+> *One canon. Four model families. Seventeen engines.*
+
+---
+
+## Install and first use — sixty seconds
 
 ```bash
 pipx install memee
 memee setup
 
-# Record a pattern you just learned
+# Record something you just learned.
 memee record pattern "retry with jitter" \
   --tags reliability,http \
-  -c "Always use exponential backoff with jitter; capped at 30s; retry only idempotent verbs."
+  -c "Exponential backoff, capped at 30s, idempotent verbs only."
 
-# Search it back
+# Find it back.
 memee search "retry"
 
-# Health check + auto-wire Claude Code / MCP config
+# Wire Claude Code / MCP, run a health check.
 memee doctor
 ```
 
-That's it. Memory lives in `~/.memee/memee.db`. No account. Core read/write is fully local; optional vector embeddings use `sentence-transformers`, which fetches a ~80 MB model from HuggingFace on first use (skipped when `TRANSFORMERS_OFFLINE=1` is set).
+That's it. Memory lives in `~/.memee/memee.db`. No account. Core read/write is fully local. Vector embeddings are optional — on by default via `sentence-transformers`, which fetches a ~80 MB model on first use. Set `TRANSFORMERS_OFFLINE=1` to skip.
 
-## What it actually does
+---
 
-Memee is a stack of small engines sitting on SQLite + FTS5 + sentence-transformer embeddings.
+## The architecture, on one page
 
-| Layer | What it does | Why you care |
-|---|---|---|
-| **Router** | Task-aware briefing. Picks 5–7 memories within a token budget. | Agents get signal, not a dump. |
-| **Quality gate** | Validates, dedupes, rates every incoming memory. | Junk doesn't survive the first write. |
-| **Confidence scoring** | Adaptive: cross-project ×1.5, cross-model ×1.3, combined ×1.95. | Patterns earn trust across evidence, not by author claim. |
-| **Lifecycle** | hypothesis → tested → validated → canon → deprecated. | Old advice ages out; good advice gets promoted. |
-| **Dream mode** | Nightly: connect related memories, surface contradictions, promote canon. | Knowledge compounds while you sleep. |
-| **Propagation** | A validated pattern auto-pushes to other projects with matching stack/tags. | Fix once, benefit everywhere. |
-| **Review** | `git diff | memee review -` scans changes against anti-patterns. | Institutional memory enters code review. |
-| **CMAM bridge** | Push canon to Anthropic's Managed Agents Memory at `/mnt/memory/`. | Claude sessions see canon on turn 1, no MCP roundtrip. |
+Small engines on SQLite + FTS5 + a 384-dim embedding space.
 
-Deeper architecture doc: [CLAUDE.md](CLAUDE.md). CMAM specifics: [docs/cmam.md](docs/cmam.md). Review engine: [docs/review-fixes.md](docs/review-fixes.md).
+| Layer | Job |
+|---|---|
+| **Router** | Task-aware briefing. Budget-capped. |
+| **Quality gate** | Validates, deduplicates, rates every incoming memory before it earns a row. |
+| **Confidence scoring** | Adaptive. Cross-project ×1.5. Cross-model ×1.3. Both stacked ×1.95. |
+| **Lifecycle** | hypothesis → tested → validated → canon → deprecated. Old advice ages out. Good advice gets promoted. |
+| **Dream mode** | Nightly. Connects related memories, surfaces contradictions, elevates canon. |
+| **Propagation** | A validated pattern auto-pushes to projects with matching stack or tags. Fix once. Benefit everywhere. |
+| **Review** | `git diff \| memee review -` scans a changeset against known anti-patterns. Institutional memory enters code review. |
+| **CMAM bridge** | Push canon to Anthropic's Managed Agents Memory at `/mnt/memory/`. Claude sees canon on turn one — no MCP round-trip. |
 
-## Benchmarks
+Deeper notes: [CLAUDE.md](CLAUDE.md). CMAM spec: [docs/cmam.md](docs/cmam.md). Review engine: [docs/review-fixes.md](docs/review-fixes.md).
 
-> All numbers below are **internal simulations and benchmarks**, not independent third-party evaluations. They describe system behaviour under synthetic workloads. Treat them as suggestive, not conclusive.
+---
 
-- **Per-turn context baseline:** median `CLAUDE.md` / `AGENTS.md` across 27 popular OSS repos (langchain, vercel/ai, prisma, zed, openai/codex, …) is **~2,160 tokens**; mean 2,500; p95 ~9,600; a published outlier at 42,000. Both Claude Code and Cursor load this file in full on every session start.
-- **Router output:** budget-capped at 500 tokens, measured average of 39 tokens (min 18, max 67) across 10 task queries on a 500-pattern synthetic corpus. The cap holds regardless of library size, so the gap to the baseline *widens* as your knowledge grows.
-- **OrgMemEval v1.0:** 92.4/100, across propagation, avoidance, maturity, onboarding, recovery, calibration, synthesis, and research. Competitor baselines on the same scenarios range from 0.9/100 (MemPalace) to 3.5/100 (Mem0, the closest); see [docs/benchmarks.md](docs/benchmarks.md).
-- **7-task A/B (with vs. without Memee):** time –71%, iterations –65%, quality 56% → 93%, impact-DB ROI ≈ 10.7× at the current $49/mo Team tier. GigaCorp sim (100 projects, 100 agents, 18 months): incidents 12/mo → 3/mo, annual ROI ≈ 3× at the same flat Team tier.
-- **Retrieval:** hit@1 = 100% on a 12-memory routing benchmark after the recent ranking fix.
+## The token math
+
+> Numbers below are **internal simulations and measured benchmarks**, not independent third-party evaluations. Treat them as suggestive, not conclusive.
+
+The thing Memee saves isn't the first page. It's the slope.
+
+- **Without Memee, median:** ~2,160 tokens per turn. That's a `CLAUDE.md` / `AGENTS.md` across 27 popular OSS repos (langchain, vercel/ai, prisma, zed, openai/codex, and others), sampled via `gh api`. Claude Code and Cursor load it in full on every session.
+- **Without Memee, grown teams:** 6k–15k. p95 of the sample hits 9,600. One published outlier reached 42,000.
+- **With Memee:** 500-token cap, measured average ~40 tokens per briefing (min 18, max 67 across 10 task queries on a 500-pattern corpus).
+- **So the saving, honestly:** ≥77 % at median. ≥95 % at 10k-grown teams. ≥99 % at the 42k outlier. And unlike `CLAUDE.md`, it's bounded. Your library grows. Per-turn context doesn't.
 
 Reproduce locally:
 
 ```bash
 memee benchmark          # OrgMemEval v1.0
-pytest tests/ -v         # full suite, ~60s
+pytest tests/ -v         # full suite
 ```
+
+Full methodology + per-repo file sizes: [docs/benchmarks.md](docs/benchmarks.md).
+
+---
+
+## Benchmarks
+
+- **OrgMemEval v1.0**: 92.4 / 100 across propagation, avoidance, maturity, onboarding, recovery, calibration, synthesis, research. Competitors on the same scenarios: MemPalace 0.9, Letta 1.3, Zep 2.3, Mem0 3.5 (the closest).
+- **7-task A/B (with / without Memee):** time −71 %, iterations −65 %, quality 56 % → 93 %, ROI ≈ 10.7× at the $49 / month Team tier.
+- **GigaCorp simulation**, 100 projects, 100 agents, 18 months: incidents 12/mo → 3/mo, annual ROI ≈ 3× at the same flat Team tier.
+- **Retrieval**: hit@1 = 100 % on a 12-memory routing benchmark after the recent ranking fix.
+
+---
 
 ## Using it with Claude, GPT, Gemini
 
-Memee ships an MCP server with 24 tools. Drop this into `~/.claude/settings.json` (or the Cursor / Continue / any MCP-capable client equivalent):
+An MCP server with 24 tools ships with the install. Drop this into `~/.claude/settings.json` — or the Cursor / Continue / any MCP-capable client equivalent:
 
 ```json
 {
@@ -99,33 +125,51 @@ Memee ships an MCP server with 24 tools. Drop this into `~/.claude/settings.json
 
 Memee auto-detects the caller's model family from `MEMEE_MODEL`, `ANTHROPIC_MODEL`, or `OPENAI_MODEL` and tags every write with `source_model`. That's how confidence scoring knows when Claude and Gemini agree — and when they don't.
 
-Quick CLI:
+Quick CLI tour:
 
 ```bash
 memee brief --task "write unit tests"   # PUSH: routed briefing
 memee check "about to add eval() here"  # PULL: anti-pattern check
-memee propagate                          # cross-project diffusion
-memee dream                              # nightly: connect, contradict, promote
-memee cmam sync                          # push canon to /mnt/memory/ for Claude
+memee propagate                         # cross-project diffusion
+memee dream                             # nightly: connect, contradict, promote
+memee cmam sync                         # push canon to /mnt/memory/ for Claude
 ```
+
+---
 
 ## Pricing
 
-**Memee (this repo) is MIT-licensed and free.** It's a single-user product: your memory, your machine, no account.
+Flat per team. Same engine in every tier.
 
-If you need multi-user scope (personal / team / org), SSO, audit log, seat management, or a hosted control plane, install `memee-team` — a paid proprietary package from [memee.eu](https://memee.eu). Pricing is flat, not per-seat: **$49/month** for a team of up to 15, **from $12k/year** for Enterprise with SOC 2, SCIM, and air-gap. It plugs into the same engine; no re-install, no data migration.
+| | Free | Team | Enterprise |
+|---|---|---|---|
+| | **$0** forever · MIT | **$49 / month flat** — up to 15 seats, annual | **from $12k / year** — unlimited seats |
+| For | Solo developers. Self-hosted. Full engine, local scope. | Teams that want shared memory, SSO, and an audit trail. | Regulated industries, air-gap, SOC 2. |
+| Stack | Router, quality gate, dream mode, CMAM sync, all 4 model families | Everything in Free + team/org scope with promotion workflows, SSO (SAML / OIDC), RBAC, audit log export, Postgres / Turso backend, multi-agent dashboard, 24h SLA | Everything in Team + SOC 2 Type II, DPA, SCIM, on-prem license key, dedicated CSM, 4h SLA, custom MCP integrations |
+
+Between fifteen and a hundred seats, and no SOC 2 needed? Email [info@memee.eu](mailto:info@memee.eu) for a custom Growth plan.
+
+Memee is memory, not model. Value scales sublinearly with headcount — one canon serves the whole team — so pricing is flat, not per-seat.
+
+---
 
 ## Contributing
 
-PRs are welcome. Before opening a big one, a short issue describing the direction saves everyone time.
+PRs welcome. Before opening a large one, a short issue describing the direction saves everyone a round-trip.
 
 ```bash
 pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
-Style: type hints, docstrings in English, 100-char lines, `ruff` clean. New engines live in `src/memee/`; every new behaviour wants a test in `tests/`.
+Style: type hints, English docstrings, 100-char lines, `ruff` clean. New engines live in `src/memee/`. Every new behaviour wants a test in `tests/`.
+
+---
 
 ## License
 
-Memee core is released under the [MIT License](LICENSE). The optional `memee-team` package is proprietary and distributed under a separate commercial EULA; see [memee.eu](https://memee.eu) for terms.
+Memee core is [MIT](LICENSE). The optional `memee-team` package is proprietary, distributed under a separate commercial EULA. See [memee.eu](https://memee.eu) for the terms.
+
+---
+
+**Built by people who stopped teaching the same lesson to every new agent.**
