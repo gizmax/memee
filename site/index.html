@@ -134,6 +134,7 @@ section { padding-block: clamp(72px, 9vw, 140px); }
 }
 .nav {
   display: flex; gap: 26px;
+  align-items: center;
   font-family: var(--grotesk);
   font-size: 14px;
   font-weight: 500;
@@ -177,7 +178,7 @@ section { padding-block: clamp(72px, 9vw, 140px); }
 /* ============================================================
    S1 HERO — punchy, one idea
    ============================================================ */
-.hero { padding-top: clamp(56px, 7vw, 120px); padding-bottom: 40px; }
+.hero { padding-top: clamp(24px, 3vw, 48px); padding-bottom: 40px; }
 .hero-eyebrow {
   margin-bottom: 28px;
   display: flex; gap: 24px; flex-wrap: wrap;
@@ -343,6 +344,84 @@ section { padding-block: clamp(72px, 9vw, 140px); }
   letter-spacing: -0.02em;
   color: var(--lime);
   text-transform: none;
+}
+
+/* ============================================================
+   FLAT-PLAN VALUE — four cards for subscription users
+   ============================================================ */
+.flatplan { border-top: var(--rule); padding-block: clamp(64px, 8vw, 128px); }
+.flatplan-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-items: end;
+  margin-bottom: clamp(32px, 4vw, 56px);
+}
+.flatplan-head h2 {
+  margin: 0;
+  font-size: clamp(36px, 4.4vw, 64px);
+  max-width: 18ch;
+}
+.flatplan-head h2 em {
+  font-family: var(--serif);
+  font-style: italic;
+  color: var(--orange);
+  font-weight: 500;
+}
+.flatplan-head .lede {
+  margin: 0;
+  font-size: clamp(16px, 1.2vw, 19px);
+  color: var(--ink-80);
+  max-width: 48ch;
+  line-height: 1.55;
+}
+.flatplan-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+.flatplan-card {
+  padding: clamp(22px, 2vw, 32px);
+  border-radius: 18px;
+  background: var(--bone-dim);
+  border: 1px solid transparent;
+  display: flex; flex-direction: column; gap: 12px;
+  transition: transform 200ms ease, border-color 200ms ease;
+}
+.flatplan-card:hover { transform: translateY(-3px); border-color: var(--ink-20); }
+.flatplan-card .n {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--orange);
+}
+.flatplan-card h3 {
+  margin: 0;
+  font-size: clamp(18px, 1.5vw, 22px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  max-width: 18ch;
+  text-wrap: balance;
+}
+.flatplan-card p {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--ink-80);
+}
+.flatplan-card p strong { color: var(--ink); font-weight: 600; }
+.flatplan-card p em {
+  font-family: var(--serif);
+  font-style: italic;
+  color: var(--orange);
+}
+@media screen and (max-width: 960px) {
+  .flatplan-head { grid-template-columns: 1fr; gap: 16px; }
+  .flatplan-grid { grid-template-columns: 1fr 1fr; }
+}
+@media screen and (max-width: 560px) {
+  .flatplan-grid { grid-template-columns: 1fr; }
 }
 
 /* ============================================================
@@ -1387,9 +1466,10 @@ body::before { display: none; }
       <div class="math-head">
         <h2 class="display reveal">The token math.</h2>
         <p class="lede reveal">
-          Internal micro-benchmark. Reproducible with
-          <code>memee&nbsp;benchmark</code>. Your bill depends on model,
-          task volume, and team size &mdash; scroll for the assumptions.
+          Measured on a 500-pattern knowledge base.
+          Reproducible with <code>memee&nbsp;benchmark</code>.
+          What the saved tokens are worth to you depends on your pricing
+          tier. See below.
         </p>
       </div>
 
@@ -1397,40 +1477,68 @@ body::before { display: none; }
         <div class="math-card without reveal">
           <div class="cap">Without Memee</div>
           <div class="big">14,550<span class="suffix">tokens / task</span></div>
-          <div class="per"><span>Per agent-year</span><span>$27,000</span></div>
           <div class="sub">Full pattern library dumped into every prompt.</div>
         </div>
         <div class="math-card with reveal">
           <div class="cap">With Memee</div>
           <div class="big">500<span class="suffix">tokens / task</span></div>
-          <div class="per"><span>Per agent-year</span><span>$1,100</span></div>
           <div class="sub">Router&rsquo;s default 500-token budget per task.</div>
         </div>
         <div class="math-card savings reveal">
           <div class="cap">You keep</div>
           <div class="big">96%</div>
-          <div class="per"><span>Annual savings, typical</span><span>~$25,900</span></div>
-          <div class="sub">Difference, under the same assumptions.</div>
+          <div class="sub">Of the context, every task, every agent.</div>
         </div>
       </div>
 
       <div class="math-foot">
-        <p class="math-pull reveal">Fewer tokens&nbsp;spent. <em>More software shipped.</em></p>
+        <p class="math-pull reveal">Fewer tokens&nbsp;in. <em>Fewer iterations, faster replies, better first answers.</em></p>
         <div class="math-note reveal">
-          <strong>How we get to these numbers.</strong><br />
-          <em>Tokens per task</em> &mdash; measured on a 500-pattern knowledge base.
-          The &ldquo;without&rdquo; number is the full library injected into context;
-          the &ldquo;with&rdquo; number is the router&rsquo;s configurable budget (default 500).<br />
-          <em>Dollars per agent-year</em> &mdash; assumes 100 tasks/day &times; 250 working
-          days = 25,000 tasks/year, priced at Claude Opus output
-          ($75 / 1M tokens). Sonnet is ~5&times; cheaper; small teams divide
-          proportionally.<br />
-          <em>These are internal simulations, not customer case studies.</em>
-          Full methodology + reproducibility:
+          <strong>What 96% turns into.</strong><br />
+          <em>On a pay-per-token API</em> (Anthropic, OpenAI direct):
+          Memee cuts the token bill by the same 96 %.
+          Multiply by your per-1M pricing and your task volume to see
+          the number on your invoice.<br />
+          <em>On a flat subscription</em> (Claude Max, ChatGPT Plus / Pro,
+          seat-based plans): the bill is flat, but the cap isn&rsquo;t. See the
+          four items below.<br />
+          <em>These are internal benchmark results, not customer case studies.</em>
+          Full methodology:
           <code>memee benchmark</code> &middot;
           <a href="https://github.com/gizmax/memee/blob/main/docs/benchmarks.md"
              rel="external">docs/benchmarks.md</a>.
         </div>
+      </div>
+    </section>
+
+    <!-- S5b FLAT-PLAN VALUE -->
+    <section class="flatplan shell" id="flat-value">
+      <div class="flatplan-head">
+        <h2 class="display reveal">On a flat plan? The 96&nbsp;% is <em>time</em>, not dollars.</h2>
+        <p class="lede reveal">If you pay per token, cut it from your bill. If you pay a flat subscription (Claude Max, ChatGPT Plus / Pro, Claude for Business seats), the saved tokens buy you four other things.</p>
+      </div>
+
+      <div class="flatplan-grid">
+        <article class="flatplan-card reveal">
+          <div class="n">01</div>
+          <h3>More productive work under the same cap.</h3>
+          <p>Max&nbsp;x20 isn&rsquo;t unlimited. You hit the 5-hour throttle. A 500-token briefing leaves your budget for the actual answer, not the context dump. Roughly&nbsp;30&times; more tasks per window.</p>
+        </article>
+        <article class="flatplan-card reveal">
+          <div class="n">02</div>
+          <h3>Better output on the first try.</h3>
+          <p><strong>hit@1 = 100&nbsp;%</strong> on the routing benchmark (was 16.7&nbsp;% without the router). In a 7-task A/B, iterations per task dropped <strong>&minus;65&nbsp;%</strong>. Real time saved, not imaginary dollars.</p>
+        </article>
+        <article class="flatplan-card reveal">
+          <div class="n">03</div>
+          <h3>Memory across sessions and projects.</h3>
+          <p>Claude Max session resets. Your agent forgot what you taught it an hour ago. Memee didn&rsquo;t. One lesson, everywhere, forever. This part is independent of pricing tier.</p>
+        </article>
+        <article class="flatplan-card reveal">
+          <div class="n">04</div>
+          <h3>Cross-model canon.</h3>
+          <p>Switch Claude Max to ChatGPT Team to Gemini. The canon stays. Flat subscriptions lock you to one vendor. Memee gives you a <em>vendor-exit option</em>.</p>
+        </article>
       </div>
     </section>
 
@@ -1466,7 +1574,7 @@ body::before { display: none; }
     <section class="pricing shell" id="pricing">
       <div class="pricing-head">
         <h2 class="display reveal">Pick your scope.</h2>
-        <p class="lede reveal">Memee is a memory layer, not a model. It&rsquo;s priced like shared infrastructure &mdash; flat per team, not per seat.</p>
+        <p class="lede reveal">Memee is a memory layer, not a model. It&rsquo;s priced like shared infrastructure. Flat per team, not per seat.</p>
       </div>
 
       <div class="ptiers">
@@ -1535,14 +1643,14 @@ body::before { display: none; }
           <form class="lane-form" id="team-form"
                 action="https://formsubmit.co/info@memee.eu" method="POST">
             <!-- FormSubmit config — delivered to info@memee.eu on submit -->
-            <input type="hidden" name="_subject" value="Memee Team — trial request" />
+            <input type="hidden" name="_subject" value="Memee Team: trial request" />
             <input type="hidden" name="_template" value="table" />
             <input type="hidden" name="_captcha" value="false" />
             <input type="hidden" name="_honey" value="" />
             <input type="text" name="company" aria-label="Company" placeholder="Company" required />
             <input type="number" name="seats" aria-label="Number of seats" placeholder="Seats" min="1" required />
             <input type="email" name="email" class="full" aria-label="Contact email" placeholder="Contact email" required />
-            <textarea name="notes" class="full" aria-label="Notes" placeholder="Notes (optional) — who's the team, what are you hoping Memee solves?" rows="3"></textarea>
+            <textarea name="notes" class="full" aria-label="Notes" placeholder="Notes (optional). Who's the team, what are you hoping Memee solves?" rows="3"></textarea>
             <button type="submit" class="btn" style="grid-column:1/-1;margin-top:4px;justify-content:center">Start 14-day trial <span class="arrow">→</span></button>
           </form>
           <span class="tiny">No card until day fifteen. Cancel by reply.</span>
