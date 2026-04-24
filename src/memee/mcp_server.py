@@ -30,6 +30,29 @@ def _parse_tags(tags: str) -> list[str]:
     return [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
 
+def _clamp_limit(value, default: int = 10, maxv: int = 200) -> int:
+    """Bound a caller-supplied limit. Protects against ``limit=999999``."""
+    try:
+        return max(1, min(int(value), maxv))
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_json(raw, default, *, arg_name: str = ""):
+    """Parse JSON but never raise. Returns (value, error-message-or-None).
+
+    If ``raw`` is empty/None, returns ``(default, None)``. If it fails to
+    parse, returns ``(default, "bad json in <arg_name>")`` so the caller
+    can surface a structured rejection instead of a 500.
+    """
+    if not raw:
+        return default, None
+    try:
+        return json.loads(raw), None
+    except (json.JSONDecodeError, TypeError):
+        return default, f"bad json in {arg_name}" if arg_name else "bad json"
+
+
 def _detect_model(model: str = "") -> str | None:
     """Detect model name from param or environment."""
     if model:
@@ -79,7 +102,9 @@ async def memory_record(
     session = _get_session()
 
     tag_list = _parse_tags(tags)
-    ctx = json.loads(context) if context else {}
+    ctx, ctx_err = _safe_json(context, {}, arg_name="context")
+    if ctx_err:
+        return json.dumps({"status": "rejected", "reason": ctx_err})
     model_name = _detect_model(model)
 
     # Quality gate
@@ -155,6 +180,7 @@ async def memory_search(
 
     session = _get_session()
     tag_list = _parse_tags(tags) or None
+    limit = _clamp_limit(limit, default=10, maxv=200)
 
     results = search_memories(
         session,
@@ -228,6 +254,7 @@ async def memory_suggest(
 
     session = _get_session()
     tag_list = _parse_tags(tags) or None
+    limit = _clamp_limit(limit, default=5, maxv=200)
 
     results = search_memories(session, context, tags=tag_list, limit=limit)
 
@@ -370,8 +397,12 @@ async def decision_record(
 
     session = _get_session()
 
-    alt_list = json.loads(alternatives) if alternatives else []
-    crit_list = json.loads(criteria) if criteria else []
+    alt_list, alt_err = _safe_json(alternatives, [], arg_name="alternatives")
+    if alt_err:
+        return json.dumps({"status": "rejected", "reason": alt_err})
+    crit_list, crit_err = _safe_json(criteria, [], arg_name="criteria")
+    if crit_err:
+        return json.dumps({"status": "rejected", "reason": crit_err})
     content = f"Chose {chosen}. Alternatives: {alternatives}"
 
     gate = run_quality_gate(session, title, content, ["decision"], "decision", source="llm")
@@ -528,7 +559,7 @@ async def research_create(
     guard_command: str = "",
     scope: str = "",
     project_path: str = "",
-    baseline: float = -1,
+    baseline: float | None = None,
 ) -> str:
     """Create a new autoresearch experiment.
 
@@ -564,7 +595,9 @@ async def research_create(
         return json.dumps({"error": "No project found."})
 
     scope_list = [s.strip() for s in scope.split(",") if s.strip()] if scope else []
-    baseline_val = baseline if baseline >= 0 else None
+    # ``None`` means "measure it for me"; any real float (incl. -1, 0)
+    # is a legitimate baseline and must be passed through untouched.
+    baseline_val = baseline
 
     exp = create_experiment(
         session, project_id, goal, metric_name, metric_direction,
@@ -762,22 +795,24 @@ async def learning_status() -> str:
 
 
 @mcp.tool()
-async def canon_list(category: str = "") -> str:
+async def canon_list(category: str = "", limit: int = 100) -> str:
     """List all canonical best practices — the organizational truth.
 
     These are memories that have been validated across 5+ projects
-    with 85%+ confidence. Filter by tag/category.
+    with 85%+ confidence. Filter by tag/category. ``limit`` is clamped
+    to 500 to protect callers from accidental unbounded queries.
     """
     from memee.storage.models import MaturityLevel, Memory
 
     session = _get_session()
+    limit = _clamp_limit(limit, default=100, maxv=500)
 
     q = session.query(Memory).filter(Memory.maturity == MaturityLevel.CANON.value)
 
     if category:
         q = q.filter(Memory.tags.contains(category))
 
-    canons = q.all()
+    canons = q.limit(limit).all()
 
     return json.dumps({
         "count": len(canons),

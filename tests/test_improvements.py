@@ -2,7 +2,7 @@
 
 import pytest
 
-from memee.engine.dream import run_dream_cycle
+from memee.engine.dream import _boost_connected_memories, run_dream_cycle
 from memee.engine.inheritance import compute_stack_similarity, inherit_memories
 from memee.engine.predictive import scan_all_projects, scan_project_for_warnings
 from memee.engine.propagation import propagate_memory, run_propagation_cycle
@@ -11,6 +11,7 @@ from memee.storage.models import (
     AntiPattern,
     MaturityLevel,
     Memory,
+    MemoryConnection,
     MemoryType,
     Project,
     ProjectMemory,
@@ -460,3 +461,61 @@ for row in cursor.fetchall():
 """
         result = review_file_content(session, code, "query.py")
         assert result["file"] == "query.py"
+
+
+def test_dream_boost_bounded_with_many_weak_neighbors(session):
+    """20 weak neighbors must not inflate confidence past a reasonable cap.
+
+    Before the fix, `boost = 0.02 * avg_signal * len(neighbor_confs)` scaled
+    linearly in the neighbor count: a TESTED memory at 0.6 with 20 neighbors
+    at conf 0.46 and strength 0.4 gained ~0.074 per dream pass, i.e. ~0.37
+    across 5 cycles, reaching ~0.97 with no new validation evidence.
+    """
+    target = Memory(
+        type=MemoryType.PATTERN.value,
+        title="Dense-cluster hypothesis",
+        content="A target memory living inside a dense tag cluster.",
+        tags=["cluster"],
+        confidence_score=0.6,
+        maturity=MaturityLevel.TESTED.value,
+    )
+    session.add(target)
+    session.flush()
+
+    neighbors = []
+    for i in range(20):
+        n = Memory(
+            type=MemoryType.PATTERN.value,
+            title=f"Weak neighbor {i}",
+            content=f"Neighbor memory number {i}.",
+            tags=["cluster"],
+            confidence_score=0.46,
+            maturity=MaturityLevel.VALIDATED.value,
+        )
+        session.add(n)
+        neighbors.append(n)
+    session.flush()
+
+    for n in neighbors:
+        session.add(
+            MemoryConnection(
+                source_id=target.id,
+                target_id=n.id,
+                relationship_type="related_to",
+                strength=0.4,
+            )
+        )
+    session.commit()
+
+    for _ in range(5):
+        _boost_connected_memories(session)
+    session.commit()
+
+    session.refresh(target)
+    # With len_factor capped at 5, per-pass boost ≈ 0.02 * 0.184 * 5 ≈ 0.018,
+    # so after 5 passes ≈ 0.69. Assert we stayed well under the pre-fix runaway.
+    assert target.confidence_score < 0.75, (
+        f"Dream mode inflated confidence past bound: got {target.confidence_score:.3f}"
+    )
+    # Sanity: boost did still apply (some movement), just bounded.
+    assert target.confidence_score > 0.6

@@ -105,16 +105,23 @@ def deprecate_memory(
 
 
 def get_expiring_memories(session: Session, within_days: int = 7) -> list[Memory]:
-    """Get hypothesis memories that will expire within N days."""
+    """Get hypothesis memories that will expire within N days.
+
+    A hypothesis expires at ``created_at + hypothesis_ttl_days``. We return
+    the ones whose expiry is within ``within_days`` from now — i.e. those
+    already at least ``(ttl - within_days)`` old. Without this age filter
+    the function returned every unvalidated hypothesis regardless of age.
+    """
     now = utcnow()
     ttl = timedelta(days=settings.hypothesis_ttl_days)
-    warn_threshold = ttl - timedelta(days=within_days)
+    warn_threshold = now - (ttl - timedelta(days=within_days))
 
     return (
         session.query(Memory)
         .filter(
             Memory.maturity == MaturityLevel.HYPOTHESIS.value,
             Memory.validation_count == 0,
+            Memory.created_at < warn_threshold,
         )
         .all()
     )

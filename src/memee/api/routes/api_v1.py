@@ -22,9 +22,18 @@ from memee.storage.models import (
 router = APIRouter(tags=["api"])
 
 
-def get_db() -> Session:
-    engine = init_db()
-    return get_session(engine)
+def get_db():
+    """FastAPI dependency — yields a Session and guarantees close().
+
+    Must be a generator: FastAPI only runs teardown for generator deps.
+    The previous plain-return version leaked a connection per request
+    and would eventually exhaust the SQLite pool.
+    """
+    session = get_session(init_db())
+    try:
+        yield session
+    finally:
+        session.close()
 
 
 @router.get("/stats")

@@ -210,7 +210,13 @@ def _boost_connected_memories(session: Session) -> int:
 
         if len(neighbor_confs) >= 2:
             avg_signal = sum(neighbor_confs) / len(neighbor_confs)
-            boost = 0.02 * avg_signal * len(neighbor_confs)
+            # Cap neighbor-count multiplier: unbounded multiplication by
+            # len(neighbor_confs) let tag-clustered memories accrue ~0.07+
+            # per dream cycle (→ ~0.37 over a week) with no new validation.
+            # Capping at 5 rewards "fewer but stronger" without letting
+            # dense tag clusters inflate confidence past actual evidence.
+            len_factor = min(len(neighbor_confs), 5)
+            boost = 0.02 * avg_signal * len_factor
             memory.confidence_score = min(0.99, memory.confidence_score + boost)
             boosted += 1
 

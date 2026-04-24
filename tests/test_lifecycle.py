@@ -2,7 +2,12 @@
 
 from datetime import datetime, timedelta, timezone
 
-from memee.engine.lifecycle import deprecate_memory, run_aging_cycle
+from memee.config import settings
+from memee.engine.lifecycle import (
+    deprecate_memory,
+    get_expiring_memories,
+    run_aging_cycle,
+)
 from memee.storage.models import MaturityLevel, Memory, MemoryType
 
 
@@ -92,3 +97,43 @@ def test_promotion_during_aging(session):
     stats = run_aging_cycle(session)
     assert memory.maturity == MaturityLevel.VALIDATED.value
     assert stats["promoted"] >= 1
+
+
+def test_get_expiring_memories_filters_by_age(session):
+    """`within_days` must actually scope the result set by age.
+
+    An expiring-window of 30 days should return the hypothesis about to
+    expire (already older than ttl-30) and skip the brand-new one, whose
+    expiry is far outside the window.
+    """
+    ttl = settings.hypothesis_ttl_days
+    now = datetime.now(timezone.utc)
+
+    # Old hypothesis: created 5 days before TTL runs out → within the
+    # 30-day warning window.
+    old = Memory(
+        type=MemoryType.PATTERN.value,
+        title="Old hypothesis nearing expiry",
+        content="Content for aged hypothesis.",
+        created_at=now - timedelta(days=ttl - 5),
+        validation_count=0,
+        maturity=MaturityLevel.HYPOTHESIS.value,
+    )
+    # Fresh hypothesis: just created. Expiry is ttl days away, well
+    # outside a 30-day warning window.
+    fresh = Memory(
+        type=MemoryType.PATTERN.value,
+        title="Fresh hypothesis",
+        content="Brand new content.",
+        created_at=now,
+        validation_count=0,
+        maturity=MaturityLevel.HYPOTHESIS.value,
+    )
+    session.add_all([old, fresh])
+    session.commit()
+
+    expiring = get_expiring_memories(session, within_days=30)
+    expiring_ids = {m.id for m in expiring}
+
+    assert old.id in expiring_ids
+    assert fresh.id not in expiring_ids

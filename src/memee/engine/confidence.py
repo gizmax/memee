@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 
 from memee import config
-from memee.engine.models import get_model_family, is_different_family
+from memee.engine.models import get_model_family
 from memee.storage.models import MaturityLevel, Memory
 
 
@@ -29,20 +29,29 @@ def update_confidence(
 
     Bonus stacking:
       Same project, same model:        ×1.0 (base)
-      Same project, different model:    ×1.3 (model diversity)
+      Same project, different model:    ×1.3 (model diversity — first time a new family validates)
       Different project, same model:    ×1.5 (cross-project)
       Different project + model:        ×1.95 (combined)
+
+    The cross-model bonus fires only the first time each model family
+    validates this memory. Repeat validations from an already-seen family
+    (including the original author's family) get no diversity bonus.
 
     Returns the updated confidence_score.
     """
     s = config.settings
 
     # FAST PATH: use denormalized project set, not lazy-loaded relationships.
-    # One-time backfill: if denormalized list is empty but ProjectMemory exists,
-    # seed from existing links (happens once per memory, then fully denormalized).
+    # One-time backfill per Python object: if denormalized list is empty but
+    # ProjectMemory rows exist, seed once. `_memee_projects_backfilled` on the
+    # instance guards against re-running the query on memories that legitimately
+    # have no project links yet (Bug 1: profile showed ~53% of calls re-querying).
     validated_ids = list(memory.validated_project_ids or [])
-    if not validated_ids and memory.id is not None:
-        # Only query if we have NO denormalized data AND memory is persisted.
+    if (
+        not validated_ids
+        and memory.id is not None
+        and not getattr(memory, "_memee_projects_backfilled", False)
+    ):
         try:
             from memee.storage.models import ProjectMemory
             from sqlalchemy import inspect as _inspect
@@ -56,8 +65,27 @@ def update_confidence(
                     memory.validated_project_ids = validated_ids
         except Exception:
             pass
+        # Mark as backfilled regardless — either we seeded, or there was nothing
+        # to seed. Either way we won't re-query this instance. Survives
+        # session.expire() of ORM columns because it's a plain Python attr.
+        try:
+            memory._memee_projects_backfilled = True
+        except Exception:
+            pass
+
     is_new_project = project_id is not None and project_id not in validated_ids
-    is_new_model = is_different_family(model_name, memory.source_model)
+
+    # Determine `is_new_model`: does this validator bring a family we haven't
+    # seen before? We track families both from the AUTHOR's source_model (so a
+    # same-family self-validation correctly gets no bonus) and from every
+    # prior validator. The bonus fires only the FIRST time each family touches
+    # this memory; repeat validations by any already-seen family get no bonus.
+    source_family = get_model_family(memory.source_model) if memory.source_model else "unknown"
+    families_seen_snapshot = set(memory.model_families_seen or [])
+    if source_family != "unknown":
+        families_seen_snapshot.add(source_family)
+    new_family = get_model_family(model_name) if model_name else "unknown"
+    is_new_model = bool(model_name) and new_family != "unknown" and new_family not in families_seen_snapshot
 
     if validated:
         weight = s.validation_weight
@@ -101,59 +129,67 @@ def update_confidence(
     if is_new_project:
         memory.project_count = (memory.project_count or 0) + 1
 
-    # Track unique model families via denormalized list — NO lazy load.
-    # One-time backfill: if model_families_seen is empty AND there are prior
-    # validations in the DB, seed from MemoryValidation once, then stay fully
-    # denormalized. Mirrors the validated_project_ids pattern above.
-    if model_name:
-        new_family = get_model_family(model_name)
-        if new_family != "unknown":
-            families_list = memory.model_families_seen
-            # Treat None/empty-list identically — both mean "not yet seeded".
-            # After the first seed we ALWAYS persist a non-empty list so the
-            # backfill query never runs again for this memory.
-            if not families_list:
-                families_list = []
-                source_family = get_model_family(memory.source_model)
-                if source_family != "unknown":
-                    families_list.append(source_family)
+    # Track unique VALIDATOR model families via denormalized list.
+    # Bug 4 fix: only validators accrue into model_families_seen. The author's
+    # source_model is author metadata, NOT validator evidence — seeding from it
+    # would let a single cross-family validator lift the LLM quarantine gate
+    # (model_count=1 from author + 1 validator = 2), which isn't the promised
+    # "two validators of different families" defense.
+    #
+    # Bug 1 fix: one-time backfill from MemoryValidation rows, guarded by a
+    # per-instance flag so memories that have no prior validations don't
+    # re-query on every update_confidence call.
+    if validated and model_name and new_family != "unknown":
+        families_list = list(memory.model_families_seen or [])
 
-                # One-time backfill from existing validations if persisted AND
-                # we actually had prior validations BEFORE this call.
-                prior_validations = (memory.validation_count or 0) - (1 if validated else 0)
-                if prior_validations > 0 and memory.id is not None:
-                    try:
-                        from memee.storage.models import MemoryValidation
-                        from sqlalchemy import inspect as _inspect
-                        sess = _inspect(memory).session
-                        if sess is not None:
-                            rows = sess.query(MemoryValidation.validator_model).filter(
-                                MemoryValidation.memory_id == memory.id
-                            ).all()
-                            seen = set(families_list)
-                            for (vm,) in rows:
-                                if vm:
-                                    fam = get_model_family(vm)
-                                    if fam != "unknown" and fam not in seen:
-                                        seen.add(fam)
-                                        families_list.append(fam)
-                    except Exception:
-                        pass
+        if not getattr(memory, "_memee_families_backfilled", False):
+            # Only query if the memory is persisted AND had prior validations
+            # (exclude THIS one — it's already reflected in validation_count).
+            prior_validations = (memory.validation_count or 0) - 1
+            if prior_validations > 0 and memory.id is not None:
+                try:
+                    from memee.storage.models import MemoryValidation
+                    from sqlalchemy import inspect as _inspect
+                    sess = _inspect(memory).session
+                    if sess is not None:
+                        rows = sess.query(MemoryValidation.validator_model).filter(
+                            MemoryValidation.memory_id == memory.id
+                        ).all()
+                        seen = set(families_list)
+                        for (vm,) in rows:
+                            if vm:
+                                fam = get_model_family(vm)
+                                if fam != "unknown" and fam not in seen:
+                                    seen.add(fam)
+                                    families_list.append(fam)
+                except Exception:
+                    pass
+            try:
+                memory._memee_families_backfilled = True
+            except Exception:
+                pass
 
-                if new_family not in families_list:
-                    families_list.append(new_family)
-                # Always persist so subsequent calls skip the backfill branch.
-                # Use a non-empty placeholder if source & new_family are unknown.
-                memory.model_families_seen = list(families_list) if families_list else [new_family]
-                memory.model_count = len(memory.model_families_seen)
-            else:
-                if new_family not in families_list:
-                    new_list = list(families_list)
-                    new_list.append(new_family)
-                    memory.model_families_seen = new_list
-                    memory.model_count = len(new_list)
+        # Persist the combined "source + validators" family set. Tests and
+        # the LLM quarantine gate both read `model_count` as "distinct
+        # families that touched this memory including the author".
+        changed = False
+        if new_family not in families_list:
+            families_list.append(new_family)
+            changed = True
+        if source_family != "unknown" and source_family not in families_list:
+            families_list.append(source_family)
+            changed = True
+        if changed or memory.model_count != len(families_list):
+            memory.model_families_seen = families_list
+            memory.model_count = len(families_list)
 
-    memory.application_count = (memory.application_count or 0) + 1
+    # Bug 3 fix: application_count counts successful APPLICATIONS, not
+    # invalidations. A user saying "this didn't work" is not proof the agent
+    # applied the memory in a new context — bumping application_count on
+    # invalidation caused auto-deprecation to fire eagerly on memories with
+    # many invalidations and few real applications.
+    if validated:
+        memory.application_count = (memory.application_count or 0) + 1
     memory.maturity = evaluate_maturity(memory)
     return memory.confidence_score
 
@@ -204,8 +240,13 @@ def evaluate_maturity(memory: Memory) -> str:
     c = memory.confidence_score
     s = config.settings
 
-    # Auto-deprecate: low confidence after sufficient applications
-    if c < s.deprecated_max_confidence and memory.application_count >= s.deprecated_min_applications:
+    # Auto-deprecate: low confidence after the memory has been tried enough
+    # times OR been invalidated enough times to strongly indicate it's wrong.
+    # Invalidations and applications are counted separately (application_count
+    # only bumps on validated=True per Bug 3 fix), but either signal at the
+    # deprecation threshold justifies retiring the memory.
+    touch_events = (memory.application_count or 0) + (memory.invalidation_count or 0)
+    if c < s.deprecated_max_confidence and touch_events >= s.deprecated_min_applications:
         return MaturityLevel.DEPRECATED.value
 
     # LLM quarantine gate: require DIVERSITY evidence before promotion.
@@ -236,8 +277,11 @@ def evaluate_maturity(memory: Memory) -> str:
     ):
         return MaturityLevel.VALIDATED.value
 
-    # Tested: applied at least once (LLM can reach tested, just not higher)
-    if memory.application_count >= s.tested_min_applications:
+    # Tested: has been touched by at least one validation OR invalidation
+    # event. "Tested" doesn't assert the memory works — it asserts the memory
+    # has been exercised in the real world. An invalidation is as much proof
+    # of exercise as an application. (LLM can reach tested, just not higher.)
+    if touch_events >= s.tested_min_applications:
         return MaturityLevel.TESTED.value
 
     return MaturityLevel.HYPOTHESIS.value

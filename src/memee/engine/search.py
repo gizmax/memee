@@ -239,21 +239,48 @@ def _bm25_search(
     maturity: str | None,
     limit: int,
 ) -> list[tuple[int, float]]:
-    """BM25 search via FTS5. Returns [(rowid, rank), ...]."""
-    fts_query = _sanitize_fts_query(query)
+    """BM25 search via FTS5. Returns [(rowid, rank), ...].
+
+    AND-by-default for precision; falls back to OR (one layer) if AND returns
+    zero rows so we don't silently miss single-token or partial-hit queries.
+    """
+    fts_and = _sanitize_fts_query(query, operator="AND")
+    if not fts_and:
+        # Sanitization stripped every token — avoid shoving the raw query
+        # through FTS5 (it would hit syntax errors and silently return []).
+        return []
+
+    fts_sql = text("""
+        SELECT rowid, rank
+        FROM memories_fts
+        WHERE memories_fts MATCH :query
+        ORDER BY rank
+        LIMIT :limit
+    """)
+
     try:
-        fts_sql = text("""
-            SELECT rowid, rank
-            FROM memories_fts
-            WHERE memories_fts MATCH :query
-            ORDER BY rank
-            LIMIT :limit
-        """)
-        return session.execute(
-            fts_sql, {"query": fts_query, "limit": limit}
+        rows = session.execute(
+            fts_sql, {"query": fts_and, "limit": limit}
         ).fetchall()
     except Exception as e:
-        logger.debug(f"BM25 search failed for query '{query[:50]}': {e}")
+        logger.debug(f"BM25 AND search failed for query '{query[:50]}': {e}")
+        rows = []
+
+    if rows:
+        return rows
+
+    # One-shot OR fallback. Only useful when the query has >1 token; for a
+    # single-token query AND and OR are equivalent, so skip the retry.
+    fts_or = _sanitize_fts_query(query, operator="OR")
+    if not fts_or or fts_or == fts_and:
+        return []
+
+    try:
+        return session.execute(
+            fts_sql, {"query": fts_or, "limit": limit}
+        ).fetchall()
+    except Exception as e:
+        logger.debug(f"BM25 OR fallback failed for query '{query[:50]}': {e}")
         return []
 
 
@@ -312,8 +339,21 @@ def _rowid_to_id(session: Session, rowid: int) -> str | None:
     return result[0] if result else None
 
 
-def _sanitize_fts_query(query: str) -> str:
-    """Sanitize a query string for FTS5 MATCH."""
+def _sanitize_fts_query(query: str, operator: str = "AND") -> str:
+    """Sanitize a query string for FTS5 MATCH.
+
+    Tokens are individually quoted to neutralize FTS5 syntax chars. Joined
+    with ``operator`` (AND by default — tighter precision; OR is reserved
+    for the fallback retry when AND returns no rows).
+
+    Returns an empty string if every token was stripped by sanitization, so
+    callers can short-circuit instead of passing the raw query through FTS5
+    (which would raise a syntax error and return []).
+    """
+    op = operator.upper()
+    if op not in {"AND", "OR"}:
+        op = "AND"
+
     tokens = query.split()
     safe_tokens = []
     for token in tokens:
@@ -321,8 +361,8 @@ def _sanitize_fts_query(query: str) -> str:
         if clean:
             safe_tokens.append(f'"{clean}"')
     if not safe_tokens:
-        return query
-    return " OR ".join(safe_tokens)
+        return ""
+    return f" {op} ".join(safe_tokens)
 
 
 def _title_phrase_match(query: str, title: str | None) -> bool:

@@ -1190,3 +1190,31 @@ def _get_or_create_project(session, project_path: str):
 
     abs_path = str(Path(project_path).resolve())
     return session.query(Project).filter_by(path=abs_path).first()
+
+
+def main() -> None:
+    """Console-script entry point with clean top-level error handling.
+
+    Wraps ``cli()`` so an uncaught engine exception surfaces as
+    ``memee: <error>`` + exit 1 instead of a raw Python traceback.
+    Set ``MEMEE_DEBUG=1`` to re-raise the original exception for debugging.
+
+    Click's own errors (``ClickException``, ``Abort``, ``SystemExit``) are
+    passed through unchanged so Click's usage/help/exit-code logic still
+    works, and tests using ``CliRunner`` (which invokes ``cli`` directly)
+    are unaffected.
+    """
+    import os
+    import sys
+
+    try:
+        cli()  # Click handles its own exit via SystemExit
+    except click.ClickException:
+        raise
+    except (SystemExit, KeyboardInterrupt):
+        raise
+    except Exception as e:
+        click.echo(f"memee: {e}", err=True)
+        if os.environ.get("MEMEE_DEBUG"):
+            raise
+        sys.exit(1)

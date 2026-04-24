@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] — 2026-04-24
+
+Correctness, performance, and API hygiene pass. Fourteen findings from
+two independent audits (engine bugs + perf profile + API review),
+addressed in one batch.
+
+### Fixed
+
+**Confidence engine (`src/memee/engine/confidence.py`)**
+
+- One-time backfill is actually one-time. Both `validated_project_ids`
+  and `model_families_seen` now set an in-memory sentinel after the
+  first backfill attempt so subsequent calls skip the query entirely.
+  Profile showed the old code re-querying on ~53% of validation calls
+  for memories whose first event was an invalidation.
+- Cross-model diversity bonus fires only on the first time each model
+  family validates a memory, including the author's own family. The
+  previous check compared the new validator to `memory.source_model`
+  only, so the same family could trigger the bonus repeatedly across
+  separate validations. Honest semantic: validator_family ∉ families_seen.
+- `application_count` no longer bumps on invalidation. An invalidation
+  signal is counted separately via `invalidation_count`; auto-deprecation
+  and the tested-maturity gate now read `application_count + invalidation_count`
+  so a memory exercised via invalidations is still eligible for
+  deprecation at low confidence, without conflating "tried and failed"
+  with "applied successfully".
+- LLM quarantine tightened: removed the `validation_count ≥ 3` escape
+  hatch that let a single chatty model self-validate out of hypothesis.
+  Promotion now requires real diversity (cross-model or cross-project)
+  for VALIDATED, and cross-model evidence specifically for CANON of
+  LLM-sourced memories.
+
+**Search and lifecycle**
+
+- FTS5 query rewrite is AND-by-default with an OR fallback on zero
+  results, and sanitized-to-empty queries no longer leak the raw
+  input into a syntax error. Before, a 6-word query would OR across
+  all tokens and return any memory touching any token — correct
+  memories were drowned by noise. (`src/memee/engine/search.py`)
+- `get_expiring_memories` now honours the `within_days` parameter
+  it always accepted; the function computed a `warn_threshold` but
+  never added it to the WHERE clause.
+- Dream-mode connection-boost now caps the neighbor-count multiplier
+  at 5. The previous unbounded formula let 20 weakly-connected tag
+  neighbours inflate confidence by ~0.074 per nightly cycle without
+  any real new validation.
+
+**API / CLI / MCP hygiene**
+
+- FastAPI `get_db()` is a proper yield-and-close generator, so request
+  scopes no longer leak SQLite connections. The prior `return` pattern
+  bypassed the closer FastAPI runs only for generators.
+- Global FastAPI exception handler: any unhandled exception now logs
+  the traceback server-side and returns a clean
+  `{"error": "internal_server_error", "detail": ...}` JSON payload.
+- `memee.cli:main` entry wraps the Click group. Any uncaught exception
+  prints `memee: <message>` to stderr and exits 1 instead of dumping
+  a raw Python traceback; set `MEMEE_DEBUG=1` to re-raise for local
+  debugging.
+- MCP tools bound their response sizes: `memory_search` and
+  `memory_suggest` clamp `limit` to [1, 200], and `canon_list` added
+  a `limit: int = 100` param (max 500). Unbounded lists could have
+  exceeded MCP JSON-RPC frame limits at scale.
+- `memory_record(context=...)` and `decision_record(alternatives=...,
+  criteria=...)` replace `json.loads` with a safe helper that returns
+  a structured rejection instead of a 500 when the model passes raw
+  text in what should be a JSON string.
+- `research_create(baseline: float = -1)` is now `Optional[float] =
+  None`, so metrics where `-1` is a legitimate value (size deltas,
+  signed offsets) no longer silently collapse into "baseline unknown".
+
+### Added
+
+- `tests/test_search.py`: AND-semantics tests, OR-fallback test, and
+  sanitize-empty test.
+- `tests/test_lifecycle.py`: `test_get_expiring_memories_filters_by_age`.
+- `tests/test_improvements.py`: dream-boost bounded test for weak
+  neighbour clusters.
+
+Tests: 201 → **207 passing**. Ruff: 0 errors.
+
 ## [1.0.2] — 2026-04-24
 
 Release-hygiene pass triggered by a third-party pre-launch review.

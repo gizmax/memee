@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memee"
-version = "1.0.2"
+version = "1.0.3"
 description = "Institutional memory for AI agent teams: multi-model, cross-project, token-budgeted."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -55,7 +55,7 @@ all = [
 ]
 
 [project.scripts]
-memee = "memee.cli:cli"
+memee = "memee.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/memee"]
