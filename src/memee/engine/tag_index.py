@@ -57,42 +57,57 @@ def _expand_project_tags(project: Project) -> set[str]:
 
 
 def sync_memory_tags(session: Session, memory: Memory) -> None:
-    """Write memory.tags JSON to the MemoryTag index table."""
-    session.query(MemoryTag).filter(MemoryTag.memory_id == memory.id).delete()
-    if memory.tags:
-        for t in memory.tags:
-            t_lower = (t or "").strip().lower()
-            if t_lower:
-                session.add(MemoryTag(memory_id=memory.id, tag=t_lower))
+    """Write memory.tags JSON to the MemoryTag index table.
+
+    The delete+insert pair is wrapped in a SAVEPOINT so a concurrent reader
+    in another connection doesn't observe the empty window between the two.
+    """
+    with session.begin_nested():
+        session.query(MemoryTag).filter(MemoryTag.memory_id == memory.id).delete()
+        if memory.tags:
+            for t in memory.tags:
+                t_lower = (t or "").strip().lower()
+                if t_lower:
+                    session.add(MemoryTag(memory_id=memory.id, tag=t_lower))
 
 
 def sync_project_tags(session: Session, project: Project) -> None:
     """Write expanded project tags to ProjectTag index."""
-    session.query(ProjectTag).filter(ProjectTag.project_id == project.id).delete()
-    for t in _expand_project_tags(project):
-        session.add(ProjectTag(project_id=project.id, tag=t))
+    with session.begin_nested():
+        session.query(ProjectTag).filter(
+            ProjectTag.project_id == project.id
+        ).delete()
+        for t in _expand_project_tags(project):
+            session.add(ProjectTag(project_id=project.id, tag=t))
 
 
 def rebuild_all_tag_indexes(session: Session) -> dict:
-    """Rebuild tag indexes from scratch (for migrations / repair)."""
-    session.query(MemoryTag).delete()
-    session.query(ProjectTag).delete()
-    session.flush()
+    """Rebuild tag indexes from scratch (for migrations / repair).
 
+    Wrapped in a single SAVEPOINT so concurrent readers never observe the
+    empty intermediate state between DELETE and INSERT. MemoryTag rebuilds
+    are still slow at scale — this is a maintenance op, not a hot path.
+    Do not call this from a request handler.
+    """
     mem_count = 0
-    for m in session.query(Memory).all():
-        if m.tags:
-            for t in m.tags:
-                t_lower = (t or "").strip().lower()
-                if t_lower:
-                    session.add(MemoryTag(memory_id=m.id, tag=t_lower))
-                    mem_count += 1
-
     proj_count = 0
-    for p in session.query(Project).all():
-        for t in _expand_project_tags(p):
-            session.add(ProjectTag(project_id=p.id, tag=t))
-            proj_count += 1
+    with session.begin_nested():
+        session.query(MemoryTag).delete()
+        session.query(ProjectTag).delete()
+        session.flush()
+
+        for m in session.query(Memory).all():
+            if m.tags:
+                for t in m.tags:
+                    t_lower = (t or "").strip().lower()
+                    if t_lower:
+                        session.add(MemoryTag(memory_id=m.id, tag=t_lower))
+                        mem_count += 1
+
+        for p in session.query(Project).all():
+            for t in _expand_project_tags(p):
+                session.add(ProjectTag(project_id=p.id, tag=t))
+                proj_count += 1
 
     session.commit()
     return {"memory_tags": mem_count, "project_tags": proj_count}

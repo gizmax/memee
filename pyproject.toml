@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memee"
-version = "1.0.4"
+version = "1.0.5"
 description = "Institutional memory for AI agent teams: multi-model, cross-project, token-budgeted."
 readme = "README.md"
 requires-python = ">=3.11"

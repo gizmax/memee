@@ -102,8 +102,18 @@ class Project(Base):
     last_active = Column(DateTime)
 
     organization = relationship("Organization", back_populates="projects")
-    memories = relationship("ProjectMemory", back_populates="project")
-    experiments = relationship("ResearchExperiment", back_populates="project")
+    memories = relationship(
+        "ProjectMemory",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    experiments = relationship(
+        "ResearchExperiment",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         UniqueConstraint("organization_id", "path", name="uq_org_path"),
@@ -174,11 +184,36 @@ class Memory(Base):
     # (flag for manual review once a single memory absorbs too many near-dupes).
     merge_count = Column(Integer, default=0)
 
-    # Relations
-    projects = relationship("ProjectMemory", back_populates="memory")
-    validations = relationship("MemoryValidation", back_populates="memory")
-    decision = relationship("Decision", back_populates="memory", uselist=False)
-    anti_pattern = relationship("AntiPattern", back_populates="memory", uselist=False)
+    # Relations. `cascade="all, delete-orphan"` + `passive_deletes=True` lets
+    # SQLAlchemy hand off cascade to the DB (ON DELETE CASCADE on the FK side)
+    # so bulk deletes don't trigger N+1 loads and raw SQL deletes still clean
+    # up dangling child rows.
+    projects = relationship(
+        "ProjectMemory",
+        back_populates="memory",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    validations = relationship(
+        "MemoryValidation",
+        back_populates="memory",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    decision = relationship(
+        "Decision",
+        back_populates="memory",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    anti_pattern = relationship(
+        "AntiPattern",
+        back_populates="memory",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         Index("ix_memories_type", "type"),
@@ -191,8 +226,12 @@ class Memory(Base):
 class ProjectMemory(Base):
     __tablename__ = "project_memories"
 
-    project_id = Column(String(36), ForeignKey("projects.id"), primary_key=True)
-    memory_id = Column(String(36), ForeignKey("memories.id"), primary_key=True)
+    project_id = Column(
+        String(36), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    memory_id = Column(
+        String(36), ForeignKey("memories.id", ondelete="CASCADE"), primary_key=True
+    )
     relevance_score = Column(Float, default=1.0)
     applied = Column(Boolean, default=False)
     applied_at = Column(DateTime)
@@ -213,8 +252,12 @@ class ProjectMemory(Base):
 class MemoryConnection(Base):
     __tablename__ = "memory_connections"
 
-    source_id = Column(String(36), ForeignKey("memories.id"), primary_key=True)
-    target_id = Column(String(36), ForeignKey("memories.id"), primary_key=True)
+    source_id = Column(
+        String(36), ForeignKey("memories.id", ondelete="CASCADE"), primary_key=True
+    )
+    target_id = Column(
+        String(36), ForeignKey("memories.id", ondelete="CASCADE"), primary_key=True
+    )
     relationship_type = Column(String(50), nullable=False)
     strength = Column(Float, default=0.5)
     created_at = Column(DateTime, default=utcnow)
@@ -224,8 +267,10 @@ class MemoryValidation(Base):
     __tablename__ = "memory_validations"
 
     id = Column(String(36), primary_key=True, default=new_id)
-    memory_id = Column(String(36), ForeignKey("memories.id"), nullable=False)
-    project_id = Column(String(36), ForeignKey("projects.id"))
+    memory_id = Column(
+        String(36), ForeignKey("memories.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"))
     validated = Column(Boolean, nullable=False)
     evidence = Column(Text)
     validator_model = Column(String(100))  # Which model validated
@@ -241,7 +286,9 @@ class MemoryValidation(Base):
 class Decision(Base):
     __tablename__ = "decisions"
 
-    memory_id = Column(String(36), ForeignKey("memories.id"), primary_key=True)
+    memory_id = Column(
+        String(36), ForeignKey("memories.id", ondelete="CASCADE"), primary_key=True
+    )
     chosen = Column(Text, nullable=False)
     alternatives = Column(JSON, default=list)
     criteria = Column(JSON, default=list)
@@ -256,7 +303,9 @@ class Decision(Base):
 class AntiPattern(Base):
     __tablename__ = "anti_patterns"
 
-    memory_id = Column(String(36), ForeignKey("memories.id"), primary_key=True)
+    memory_id = Column(
+        String(36), ForeignKey("memories.id", ondelete="CASCADE"), primary_key=True
+    )
     severity = Column(String(20), nullable=False, default=Severity.MEDIUM.value)
     trigger = Column(Text, nullable=False)
     consequence = Column(Text, nullable=False)
@@ -295,7 +344,12 @@ class ResearchExperiment(Base):
     completed_at = Column(DateTime)
 
     project = relationship("Project", back_populates="experiments")
-    iterations = relationship("ResearchIteration", back_populates="experiment")
+    iterations = relationship(
+        "ResearchIteration",
+        back_populates="experiment",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class ResearchIteration(Base):
@@ -303,7 +357,9 @@ class ResearchIteration(Base):
 
     id = Column(String(36), primary_key=True, default=new_id)
     experiment_id = Column(
-        String(36), ForeignKey("research_experiments.id"), nullable=False
+        String(36),
+        ForeignKey("research_experiments.id", ondelete="CASCADE"),
+        nullable=False,
     )
     iteration_number = Column(Integer, nullable=False)
     commit_hash = Column(String(40))
@@ -324,7 +380,9 @@ class MemoryTag(Base):
     """Normalized tag index for fast propagation/predictive lookups."""
     __tablename__ = "memory_tags"
 
-    memory_id = Column(String(36), ForeignKey("memories.id"), primary_key=True)
+    memory_id = Column(
+        String(36), ForeignKey("memories.id", ondelete="CASCADE"), primary_key=True
+    )
     tag = Column(String(100), primary_key=True)
 
     __table_args__ = (
@@ -336,7 +394,9 @@ class ProjectTag(Base):
     """Normalized tag index for projects (stack + tags combined)."""
     __tablename__ = "project_tags"
 
-    project_id = Column(String(36), ForeignKey("projects.id"), primary_key=True)
+    project_id = Column(
+        String(36), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
     tag = Column(String(100), primary_key=True)
 
     __table_args__ = (

@@ -2,7 +2,7 @@
 
 import pytest
 
-from memee.engine.router import smart_briefing, TOKENS_PER_LINE
+from memee.engine.router import smart_briefing, _count_tokens
 from memee.storage.models import (
     AntiPattern, MaturityLevel, Memory, MemoryType,
     Project,
@@ -126,14 +126,28 @@ class TestSmartBriefing:
         assert "CRITICAL" in result  # Plus critical warnings
 
     def test_token_budget_respected(self, router_env):
-        """Briefing stays within token budget."""
+        """Briefing stays within token budget (real chars/4 accounting)."""
+        session, proj, org = router_env
+        result = smart_briefing(session, "/tmp/api-project",
+                                 task="full stack development", token_budget=500)
+        # Actually count the characters: the budget is enforced on the real
+        # rendered output, not on a flat per-line tautology.
+        real_tokens = _count_tokens(result)
+        # Small overshoot is allowed for the footer line itself (computed after
+        # reservation); we give it 20% headroom.
+        assert real_tokens <= 600, (
+            f"Briefing {real_tokens} tokens exceeded budget (500 + 20% slack)"
+        )
+
+    def test_token_budget_respected_tight(self, router_env):
+        """Tighter 300-token budget is also honored."""
         session, proj, org = router_env
         result = smart_briefing(session, "/tmp/api-project",
                                  task="full stack development", token_budget=300)
-        lines = [l for l in result.split("\n") if l.strip()]
-        estimated_tokens = len(lines) * TOKENS_PER_LINE
-        # Allow some overhead for headers/footers
-        assert estimated_tokens < 500  # Well under a full dump
+        real_tokens = _count_tokens(result)
+        assert real_tokens <= 360, (
+            f"Briefing {real_tokens} tokens exceeded tight budget (300 + 20% slack)"
+        )
 
     def test_excludes_irrelevant_stack(self, router_env):
         """Python project doesn't get React patterns."""

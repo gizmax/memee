@@ -251,6 +251,92 @@ class TestMemoryInheritance:
         assert stats["memories_inherited"] > 0
         assert any(sp["name"] == "API-Service" for sp in stats["similar_projects"])
 
+    def test_inherit_excludes_tested_and_hypothesis(self, multi_project_env):
+        """Only VALIDATED + CANON memories should be inherited.
+
+        Regression: inheritance used to pull TESTED memories (one application,
+        often confidence 0.5-0.65), muddying onboarding. Now gated to
+        VALIDATED/CANON only.
+        """
+        session, projects, org = multi_project_env
+
+        # Seed a TESTED memory with high confidence — it must NOT be inherited.
+        tested = Memory(
+            type=MemoryType.PATTERN.value,
+            title="Only-tested pattern",
+            content="One application, not trusted enough for onboarding.",
+            tags=["python", "fastapi"],
+            confidence_score=0.75,
+            maturity=MaturityLevel.TESTED.value,
+            application_count=1,
+        )
+        # Seed a VALIDATED memory — this one MAY be inherited.
+        validated = Memory(
+            type=MemoryType.PATTERN.value,
+            title="Validated pattern",
+            content="Trusted across projects.",
+            tags=["python", "fastapi"],
+            confidence_score=0.85,
+            maturity=MaturityLevel.VALIDATED.value,
+            application_count=4,
+        )
+        # Seed a HYPOTHESIS memory — must not propagate either.
+        hypothesis = Memory(
+            type=MemoryType.PATTERN.value,
+            title="Hypothesis pattern",
+            content="Just recorded, not tested.",
+            tags=["python", "fastapi"],
+            confidence_score=0.5,
+            maturity=MaturityLevel.HYPOTHESIS.value,
+        )
+        for m in (tested, validated, hypothesis):
+            session.add(m)
+            session.flush()
+            session.add(
+                ProjectMemory(project_id=projects["api"].id, memory_id=m.id)
+            )
+        session.commit()
+
+        stats = inherit_memories(session, projects["api2"])
+        titles = {im["title"] for im in stats["inherited_memories"]}
+        assert "Validated pattern" in titles
+        assert "Only-tested pattern" not in titles
+        assert "Hypothesis pattern" not in titles
+
+    def test_inherit_does_not_inflate_confidence(self, multi_project_env):
+        """Inheritance links memory-to-project but must not bump confidence.
+
+        Regression: dropping update_confidence from inheritance means the
+        memory's application_count and confidence_score stay as-is — the new
+        project is a delivery, not evidence of validation.
+        """
+        session, projects, org = multi_project_env
+
+        m = Memory(
+            type=MemoryType.PATTERN.value,
+            title="Canonical pattern",
+            content="Already trusted.",
+            tags=["python", "fastapi"],
+            confidence_score=0.9,
+            maturity=MaturityLevel.VALIDATED.value,
+            application_count=5,
+        )
+        session.add(m)
+        session.flush()
+        session.add(ProjectMemory(project_id=projects["api"].id, memory_id=m.id))
+        session.commit()
+
+        before_conf = m.confidence_score
+        before_apps = m.application_count
+        inherit_memories(session, projects["api2"])
+        session.refresh(m)
+        assert m.confidence_score == before_conf, (
+            f"inheritance inflated confidence {before_conf} → {m.confidence_score}"
+        )
+        assert m.application_count == before_apps, (
+            f"inheritance inflated application_count {before_apps} → {m.application_count}"
+        )
+
     def test_no_inherit_from_different_stack(self, multi_project_env):
         """iOS project doesn't inherit Python patterns."""
         session, projects, org = multi_project_env
@@ -430,6 +516,107 @@ diff --git a/src/api.py b/src/api.py
         result = review_diff(session, "")
         assert result["warnings"] == []
         assert result["confirmations"] == []
+
+    def test_rejects_huge_diff(self, multi_project_env):
+        """Diffs above MAX_DIFF_BYTES raise DiffTooLargeError (DoS guard)."""
+        from memee.engine.review import DiffTooLargeError, MAX_DIFF_BYTES
+
+        session, _, _ = multi_project_env
+        # 6 MB of "a\n" lines — would OOM the regex engine otherwise.
+        huge = ("a\n" * (MAX_DIFF_BYTES // 2 + 1))
+        with pytest.raises(DiffTooLargeError):
+            review_diff(session, huge)
+
+    def test_skips_binary_hunks(self, multi_project_env):
+        """Binary-file markers are not scanned as code."""
+        session, projects, org = multi_project_env
+
+        # Seed an AP that would match "eval" if we scanned everything.
+        m = Memory(
+            type=MemoryType.ANTI_PATTERN.value,
+            title="Don't use eval()", content="rce",
+            tags=["python", "security", "eval"],
+        )
+        session.add(m)
+        session.flush()
+        session.add(AntiPattern(
+            memory_id=m.id, severity="critical",
+            trigger="eval", consequence="RCE",
+        ))
+        session.commit()
+
+        # The binary hunk "contains" the string eval, but via a binary marker.
+        diff = (
+            "diff --git a/logo.png b/logo.png\n"
+            "Binary files a/logo.png and b/logo.png differ\n"
+            "+eval(user_input)  # would match if scanned\n"  # must be skipped
+            "diff --git a/ok.py b/ok.py\n"
+            "--- a/ok.py\n"
+            "+++ b/ok.py\n"
+            "+print('hello')\n"
+        )
+        result = review_diff(session, diff)
+        # No eval warning should appear because the only `eval(` occurrence
+        # lived inside a binary hunk and was skipped.
+        eval_hits = [w for w in result["warnings"] if "eval" in w["title"].lower()]
+        assert eval_hits == []
+
+    def test_secrets_regex_requires_quoted_string(self, multi_project_env):
+        """Variable names that happen to contain `token` do not false-positive."""
+        from memee.engine.review import _extract_keywords
+
+        # Plain identifier — must NOT yield "secrets".
+        keywords = _extract_keywords([
+            "user_token_field = get_field('auth')",
+            "password_policy = load_policy()",
+        ])
+        assert "secrets" not in keywords
+
+        # Literal secret assignment — SHOULD yield "secrets".
+        keywords = _extract_keywords([
+            'API_KEY = "abc123xyz789"',
+        ])
+        assert "secrets" in keywords
+
+    def test_http_detector_covers_session_and_verbs(self, multi_project_env):
+        """Detector catches session.get + patch/head/options, not just requests.get."""
+        from memee.engine.review import _extract_keywords
+
+        keywords = _extract_keywords(["r = session.patch(url, json=body)"])
+        assert "http" in keywords
+        keywords = _extract_keywords(["client.options(url)"])
+        assert "http" in keywords
+
+    def test_env_detector_positive_only(self, multi_project_env):
+        """os.environ alone is fine; only indexed access / getenv should flag."""
+        from memee.engine.review import _extract_keywords
+
+        # Plain reference — must NOT yield "env-config".
+        keywords = _extract_keywords(["e = os.environ"])
+        assert "env-config" not in keywords
+
+        # Indexed access — SHOULD yield.
+        keywords = _extract_keywords(['x = os.environ["DB_URL"]'])
+        assert "env-config" in keywords
+
+        keywords = _extract_keywords(['x = os.getenv("DB_URL")'])
+        assert "env-config" in keywords
+
+    def test_unicode_diff_does_not_crash(self, multi_project_env):
+        """A diff with Czech/Cyrillic filenames and text scans cleanly."""
+        session, _, _ = multi_project_env
+        diff = (
+            "diff --git a/docs/příručka.md b/docs/příručka.md\n"
+            "--- a/docs/příručka.md\n"
+            "+++ b/docs/příručka.md\n"
+            "@@ -1,1 +1,2 @@\n"
+            "-Старое содержимое\n"
+            "+Новое содержимое: timeout=10\n"
+        )
+        # Should not raise; must return a sane stats payload.
+        result = review_diff(session, diff)
+        assert "stats" in result
+        assert isinstance(result["warnings"], list)
 
     def test_review_file_content(self, multi_project_env):
         """Review file content directly (not a diff)."""

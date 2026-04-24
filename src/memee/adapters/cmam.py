@@ -330,6 +330,32 @@ def render_memory(memory: Memory, redact: bool = True) -> str:
     return "\n".join(lines) + body
 
 
+def _chunk_by_bytes(text: str, max_bytes: int) -> list[str]:
+    """Split ``text`` into chunks of at most ``max_bytes`` encoded length,
+    splitting at character boundaries (never mid-codepoint).
+
+    Naive byte-slicing + ``decode(errors="ignore")`` silently drops leading or
+    trailing bytes of multi-byte codepoints (Czech, CJK, emoji) that straddle
+    a boundary — producing silent content loss. Walking character-by-character
+    costs O(n) but preserves every character.
+    """
+    out: list[str] = []
+    cur: list[str] = []
+    cur_size = 0
+    for ch in text:
+        b = len(ch.encode("utf-8"))
+        if cur_size + b > max_bytes and cur:
+            out.append("".join(cur))
+            cur = [ch]
+            cur_size = b
+        else:
+            cur.append(ch)
+            cur_size += b
+    if cur:
+        out.append("".join(cur))
+    return out
+
+
 def _chunk_if_needed(content: str, path: str) -> list[tuple[str, str]]:
     """If content exceeds CMAM's 100 KB per-file limit, split into .part-N.md.
 
@@ -353,10 +379,11 @@ def _chunk_if_needed(content: str, path: str) -> list[tuple[str, str]]:
     if chunk_limit < 1024:
         chunk_limit = MAX_MEMORY_BYTES // 2
 
-    chunks: list[str] = []
-    body_bytes = body.encode("utf-8")
-    for i in range(0, len(body_bytes), chunk_limit):
-        chunks.append(body_bytes[i : i + chunk_limit].decode("utf-8", errors="ignore"))
+    # We reserve extra headroom for each chunk's footer so the final chunk
+    # content (header + body_chunk + footer) still fits within MAX_MEMORY_BYTES.
+    # Footer length depends on chunk index width, but ~40 bytes is a safe
+    # over-estimate for any reasonable chunk count.
+    chunks = _chunk_by_bytes(body, chunk_limit)
 
     out: list[tuple[str, str]] = []
     base = path[:-3] if path.endswith(".md") else path

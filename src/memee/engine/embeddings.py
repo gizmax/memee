@@ -7,24 +7,45 @@ Falls back gracefully if sentence-transformers is not installed.
 from __future__ import annotations
 
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
 _model = None
+_model_lock = threading.Lock()
+_model_load_failed = False
 
 
 def get_model():
-    """Lazy-load the embedding model (downloads ~80MB on first use)."""
-    global _model
-    if _model is None:
+    """Lazy-load the embedding model (downloads ~80MB on first use).
+
+    Thread-safe: two concurrent callers won't both kick off a download,
+    which previously caused races on the HuggingFace cache directory.
+    Double-checked locking keeps the fast-path lock-free after the first
+    successful load.
+    """
+    global _model, _model_load_failed
+    if _model is not None:
+        return _model
+    if _model_load_failed:
+        # Don't re-attempt forever on a broken environment.
+        return None
+    with _model_lock:
+        if _model is not None:  # Another thread loaded it while we waited.
+            return _model
+        if _model_load_failed:
+            return None
         try:
             from sentence_transformers import SentenceTransformer
 
             _model = SentenceTransformer("all-MiniLM-L6-v2")
             logger.info("Loaded embedding model: all-MiniLM-L6-v2")
         except Exception as e:
-            logger.warning(f"Failed to load embedding model: {e}. "
-                          f"Vector search disabled. Install: pip install memee[vectors]")
+            logger.warning(
+                f"Failed to load embedding model: {e}. "
+                f"Vector search disabled. Install: pip install memee[vectors]"
+            )
+            _model_load_failed = True
             return None
     return _model
 

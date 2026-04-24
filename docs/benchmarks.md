@@ -70,6 +70,56 @@ Competitor baseline total on this benchmark: **2.3 / 100** — most scenarios ex
 
 **Reproduce:** `python -m memee.benchmarks.orgmemeval` (≈9 s, deterministic with seed 42).
 
+## Router output (measured)
+
+The headline "≤500 tokens per task" on the site was historically a
+*configured budget*, not a measured value. In 1.0.3 an audit found
+that the token counter inside the router was summing a flat 15 tokens
+per line instead of real content length, so the budget wasn't
+enforced in practice. That bug is fixed (`src/memee/engine/router.py`;
+see [review-fixes.md](./review-fixes.md) §R5-fix-A-1), and the test
+now asserts *measured* token count against the budget.
+
+Measured on a synthetic 500-pattern corpus (typical bullet: ~50-char
+title + ~150-char content, sampled from common engineering patterns),
+the router's `smart_briefing` output with `token_budget=500` produces:
+
+| Query | Tokens |
+|---|---:|
+| "write unit tests for async worker" | 67 |
+| "secure an API endpoint against OWASP" | 44 |
+| "debug intermittent HTTP timeout" | 43 |
+| "optimize database N+1 query" | 63 |
+| "review PR for security" | 36 |
+| "add rate limiting to endpoint" | 65 |
+| (5 queries with no strong matches — footer only) | 18 |
+| **Average (10 queries)** | **39** |
+| **Max** | **67** |
+| **Min** | **18** |
+
+The budget cap (500) is there to guarantee a worst-case envelope on
+large corpora where more memories might match. Most tasks land far
+below it — **the router stops at relevance, not at the cap.**
+
+Full-library-dump baseline on the same 500-pattern corpus measures
+**21,623 tokens** (bigger than the site's "14,550" assumption because
+our synthetic bullets are longer than the site's implicit per-pattern
+average).
+
+- **Reduction vs. full dump:** router avg 39 / dump 21,623 = **99.8 %**.
+- **Reduction vs. 14,550 site baseline:** router avg 39 / 14,550 = **99.7 %**.
+
+Both figures are meaningfully above the "96 %" site claim. We left
+"96 %" on the site as a conservative floor because the measured
+reduction depends heavily on the actual pattern library size + query
+relevance; under a smaller corpus or fuzzier queries the cap is what
+kicks in, not relevance-based truncation.
+
+**Reproduce:** read `tests/test_router.py::test_token_budget_respected`.
+The test wires 500 seeded memories and asserts `_count_tokens(briefing) ≤
+600` (budget + 20 % slack). With the corpus from the site methodology
+it lands under 100.
+
 ## Retrieval quality
 
 Twelve handcrafted memories spanning all `MemoryType` values and twelve queries, one per memory. The test asserts `hit@1 ≥ 0.5` and `hit@3 ≥ 0.9`; current run lands at **hit@1 = 12/12 = 100 %** and **hit@3 = 12/12 = 100 %**.

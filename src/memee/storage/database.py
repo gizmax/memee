@@ -1,5 +1,6 @@
 """Database initialization, session management, FTS5 setup."""
 
+import logging
 from pathlib import Path
 
 from sqlalchemy import create_engine, event, text
@@ -7,6 +8,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from memee import config
 from memee.storage.models import Base
+
+logger = logging.getLogger("memee.storage")
 
 
 def get_engine(db_path: Path | None = None):
@@ -21,13 +24,36 @@ def get_engine(db_path: Path | None = None):
             f"{path.parent} exists but is a file — move or delete it and rerun."
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(f"sqlite:///{path}", echo=False)
+    # `check_same_thread=False` lets FastAPI worker threads share the engine's
+    # connection pool. SQLite still serialises writes internally, but without
+    # this flag the default sqlite3 binding raises on any cross-thread use.
+    # `timeout=30` gives writers 30s to acquire the lock before raising
+    # OperationalError — default 5s is too short under contention.
+    engine = create_engine(
+        f"sqlite:///{path}",
+        echo=False,
+        connect_args={"check_same_thread": False, "timeout": 30},
+        future=True,
+    )
 
     @event.listens_for(engine, "connect")
     def _set_sqlite_pragma(dbapi_conn, _):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
+        # Read back the mode; on network filesystems (NFS, SMB) WAL silently
+        # downgrades to rollback journal and concurrent writers will clobber.
+        mode_row = cursor.execute("PRAGMA journal_mode").fetchone()
+        mode = (mode_row[0] if mode_row else "").lower()
+        if mode != "wal":
+            logger.warning(
+                "SQLite journal mode is %s, not wal. "
+                "On a network filesystem, concurrent writes may fail.",
+                mode or "unknown",
+            )
         cursor.execute("PRAGMA foreign_keys=ON")
+        # Mirror the SA-level timeout at the SQLite level so busy_timeout
+        # applies even to raw PRAGMA/DDL calls that bypass the engine pool.
+        cursor.execute("PRAGMA busy_timeout=30000")
         cursor.close()
 
     return engine
@@ -58,10 +84,14 @@ def init_db(engine=None):
             END
         """))
 
-        # Auto-sync FTS on UPDATE
+        # Auto-sync FTS on UPDATE. Gate on the text-indexed columns only —
+        # confidence_score / last_applied_at / application_count changes are
+        # hot paths (router feedback bumps) and must NOT trigger a full
+        # delete+reinsert of the FTS row. Without the column filter, at 100K
+        # memories FTS rebuilds dominate write time.
         conn.execute(text("""
             CREATE TRIGGER IF NOT EXISTS memories_fts_au
-            AFTER UPDATE ON memories BEGIN
+            AFTER UPDATE OF title, content, summary, tags ON memories BEGIN
                 INSERT INTO memories_fts(
                     memories_fts, rowid, title, content, summary, tags
                 )

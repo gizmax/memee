@@ -168,6 +168,43 @@ def test_chunk_large_content_splits_into_parts():
     assert all("id: abc" in d for _, d in out)
 
 
+def test_chunk_preserves_multibyte_characters():
+    """Byte-boundary chunking silently drops characters that straddle the
+    split point (Czech, CJK, emoji). Character-boundary chunking must
+    preserve every codepoint and never exceed the byte budget.
+    """
+    header = "---\nid: multibyte\n---\n\n# big\n"
+    body = "žlutý kůň " * 50_000  # >500 KB, crosses 100 KB boundary via ž, ý, ů, ň
+    content = header + body
+    out = _chunk_if_needed(content, "/canon/patterns/multibyte.md")
+
+    assert len(out) >= 2
+    # Every chunk fits under the 100 KB file limit
+    for _, data in out:
+        assert len(data.encode("utf-8")) <= MAX_MEMORY_BYTES
+
+    # Strip headers + footers and reassemble body. The reassembly must yield
+    # the original body verbatim — no lost characters at chunk boundaries.
+    header_raw = "---\nid: multibyte\n---\n"
+    body_parts = []
+    for _, data in out:
+        assert data.startswith(header_raw)
+        rest = data[len(header_raw):]
+        # Trim the "\n\n<!-- memee: part N/M -->\n" footer
+        footer_idx = rest.rfind("\n\n<!-- memee: part ")
+        if footer_idx != -1:
+            rest = rest[:footer_idx]
+        body_parts.append(rest)
+
+    reassembled = "".join(body_parts)
+    # The reassembled body contains the original "# big\n" preamble + body
+    assert reassembled.count("ž") == body.count("ž")
+    assert reassembled.count("ň") == body.count("ň")
+    # Exact: the reassembled text equals the original content minus the header
+    original_after_header = content[len(header_raw):]
+    assert reassembled == original_after_header
+
+
 # ── Eligibility ──
 
 

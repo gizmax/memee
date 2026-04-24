@@ -12,6 +12,7 @@ The engine orchestrates the loop. Claude agents provide the modifications.
 
 from __future__ import annotations
 
+import math
 import subprocess
 import re
 from collections import defaultdict
@@ -70,7 +71,11 @@ def create_experiment(
     return experiment
 
 
-def run_verify(command: str, timeout: int = 300, cwd: str | None = None) -> float | None:
+class VerifyTimeout(Exception):
+    """Raised when the verify/guard subprocess hits the wall-clock timeout."""
+
+
+def run_verify(command: str, timeout: int = 600, cwd: str | None = None) -> float | None:
     """Run verify command and extract metric value from output.
 
     Looks for patterns like:
@@ -78,6 +83,9 @@ def run_verify(command: str, timeout: int = 300, cwd: str | None = None) -> floa
     - "coverage: 73%"
     - "accuracy = 0.912"
     - Last number on last non-empty line
+
+    Raises ``VerifyTimeout`` if the subprocess exceeds ``timeout`` seconds
+    (default 10 min, generous for real test runs). Other failures return None.
     """
     try:
         result = subprocess.run(
@@ -90,14 +98,19 @@ def run_verify(command: str, timeout: int = 300, cwd: str | None = None) -> floa
         )
         output = result.stdout + result.stderr
         return _extract_metric(output)
-    except subprocess.TimeoutExpired:
-        return None
+    except subprocess.TimeoutExpired as e:
+        raise VerifyTimeout(
+            f"verify command exceeded {timeout}s: {command!r}"
+        ) from e
     except Exception:
         return None
 
 
-def run_guard(command: str, timeout: int = 300, cwd: str | None = None) -> bool:
-    """Run guard command. Returns True if exit code is 0."""
+def run_guard(command: str, timeout: int = 600, cwd: str | None = None) -> bool:
+    """Run guard command. Returns True if exit code is 0.
+
+    Raises ``VerifyTimeout`` if the subprocess exceeds ``timeout`` seconds.
+    """
     if not command:
         return True
     try:
@@ -110,6 +123,10 @@ def run_guard(command: str, timeout: int = 300, cwd: str | None = None) -> bool:
             cwd=cwd,
         )
         return result.returncode == 0
+    except subprocess.TimeoutExpired as e:
+        raise VerifyTimeout(
+            f"guard command exceeded {timeout}s: {command!r}"
+        ) from e
     except Exception:
         return False
 
@@ -129,7 +146,24 @@ def run_iteration(
     iteration_num = experiment.total_iterations
 
     # Run guard first
-    guard_passed = run_guard(experiment.guard_command, cwd=cwd)
+    try:
+        guard_passed = run_guard(experiment.guard_command, cwd=cwd)
+    except VerifyTimeout as e:
+        iteration = ResearchIteration(
+            experiment_id=experiment.id,
+            iteration_number=iteration_num,
+            commit_hash=commit_hash,
+            metric_value=None,
+            delta=None,
+            guard_passed=False,
+            status="timeout",
+            description=description or f"Guard timed out: {e}",
+        )
+        session.add(iteration)
+        experiment.crashes += 1
+        session.commit()
+        return iteration
+
     if not guard_passed:
         iteration = ResearchIteration(
             experiment_id=experiment.id,
@@ -147,7 +181,24 @@ def run_iteration(
         return iteration
 
     # Run verify
-    metric_value = run_verify(experiment.verify_command, cwd=cwd)
+    try:
+        metric_value = run_verify(experiment.verify_command, cwd=cwd)
+    except VerifyTimeout as e:
+        iteration = ResearchIteration(
+            experiment_id=experiment.id,
+            iteration_number=iteration_num,
+            commit_hash=commit_hash,
+            metric_value=None,
+            delta=None,
+            guard_passed=True,
+            status="timeout",
+            description=description or f"Verify timed out: {e}",
+        )
+        session.add(iteration)
+        experiment.crashes += 1
+        session.commit()
+        return iteration
+
     if metric_value is None:
         iteration = ResearchIteration(
             experiment_id=experiment.id,
@@ -164,8 +215,30 @@ def run_iteration(
         session.commit()
         return iteration
 
-    # Compare
-    baseline = experiment.best_value or experiment.baseline_value or 0
+    # Reject non-finite metrics (inf/nan would poison best_value).
+    if not math.isfinite(metric_value):
+        iteration = ResearchIteration(
+            experiment_id=experiment.id,
+            iteration_number=iteration_num,
+            commit_hash=commit_hash,
+            metric_value=None,
+            delta=None,
+            guard_passed=True,
+            status="crash",
+            description=description or f"Non-finite metric ({metric_value}); iteration rejected",
+        )
+        session.add(iteration)
+        experiment.crashes += 1
+        session.commit()
+        return iteration
+
+    # Compare — note ``0.0`` is a valid best_value; don't short-circuit on falsy.
+    if experiment.best_value is not None:
+        baseline = experiment.best_value
+    elif experiment.baseline_value is not None:
+        baseline = experiment.baseline_value
+    else:
+        baseline = 0.0
     delta = metric_value - baseline
 
     is_improvement = (
@@ -210,7 +283,13 @@ def log_iteration(
         raise ValueError(f"Experiment not found: {experiment_id}")
 
     experiment.total_iterations += 1
-    baseline = experiment.best_value or experiment.baseline_value or 0
+    # ``0.0`` is a valid best_value — don't let Python-falsy ``or`` drop it.
+    if experiment.best_value is not None:
+        baseline = experiment.best_value
+    elif experiment.baseline_value is not None:
+        baseline = experiment.baseline_value
+    else:
+        baseline = 0.0
     delta = metric_value - baseline
 
     if status == "keep":
@@ -222,7 +301,7 @@ def log_iteration(
             experiment.best_value = metric_value
     elif status == "discard":
         experiment.discards += 1
-    elif status == "crash":
+    elif status == "crash" or status == "timeout":
         experiment.crashes += 1
 
     iteration = ResearchIteration(

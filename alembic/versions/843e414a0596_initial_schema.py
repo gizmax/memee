@@ -243,9 +243,11 @@ def upgrade() -> None:
                     COALESCE(new.tags, '[]'));
         END
     """)
+    # Gate the FTS update trigger on the text-indexed columns only so
+    # confidence / counter / timestamp bumps don't force an FTS rebuild.
     op.execute("""
         CREATE TRIGGER IF NOT EXISTS memories_fts_au
-        AFTER UPDATE ON memories BEGIN
+        AFTER UPDATE OF title, content, summary, tags ON memories BEGIN
             INSERT INTO memories_fts(
                 memories_fts, rowid, title, content, summary, tags
             )

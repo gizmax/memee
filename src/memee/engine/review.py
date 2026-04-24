@@ -23,6 +23,17 @@ from memee.storage.models import (
 )
 
 
+# Reject diffs above this size. Bigger inputs (generated SQL dumps, vendored
+# deps, blobs mistakenly included) cause the regex engine to scan MB of text
+# per memory — scanning 50 MB is a soft DoS on the host process. We fail early
+# with a clear error; callers should split or truncate.
+MAX_DIFF_BYTES = 5_000_000
+
+
+class DiffTooLargeError(ValueError):
+    """Raised when the input diff exceeds ``MAX_DIFF_BYTES``."""
+
+
 def review_diff(
     session: Session,
     diff_text: str,
@@ -35,11 +46,28 @@ def review_diff(
         warnings: anti-patterns found in the diff
         confirmations: good patterns detected
         suggestions: related patterns that might help
+
+    Raises:
+        DiffTooLargeError: diff exceeds ``MAX_DIFF_BYTES`` (5 MB).
     """
+    if diff_text and len(diff_text) > MAX_DIFF_BYTES:
+        raise DiffTooLargeError(
+            f"diff too large to review ({len(diff_text)} bytes > "
+            f"{MAX_DIFF_BYTES}); truncate or split"
+        )
+
     # Extract meaningful tokens from diff (added lines only)
     added_lines = _extract_added_lines(diff_text)
     if not added_lines:
-        return {"warnings": [], "confirmations": [], "suggestions": []}
+        return {
+            "warnings": [], "confirmations": [], "suggestions": [],
+            "stats": {
+                "lines_scanned": 0,
+                "keywords_extracted": 0,
+                "warnings_count": 0,
+                "confirmations_count": 0,
+            },
+        }
 
     # Build search context from diff content
     context_text = " ".join(added_lines[:50])  # Limit context size
@@ -85,9 +113,30 @@ def review_file_content(
 
 
 def _extract_added_lines(diff_text: str) -> list[str]:
-    """Extract only added lines from a unified diff."""
-    lines = []
+    """Extract only added lines from a unified diff.
+
+    Skips:
+      * binary-file hunks (``Binary files a/x and b/x differ``) — scanning
+        binary blobs with text regexes is noise at best, crashes at worst.
+      * rename-only headers (``rename from a/…`` / ``rename to b/…``) — no
+        content change, should not trigger keyword detectors.
+    """
+    lines: list[str] = []
+    skip_hunk = False
     for line in diff_text.split("\n"):
+        # diff --git header resets the "skip" flag for a new hunk.
+        if line.startswith("diff --git "):
+            skip_hunk = False
+            continue
+        # Binary file marker — skip until next diff header.
+        if "Binary files " in line and line.endswith("differ"):
+            skip_hunk = True
+            continue
+        # Rename-only headers are informational; don't scan them as content.
+        if line.startswith("rename from ") or line.startswith("rename to "):
+            continue
+        if skip_hunk:
+            continue
         if line.startswith("+") and not line.startswith("+++"):
             # Remove the leading + and strip
             content = line[1:].strip()
@@ -99,37 +148,64 @@ def _extract_added_lines(diff_text: str) -> list[str]:
 def _extract_keywords(lines: list[str]) -> list[str]:
     """Extract meaningful keywords from code lines.
 
-    Focuses on: function names, library calls, patterns.
+    Tightened vs the original:
+      * HTTP detector covers all common verbs (``patch``/``head``/``options``)
+        and also ``session.get(...)`` / ``client.post(...)``, not only the
+        bare ``requests.*`` form.
+      * Secret detector requires an assignment to a QUOTED string; plain
+        variable names like ``user_token_field`` no longer false-positive.
+      * Env-config uses ``os.environ[...]`` as a positive form. ``os.environ``
+        alone is fine API usage and should not flag.
+      * Each detected keyword is deduplicated via a set (the keyword loop
+        already did that; we keep one detector per logical concept).
     """
-    keywords = set()
+    keywords: set[str] = set()
 
     # Common patterns to detect
     detectors = [
-        (r"import\s+(\w+)", "import"),
-        (r"from\s+(\w+)", "import"),
-        (r"requests\.(get|post|put|delete)", "http"),
+        (r"\bimport\s+(\w+)", "import"),
+        (r"\bfrom\s+(\w+)", "import"),
+        # HTTP libs: requests, httpx, aiohttp, session/client objects.
+        (
+            r"\b(?:requests|httpx|aiohttp|session|client)\."
+            r"(?:get|post|put|delete|patch|head|options)\b",
+            "http",
+        ),
         (r"\.execute\(", "database"),
-        (r"SELECT\s+\*", "select-star"),
-        (r"eval\(", "eval"),
-        (r"eval\(", "security"),
-        (r"exec\(", "exec"),
-        (r"exec\(", "security"),
-        (r"timeout", "timeout"),
-        (r"\.env|os\.getenv|environ", "env-config"),
-        (r"password|secret|api_key|token", "secrets"),
-        (r"async\s+def|await\s+", "async"),
-        (r"threading|Thread\(|multiprocessing", "concurrency"),
-        (r"except\s*:", "bare-except"),
-        (r"except\s+Exception\s*:", "broad-except"),
-        (r"git\s+reset\s+--hard", "git-reset"),
-        (r"useEffect|useState|useCallback", "react-hooks"),
-        (r"componentDidMount|componentWillMount", "react-legacy"),
+        (r"\bSELECT\s+\*", "select-star"),
+        (r"\beval\s*\(", "eval"),
+        (r"\beval\s*\(", "security"),
+        (r"\bexec\s*\(", "exec"),
+        (r"\bexec\s*\(", "security"),
+        (r"\btimeout\b", "timeout"),
+        # os.environ["KEY"] / os.environ.get("KEY") / os.getenv("KEY")
+        (
+            r"\bos\.environ\s*\[[\"'][^\"']+[\"']\]"
+            r"|\bos\.environ\.get\s*\("
+            r"|\bos\.getenv\s*\(",
+            "env-config",
+        ),
+        # Assigning a literal-string secret, e.g. API_KEY = "abc123". Plain
+        # variable names such as `user_token_field` no longer match because
+        # we require `= "…"` on the same line.
+        (
+            r"\b(?:password|api[_-]?key|secret[_-]?key|auth[_-]?token)"
+            r"\s*=\s*[\"'][^\"']+[\"']",
+            "secrets",
+        ),
+        (r"\basync\s+def\b|\bawait\s+", "async"),
+        (r"\bthreading\b|\bThread\s*\(|\bmultiprocessing\b", "concurrency"),
+        (r"\bexcept\s*:", "bare-except"),
+        (r"\bexcept\s+Exception\s*:", "broad-except"),
+        (r"\bgit\s+reset\s+--hard\b", "git-reset"),
+        (r"\buseEffect\b|\buseState\b|\buseCallback\b", "react-hooks"),
+        (r"\bcomponentDidMount\b|\bcomponentWillMount\b", "react-legacy"),
         (r"style\s*=\s*\{\{", "inline-styles"),
-        (r"\.query\(.*\)\.all\(\)", "orm-query"),
-        (r"for\s+\w+\s+in\s+.*\.all\(\)", "n-plus-one"),
-        (r"retry|backoff|tenacity", "retry-logic"),
-        (r"logging\.|logger\.", "logging"),
-        (r"pytest|unittest|test_", "testing"),
+        (r"\.query\([^)]*\)\.all\(\)", "orm-query"),
+        (r"\bfor\s+\w+\s+in\s+.*\.all\(\)", "n-plus-one"),
+        (r"\bretry\b|\bbackoff\b|\btenacity\b", "retry-logic"),
+        (r"\blogging\.|\blogger\.", "logging"),
+        (r"\bpytest\b|\bunittest\b|\btest_\w+", "testing"),
     ]
 
     combined = "\n".join(lines)
@@ -137,7 +213,9 @@ def _extract_keywords(lines: list[str]) -> list[str]:
         if re.search(pattern, combined, re.IGNORECASE):
             keywords.add(keyword)
 
-    # Also extract plain words that might match memory tags
+    # Also extract plain words that might match memory tags. Unicode-safe:
+    # `\b[a-z]{4,15}\b` keeps us inside ASCII identifiers and never trips on
+    # Czech/Cyrillic filenames inside diff headers.
     words = re.findall(r"\b[a-z]{4,15}\b", combined.lower())
     important_words = {
         "timeout", "retry", "cache", "index", "query", "async",

@@ -32,8 +32,21 @@ from memee.storage.models import (
     Project,
 )
 
-# Approximate tokens per memory line
+# Approximate tokens per memory line (legacy sentinel — kept for backward-compat
+# in tests that imported the symbol; real accounting uses _count_tokens below).
 TOKENS_PER_LINE = 15
+
+
+def _count_tokens(text: str) -> int:
+    """Conservative token estimator: ~4 chars per token (Claude rule of thumb).
+
+    Counts every character in the joined text — headers, blank lines, prefixes,
+    severity badges, footer — nothing is free. Anchors the budget to reality
+    instead of a flat per-line guess that drifted 4-6x low.
+    """
+    if not text:
+        return 0
+    return len(text) // 4
 
 # Stack exclusion: filter out memories from completely unrelated stacks
 _UNRELATED_TAGS = {
@@ -64,8 +77,18 @@ def smart_briefing(
     Layer 0: Critical anti-patterns (always, ~100 tokens)
     Layer 1: Search results for task (hybrid BM25+vector, ~300 tokens)
     """
-    lines = []
-    tokens_used = 0
+    lines: list[str] = []
+
+    def current_tokens() -> int:
+        return _count_tokens("\n".join(lines))
+
+    def would_fit(candidate: str, budget: int) -> bool:
+        projected = _count_tokens("\n".join(lines + [candidate]))
+        return projected <= budget
+
+    # Reserve tail budget for footer (2 lines: stats + token counter).
+    # Footer lines are ~50 chars each → ~25 tokens total. Round up a bit.
+    FOOTER_RESERVE = 40
 
     # Find project context
     project = _find_project(session, project_path)
@@ -86,13 +109,22 @@ def smart_briefing(
     )
 
     if critical_aps:
-        lines.append("CRITICAL (always):")
-        for m, ap in critical_aps:
-            if tokens_used >= 100:
-                break
-            lines.append(f"  ⚠ {m.title}")
-            tokens_used += TOKENS_PER_LINE
-        lines.append("")
+        header = "CRITICAL (always):"
+        if would_fit(header, token_budget - FOOTER_RESERVE):
+            lines.append(header)
+            for m, _ap in critical_aps:
+                candidate = f"  ⚠ {m.title}"
+                # Layer-0 cap: keep critical block ≤ ~100 tokens of content,
+                # but still respect overall budget first.
+                if current_tokens() + _count_tokens("\n" + candidate) > min(
+                    token_budget - FOOTER_RESERVE,
+                    _count_tokens("\n".join(lines)) + 100,
+                ):
+                    break
+                if not would_fit(candidate, token_budget - FOOTER_RESERVE):
+                    break
+                lines.append(candidate)
+            lines.append("")
 
     # ── Layer 1: Search-routed briefing ──
     # Build search query from task + stack context
@@ -139,32 +171,46 @@ def smart_briefing(
 
         # Show patterns
         if patterns:
-            label = f"For \"{task[:40]}\":" if task else f"For {', '.join(sorted(stack_tags)[:3])}:" if stack_tags else "Relevant:"
-            lines.append(label)
-            for r in patterns:
-                if tokens_used >= token_budget - TOKENS_PER_LINE * 3:
-                    break
-                m = r["memory"]
-                conf = f"{m.confidence_score:.0%}"
-                lines.append(f"  ✓ {m.title} ({conf})")
-                tokens_used += TOKENS_PER_LINE
-            lines.append("")
+            label = (
+                f"For \"{task[:40]}\":"
+                if task
+                else f"For {', '.join(sorted(stack_tags)[:3])}:"
+                if stack_tags
+                else "Relevant:"
+            )
+            if would_fit(label, token_budget - FOOTER_RESERVE):
+                lines.append(label)
+                for r in patterns:
+                    m = r["memory"]
+                    conf = f"{m.confidence_score:.0%}"
+                    candidate = f"  ✓ {m.title} ({conf})"
+                    if not would_fit(candidate, token_budget - FOOTER_RESERVE):
+                        break
+                    lines.append(candidate)
+                lines.append("")
 
         # Show non-critical warnings
-        if warnings and tokens_used < token_budget - TOKENS_PER_LINE * 3:
-            lines.append("Warnings:")
-            for r in warnings:
-                if tokens_used >= token_budget - TOKENS_PER_LINE * 2:
-                    break
-                m = r["memory"]
-                sev = m.anti_pattern.severity.upper() if m.anti_pattern else "!"
-                lines.append(f"  [{sev}] {m.title}")
-                tokens_used += TOKENS_PER_LINE
-            lines.append("")
+        if warnings:
+            header = "Warnings:"
+            if would_fit(header, token_budget - FOOTER_RESERVE):
+                lines.append(header)
+                for r in warnings:
+                    m = r["memory"]
+                    sev = m.anti_pattern.severity.upper() if m.anti_pattern else "!"
+                    candidate = f"  [{sev}] {m.title}"
+                    if not would_fit(candidate, token_budget - FOOTER_RESERVE):
+                        break
+                    lines.append(candidate)
+                lines.append("")
 
     # ── Footer ──
     total = session.query(func.count(Memory.id)).scalar() or 0
     lines.append(f"[{total} memories — memee search <query> for more]")
+    # Report the actual rendered token count rather than a flat-per-line guess.
+    rendered = "\n".join(lines)
+    tokens_used = _count_tokens(rendered) + _count_tokens(
+        f"[~{token_budget} tokens / {token_budget} budget]"
+    )
     lines.append(f"[~{tokens_used} tokens / {token_budget} budget]")
 
     return "\n".join(lines)

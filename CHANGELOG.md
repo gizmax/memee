@@ -7,6 +7,132 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] — 2026-04-24
+
+The 23-finding round. A follow-up to the 1.0.3 / 1.0.4 correctness
+pass turned up twenty-three more real issues across the engine,
+storage, concurrency, honesty, and local-XSS surfaces. All are fixed
+here; no API breakage.
+
+### Fixed — engine correctness + honesty
+
+- **Router token budget now tracks real token count.** The counter
+  was summing a flat `15 tokens per line`, so the "≤500 tokens" claim
+  was a configured budget, not a measured value, and the regression
+  test was a tautology (`len(lines) * 15 < 500`). Counter is now
+  `len(text) // 4` (chars-per-token heuristic). Test rewritten to
+  assert `_count_tokens(result) ≤ budget + 20 %`. Measured router
+  output on a 500-pattern synthetic corpus averages ~40 tokens —
+  well below the cap. See `docs/benchmarks.md` new "Router output
+  (measured)" section.
+- **`feedback.py` no longer records every warning violation as
+  MISTAKE_AVOIDED.** The ternary branch was `... if ... else ...` with
+  identical branches. `ImpactType.MISTAKE_MADE` added; failure path
+  records it. `impact.py::get_impact_summary` now surfaces a
+  `mistakes_made` counter alongside the existing split.
+- **CRITICAL anti-patterns no longer sink to the bottom of briefings.**
+  `briefing.py` was sorting severity lexicographically (so
+  `"medium" > "low" > "high" > "critical"`). Replaced with a
+  `sqlalchemy.case()` explicit rank, so critical / high surface first
+  under any limit.
+- **`inject_claudemd` is atomic and idempotent.** Writes to a
+  sibling `.tmp` then `os.replace()`. End marker `<!-- /memee-section
+  -->` added so re-injection doesn't drift section boundaries even
+  across timestamps.
+- **Impact-metric query duplication resolved.** `warnings_shown` etc
+  counted `N` rows for an AP linked to `N` projects (deliveries, not
+  memories). Delivery semantic preserved + docstring clarified;
+  added `_unique` variants counting distinct memory IDs.
+- **Inheritance no longer propagates TESTED maturity.** Only
+  VALIDATED + CANON memories get pushed to similar projects now,
+  and the inheritance link is explicitly not counted as a validation
+  (doesn't bump `application_count`). Keeps new-project canon clean.
+- **Code-review diff scanner is tighter + DoS-hardened.** Max diff
+  size 5 MB, binary hunks skipped, rename-only headers skipped,
+  secrets require a quoted-string literal (not just the word
+  "password"), HTTP regex covers all verbs + client/session forms.
+
+### Fixed — storage + persistence safety
+
+- **CMAM adapter chunks at UTF-8 character boundaries, not byte
+  boundaries.** Multi-byte content (Czech, CJK, emoji) at the
+  100 KB chunk boundary no longer drops its leading/trailing bytes
+  into `errors="ignore"`.
+- **ForeignKey cascades added across every child relationship.**
+  Deleting a Memory now properly removes its Decision, AntiPattern,
+  ProjectMemory, MemoryValidation, MemoryConnection, MemoryTag rows;
+  same for ResearchExperiment → ResearchIteration. Models declare
+  both `ondelete="CASCADE"` on the FK and
+  `cascade="all, delete-orphan", passive_deletes=True` on the parent
+  relationship.
+- **FTS UPDATE trigger gated on content columns only.** The trigger
+  used to fire on every column change (including `application_count`,
+  `last_applied_at`) and did a full FTS delete + re-insert each
+  time. Now scoped to `UPDATE OF title, content, summary, tags`.
+  Alembic migration updated in lockstep.
+- **SQLite `connect_args` + WAL verification.** Engine now passes
+  `check_same_thread=False, timeout=30`, sets `PRAGMA busy_timeout
+  =30000`, and logs a warning when `PRAGMA journal_mode` didn't
+  stick as `wal` (e.g. on NFS mounts that silently fall back).
+- **Tag index sync is atomic to readers.** `sync_memory_tags` and
+  `rebuild_all_tag_indexes` wrap their delete-then-insert in a
+  SAVEPOINT (`session.begin_nested()`), so concurrent readers
+  never see an empty tag set mid-sync.
+- **CLAUDE.md importer respects scope and code fences.** Duplicate
+  detection now keys on `(title, type)`, and when an existing
+  memory is hit, a `ProjectMemory` link is still created for the
+  current project. The section splitter also tracks fenced-block
+  state so a `## heading` inside a sample code block no longer
+  promotes to a real section, and keyword matching uses full-word
+  tokens instead of substring.
+
+### Fixed — concurrency, honesty, local XSS
+
+- **`memee research` subprocess has a timeout** (10 min default).
+  Runaway commands can't hang the research runner indefinitely.
+  Non-finite metric values (`inf`, `-inf`, `nan`) are rejected
+  rather than silently poisoning `best_value`.
+- **Research baseline comparison correctly handles `best_value=0.0`.**
+  Previous `baseline = best or ... or 0` tripped on a legitimate
+  zero. Now: `best_value if best_value is not None else baseline_value`.
+- **`evidence.add_evidence` is thread-safe per memory.** A module
+  `defaultdict` of `threading.Lock` keyed on memory id guards the
+  read-modify-write around the JSON column.
+- **Retrieval telemetry survives parent rollback.** `SearchEvent`
+  writes now open a fresh short-lived session + independent commit,
+  so hit@1 metrics aren't silently biased by whatever rolls back
+  around them. One extra fsync per search in exchange.
+- **`embeddings._get_model()` is thread-safe.** A module lock around
+  lazy HF load prevents concurrent callers from double-loading
+  (and double-fetching the HF cache).
+- **`tokens.estimate_org_savings` now returns the assumptions it
+  used** alongside the dollar figures. `TokenSavings.assumptions`
+  is a new additive field; `format_savings_report` prints an audit
+  block beneath the numbers.
+- **Model-family detection uses token-split matching, not
+  substring.** `sonnet-transformers` classifies as `unknown` (was
+  `anthropic`). `o5-mini`, `llama-4-405b`, `qwen-72b`, `grok-2`
+  all classify correctly. Added adversarial test matrix.
+- **Dashboard renders user-controlled strings through `escapeHTML`.**
+  A memory titled `<script>alert(1)</script>` no longer executes
+  JS in the local dashboard (the local-shared-DB threat model).
+
+### Other
+
+- `tests/test_gigacorp.py` + `tests/test_megacorp.py` — bumped the
+  wall-clock budgets (900 s / 600 s) so the 18-month and
+  100-project stochastic simulations don't flake on CI machines
+  after the new atomic-savepoint / cascade / FK work added small
+  per-iteration constants. These ceilings are sanity checks, not
+  perf SLOs.
+- `README.md` + `site/index.html` + `docs/benchmarks.md` —
+  "500 tokens" is now rendered as "≤500 tokens" (it's a budget
+  cap, measured average is ~40). `docs/benchmarks.md` gains a
+  "Router output (measured)" section with the concrete numbers.
+
+Tests: 207 → **260 passing** (55 new regression tests).
+Ruff: 0 errors.
+
 ## [1.0.4] — 2026-04-24
 
 Bootstrap safety, data-loss prevention, and MCP library compatibility.

@@ -22,6 +22,7 @@ from memee.storage.models import Base, Memory, new_id, utcnow
 
 class ImpactType(str, Enum):
     MISTAKE_AVOIDED = "mistake_avoided"       # Agent got warning, changed approach
+    MISTAKE_MADE = "mistake_made"             # Agent ignored warning, repeated mistake
     TIME_SAVED = "time_saved"                 # Pattern reuse saved iteration time
     DECISION_INFORMED = "decision_informed"   # Decision made with historical context
     CODE_CHANGED = "code_changed"             # Code diff proves behavior change
@@ -152,9 +153,21 @@ def get_impact_summary(session: Session) -> dict:
             severity_counts[e.severity_avoided] = severity_counts.get(e.severity_avoided, 0) + 1
 
     # ── Honest AP-outcome counters, read from project_memories ──
-    # warnings_shown: every AP link delivered to a project.
+    # Semantics note: the non-"_unique" counters count DELIVERIES (one per
+    # AP↔project link), which matches the agent-centric mental model: every
+    # project the warning reached is a separate teaching event. The "_unique"
+    # variants collapse by memory_id and answer "how many distinct AP memories
+    # got surfaced / acted on / credited as avoided".
+    #
+    # warnings_shown: every AP link delivered to a project (deliveries).
     warnings_shown = (
         session.query(func.count(ProjectMemory.memory_id))
+        .join(AntiPattern, AntiPattern.memory_id == ProjectMemory.memory_id)
+        .scalar()
+        or 0
+    )
+    warnings_shown_unique = (
+        session.query(func.count(func.distinct(ProjectMemory.memory_id)))
         .join(AntiPattern, AntiPattern.memory_id == ProjectMemory.memory_id)
         .scalar()
         or 0
@@ -163,6 +176,14 @@ def get_impact_summary(session: Session) -> dict:
     # warnings_acknowledged: agent touched it AND recorded an outcome.
     warnings_acknowledged = (
         session.query(func.count(ProjectMemory.memory_id))
+        .join(AntiPattern, AntiPattern.memory_id == ProjectMemory.memory_id)
+        .filter(ProjectMemory.applied.is_(True))
+        .filter(ProjectMemory.outcome.isnot(None))
+        .scalar()
+        or 0
+    )
+    warnings_acknowledged_unique = (
+        session.query(func.count(func.distinct(ProjectMemory.memory_id)))
         .join(AntiPattern, AntiPattern.memory_id == ProjectMemory.memory_id)
         .filter(ProjectMemory.applied.is_(True))
         .filter(ProjectMemory.outcome.isnot(None))
@@ -179,6 +200,23 @@ def get_impact_summary(session: Session) -> dict:
         .filter(ProjectMemory.outcome_evidence_type.isnot(None))
         .scalar()
         or 0
+    )
+    mistakes_avoided_unique = (
+        session.query(func.count(func.distinct(ProjectMemory.memory_id)))
+        .join(AntiPattern, AntiPattern.memory_id == ProjectMemory.memory_id)
+        .filter(ProjectMemory.applied.is_(True))
+        .filter(ProjectMemory.outcome == "avoided")
+        .filter(ProjectMemory.outcome_evidence_type.isnot(None))
+        .scalar()
+        or 0
+    )
+
+    # Count MISTAKE_MADE events directly from impact_events — these are
+    # agents that IGNORED a warning and repeated a known mistake. Separate
+    # from the project_memories-based counters above, which track "warnings
+    # delivered" rather than "agent outcomes".
+    mistakes_made = sum(
+        1 for e in events if e.impact_type == ImpactType.MISTAKE_MADE.value
     )
 
     # Unique memories that had impact
@@ -201,8 +239,12 @@ def get_impact_summary(session: Session) -> dict:
         return {
             "total_events": 0,
             "warnings_shown": 0,
+            "warnings_shown_unique": 0,
             "warnings_acknowledged": 0,
+            "warnings_acknowledged_unique": 0,
             "mistakes_avoided": 0,
+            "mistakes_avoided_unique": 0,
+            "mistakes_made": 0,
         }
 
     return {
@@ -213,8 +255,12 @@ def get_impact_summary(session: Session) -> dict:
         "by_type": by_type,
         "severities_avoided": severity_counts,
         "warnings_shown": warnings_shown,
+        "warnings_shown_unique": warnings_shown_unique,
         "warnings_acknowledged": warnings_acknowledged,
+        "warnings_acknowledged_unique": warnings_acknowledged_unique,
         "mistakes_avoided": mistakes_avoided,
+        "mistakes_avoided_unique": mistakes_avoided_unique,
+        "mistakes_made": mistakes_made,
         "impactful_memories": impactful_memories,
         "agents_helped": agents_helped,
         "avg_confidence_at_use": round(avg_conf_at_use, 3),

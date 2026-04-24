@@ -286,6 +286,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         lesson: '#6bcb77', observation: '#888888',
     };
 
+    // XSS guard — every user-controlled string (memory title/tags,
+    // anti-pattern trigger/alternative, agent name, project name) goes
+    // through escapeHTML before being interpolated into innerHTML. Server-
+    // controlled enums (maturity, severity, memory type) are whitelisted
+    // in COLORS/class names so they do not need escaping.
+    function escapeHTML(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+            ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])
+        );
+    }
+
     async function fetchJSON(path) {
         const res = await fetch(API + path);
         return res.json();
@@ -399,7 +410,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const pct = (a.avg_confidence * 100).toFixed(0);
             const color = a.avg_confidence > 0.7 ? COLORS.canon : a.avg_confidence > 0.5 ? COLORS.validated : COLORS.hypothesis;
             return `<div class="agent-row">
-                <span class="agent-name">${a.name}</span>
+                <span class="agent-name">${escapeHTML(a.name)}</span>
                 <div class="agent-bar"><div class="agent-fill" style="width:${a.memories/maxMem*100}%;background:${color}"></div></div>
                 <span class="agent-score" style="color:${color}">${pct}%</span>
                 <span style="font-size:11px;color:#555;width:60px;text-align:right">${a.memories} mem</span>
@@ -415,14 +426,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         el.innerHTML = aps.map(a => `
             <div class="memory-item">
                 <div class="memory-title">
-                    <span class="badge badge-${a.severity}">${a.severity}</span>
-                    ${a.title}
+                    <span class="badge badge-${escapeHTML(a.severity)}">${escapeHTML(a.severity)}</span>
+                    ${escapeHTML(a.title)}
                 </div>
                 <div class="memory-meta">
-                    Trigger: ${a.trigger}<br>
-                    Alternative: ${a.alternative || '—'}
+                    Trigger: ${escapeHTML(a.trigger)}<br>
+                    Alternative: ${a.alternative ? escapeHTML(a.alternative) : '—'}
                 </div>
-                <div class="memory-meta">${(a.tags||[]).map(t => '<span class="tag">'+t+'</span>').join(' ')}</div>
+                <div class="memory-meta">${(a.tags||[]).map(t => '<span class="tag">'+escapeHTML(t)+'</span>').join(' ')}</div>
             </div>
         `).join('');
     }
@@ -435,14 +446,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         el.innerHTML = mems.map(m => `
             <div class="memory-item">
                 <div class="memory-title">
-                    <span class="badge badge-${m.maturity}">${m.maturity}</span>
-                    ${m.title}
+                    <span class="badge badge-${escapeHTML(m.maturity)}">${escapeHTML(m.maturity)}</span>
+                    ${escapeHTML(m.title)}
                 </div>
                 <div class="memory-meta">
-                    ${m.type} · conf: ${(m.confidence*100).toFixed(0)}% · ${m.validations} validations · ${m.projects} projects
-                    ${m.agent ? ' · by ' + m.agent : ''}
+                    ${escapeHTML(m.type)} · conf: ${(m.confidence*100).toFixed(0)}% · ${m.validations} validations · ${m.projects} projects
+                    ${m.agent ? ' · by ' + escapeHTML(m.agent) : ''}
                 </div>
-                <div class="memory-meta">${(m.tags||[]).map(t => '<span class="tag">'+t+'</span>').join(' ')}</div>
+                <div class="memory-meta">${(m.tags||[]).map(t => '<span class="tag">'+escapeHTML(t)+'</span>').join(' ')}</div>
             </div>
         `).join('');
     }
@@ -457,8 +468,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             projs.map(p => {
                 const pct = maxMem > 0 ? (p.memories / maxMem * 100) : 0;
                 return `<div style="background:#1a1a2e;border-radius:8px;padding:12px">
-                    <div style="font-weight:600;color:#ddd">${p.name}</div>
-                    <div style="font-size:11px;color:#666;margin:4px 0">${(p.stack||[]).join(' · ')}</div>
+                    <div style="font-weight:600;color:#ddd">${escapeHTML(p.name)}</div>
+                    <div style="font-size:11px;color:#666;margin:4px 0">${(p.stack||[]).map(s => escapeHTML(s)).join(' · ')}</div>
                     <div style="height:6px;background:#0a0a0f;border-radius:3px;margin-top:6px">
                         <div style="height:100%;width:${pct}%;background:${COLORS.validated};border-radius:3px"></div>
                     </div>

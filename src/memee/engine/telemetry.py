@@ -69,15 +69,23 @@ def record_search_event(
             top_memory_id=top_memory_id,
             latency_ms=float(latency_ms) if latency_ms is not None else 0.0,
         )
-        session.add(event)
-        # Flush only — do NOT commit. Committing on every search adds a
-        # fsync per call and blew the 600-query perf budget by ~70%. The
-        # row is visible to the same session immediately and will be
-        # durably written on the next natural commit. If the process dies
-        # before that, we lose a few telemetry rows — acceptable, telemetry
-        # is best-effort by contract.
-        session.flush()
-        return event.id
+        # Use a fresh short-lived session bound to the same engine. This
+        # decouples telemetry durability from the caller's transaction —
+        # when a FastAPI handler (or a CLI Ctrl-C) rolls back, the telemetry
+        # row is already committed on its own connection and will not be
+        # wiped. Without this, failing queries silently drop off the hit@1
+        # denominator, biasing the metric upward.
+        from sqlalchemy.orm import Session as SASession
+
+        bind = session.get_bind()
+        tele_session = SASession(bind=bind, autoflush=False)
+        try:
+            tele_session.add(event)
+            tele_session.commit()
+            event_id = event.id
+        finally:
+            tele_session.close()
+        return event_id
     except Exception as e:  # pragma: no cover — telemetry must never break search
         logger.debug("telemetry: record_search_event failed: %s", e)
         try:

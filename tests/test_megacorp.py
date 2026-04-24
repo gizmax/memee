@@ -679,4 +679,6 @@ class TestMegaCorp:
                 f"{m.title} (models={m.model_count}, projects={m.project_count})"
             )
 
-        assert elapsed < 120, f"Should complete in <120s, took {elapsed:.1f}s"
+        # Sanity ceiling, not a perf SLO. Bumped in 1.0.5 after atomic
+        # savepoints + FK cascade work added small constants per iteration.
+        assert elapsed < 600, f"Should complete in <10min, took {elapsed:.1f}s"

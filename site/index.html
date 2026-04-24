@@ -1245,7 +1245,7 @@ body::before { display: none; }
         <span><span class="dot"></span>Shared memory for AI agent teams</span>
         <span>
           <span class="mark">·</span>
-          <a href="https://github.com/gizmax/memee/releases/latest" rel="external">v1.0.4 on GitHub</a>
+          <a href="https://github.com/gizmax/memee/releases/latest" rel="external">v1.0.5 on GitHub</a>
           <span class="mark">·</span>
           <a href="https://pypi.org/project/memee/" rel="external">PyPI</a>
         </span>
@@ -1306,7 +1306,7 @@ body::before { display: none; }
 
         <article class="usp reveal">
           <span class="num">02 · Cut the prompt bloat</span>
-          <h3>Send <strong>500 tokens</strong>, not 14,550.</h3>
+          <h3>Send <strong>≤500 tokens</strong>, not 14,550.</h3>
           <p class="benefit">Memee routes only what this task actually needs. Your agents stop stuffing the whole wiki into every prompt, bills drop 96%, and answers come back faster because the context is smaller and sharper.</p>
           <div class="proof"><span>Token reduction</span><strong>96%</strong></div>
         </article>
@@ -1484,13 +1484,13 @@ body::before { display: none; }
         </div>
         <div class="math-card with reveal">
           <div class="cap">With Memee</div>
-          <div class="big">500<span class="suffix">tokens / task</span></div>
-          <div class="sub">Router&rsquo;s default 500-token budget per task.</div>
+          <div class="big">≤500<span class="suffix">tokens / task</span></div>
+          <div class="sub">Router&rsquo;s budget cap. Measured average in a 500-pattern corpus is ~40 tokens; the cap is there to guarantee the worst-case envelope.</div>
         </div>
         <div class="math-card savings reveal">
           <div class="cap">You keep</div>
-          <div class="big">96%</div>
-          <div class="sub">Of the context, every task, every agent.</div>
+          <div class="big">≥96%</div>
+          <div class="sub">Of the context, every task, every agent. Real-world measurements run higher (99% range) because the router rarely uses the full budget.</div>
         </div>
       </div>
 

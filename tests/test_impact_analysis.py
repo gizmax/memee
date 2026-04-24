@@ -746,3 +746,95 @@ class TestImpactAnalysis:
 
         assert final_iq > baseline["iq"], "Improvements should increase Org IQ"
         assert total_improvement > 50, "Combined improvements should give >50% boost"
+
+
+def test_feedback_splits_mistake_made_vs_avoided(session, org, tmp_path):
+    """Post-task review must branch MISTAKE_MADE (failure) vs MISTAKE_AVOIDED (success).
+
+    Regression for a no-op ternary in feedback.py that classified every
+    violation as MISTAKE_AVOIDED, turning the honesty of the impact counters
+    inside out.
+    """
+    from memee.engine.feedback import post_task_review
+    from memee.engine.impact import (
+        ImpactEvent,
+        ImpactType,
+        get_impact_summary,
+    )
+
+    # Seed: one anti-pattern (eval), one good pattern (timeout).
+    project_dir = tmp_path / "feedback-project"
+    project_dir.mkdir()
+    proj = Project(
+        organization_id=org.id, name="FeedbackProj",
+        path=str(project_dir),
+        stack=["Python"], tags=["python"],
+    )
+    session.add(proj)
+
+    ap_memory = Memory(
+        type=MemoryType.ANTI_PATTERN.value,
+        title="Never use eval() on user input",
+        content="eval on untrusted input is remote code execution.",
+        tags=["python", "security", "eval"],
+        confidence_score=0.85,
+    )
+    session.add(ap_memory)
+    session.flush()
+    ap = AntiPattern(
+        memory_id=ap_memory.id, severity="critical",
+        trigger="eval()", consequence="RCE", alternative="ast.literal_eval",
+    )
+    session.add(ap)
+
+    ok_memory = Memory(
+        type=MemoryType.PATTERN.value,
+        title="Always use timeout on HTTP requests",
+        content="Prevents hung sockets.",
+        tags=["python", "http", "timeout"],
+        confidence_score=0.9,
+        maturity=MaturityLevel.VALIDATED.value,
+    )
+    session.add(ok_memory)
+    session.commit()
+
+    # Run #1: violation + failure → MISTAKE_MADE.
+    bad_diff = "+    result = eval(user_input)\n"
+    post_task_review(
+        session, bad_diff,
+        project_path=str(project_dir),
+        agent="agent-A", model="claude",
+        outcome="failure",
+    )
+
+    # Run #2: good usage + success → should NOT emit MISTAKE_MADE.
+    good_diff = "+    r = requests.get(url, timeout=10)\n+    import logging\n"
+    post_task_review(
+        session, good_diff,
+        project_path=str(project_dir),
+        agent="agent-A", model="claude",
+        outcome="success",
+    )
+
+    # Verify the raw events split correctly.
+    made = (
+        session.query(ImpactEvent)
+        .filter(ImpactEvent.impact_type == ImpactType.MISTAKE_MADE.value)
+        .count()
+    )
+    avoided = (
+        session.query(ImpactEvent)
+        .filter(ImpactEvent.impact_type == ImpactType.MISTAKE_AVOIDED.value)
+        .count()
+    )
+    assert made >= 1, "Failure + violation must record MISTAKE_MADE"
+    # The aggregate summary exposes the new counter.
+    summary = get_impact_summary(session)
+    assert summary.get("mistakes_made", 0) >= 1, (
+        "get_impact_summary must surface mistakes_made separately"
+    )
+    # Sanity: the two counters don't collide — MISTAKE_MADE rows should not be
+    # counted as avoided.
+    assert made != avoided or (made > 0 and avoided == 0), (
+        f"mistake_made={made} mistake_avoided={avoided} — split is wrong"
+    )

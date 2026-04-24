@@ -17,7 +17,8 @@ At scale: 50 agents × 10 lookups/day × 250 days = 125K lookups/year.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 # Token cost estimates (per knowledge retrieval event)
 # Based on typical Claude/GPT conversation patterns
@@ -98,6 +99,12 @@ class TokenSavings:
     reduction_pct: float    # % token reduction
     cost_per_lookup_without: float
     cost_per_lookup_with: float
+
+    # Methodology — all inputs to ``estimate_org_savings``, including the
+    # model pricing table used. Callers must be able to see whether a
+    # "$3,911 saved" figure came from 100 tasks/day or 400 tasks/day.
+    # Added as a field with default so existing callers don't break.
+    assumptions: dict[str, Any] = field(default_factory=dict)
 
 
 def estimate_per_event_savings(
@@ -181,6 +188,18 @@ def estimate_org_savings(
     cost_per_without = avg_discovery * (pricing["input"] * 0.6 + pricing["output"] * 0.4) / 1_000_000
     cost_per_with = LOOKUP_TOKENS["total"] * (pricing["input"] * 0.6 + pricing["output"] * 0.4) / 1_000_000
 
+    assumptions = {
+        "agents": agents,
+        "lookups_per_agent_per_day": lookups_per_agent_per_day,
+        "working_days_per_year": working_days_per_year,
+        "avg_iterations_saved_per_incident": avg_iterations_saved_per_incident,
+        "incidents_per_year": incidents_per_year,
+        "model": model,
+        "pricing_used": dict(pricing),
+        "avg_discovery_tokens": avg_discovery,
+        "lookup_tokens_total": LOOKUP_TOKENS["total"],
+    }
+
     return TokenSavings(
         tokens_without=avg_discovery,
         tokens_with=LOOKUP_TOKENS["total"],
@@ -195,6 +214,7 @@ def estimate_org_savings(
         reduction_pct=round((1 - total_with / total_without) * 100, 1),
         cost_per_lookup_without=round(cost_per_without, 6),
         cost_per_lookup_with=round(cost_per_with, 6),
+        assumptions=assumptions,
     )
 
 
@@ -233,5 +253,27 @@ def format_savings_report(savings: TokenSavings, agents: int = 10, model: str = 
                      f"${scaled.total_cost_saved_usd:8,.2f}/yr saved")
 
     lines.append("")
+
+    # Methodology: every input the caller can audit. Printed AFTER the
+    # numbers so people can't skim the dollar figure without seeing the
+    # assumption that produced it.
+    a = savings.assumptions or {}
+    if a:
+        lines.append("  ASSUMPTIONS (for audit):")
+        lines.append(f"    Agents:                          {a.get('agents', '-')}")
+        lines.append(f"    Lookups / agent / day:           {a.get('lookups_per_agent_per_day', '-')}")
+        lines.append(f"    Working days / year:             {a.get('working_days_per_year', '-')}")
+        lines.append(f"    Incidents / year:                {a.get('incidents_per_year', '-')}")
+        lines.append(f"    Iterations saved / incident:     {a.get('avg_iterations_saved_per_incident', '-')}")
+        lines.append(f"    Avg discovery tokens (without):  {a.get('avg_discovery_tokens', '-'):,}")
+        lines.append(f"    Lookup tokens (with Memee):      {a.get('lookup_tokens_total', '-'):,}")
+        pricing = a.get("pricing_used", {})
+        if pricing:
+            lines.append(
+                f"    Pricing ({a.get('model', 'default')}): "
+                f"${pricing.get('input', 0):.2f} in / ${pricing.get('output', 0):.2f} out per 1M"
+            )
+        lines.append("")
+
     lines.append("═" * 70)
     return "\n".join(lines)

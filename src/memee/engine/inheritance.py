@@ -59,10 +59,22 @@ def inherit_memories(
     session: Session,
     target_project: Project,
     min_similarity: float = 0.2,
-    min_memory_confidence: float = 0.6,
+    min_memory_confidence: float = 0.7,
     max_inherit: int = 200,
 ) -> dict:
     """Inherit validated patterns from similar projects.
+
+    Inheritance ≠ validation:
+      We create project-to-memory links so onboarding agents SEE the knowledge,
+      but we do NOT bump confidence or applications_count. A memory that was
+      applied once in Project A does not become 2x validated because Project B
+      is similar; linking is only a delivery event.
+
+      Previously this function pulled in TESTED memories (maturity after a
+      single application), which dragged hypothesis-adjacent, 0.5-0.65
+      confidence content into fresh projects and polluted onboarding. We now
+      restrict to VALIDATED + CANON and raise the default confidence floor to
+      0.7 — inheritance should carry forward knowledge the org already trusts.
 
     Returns stats: {similar_projects, memories_inherited, by_type, avg_confidence}
     """
@@ -90,7 +102,9 @@ def inherit_memories(
             "similarity": round(similarity, 3),
         })
 
-        # Get high-confidence memories from source project
+        # Get validated/canon memories from source project only. TESTED is
+        # explicitly excluded: "one application" is not strong enough evidence
+        # to deliver a memory to a cross-project onboarding channel.
         source_links = (
             session.query(ProjectMemory)
             .join(Memory, Memory.id == ProjectMemory.memory_id)
@@ -98,7 +112,6 @@ def inherit_memories(
                 ProjectMemory.project_id == source_project.id,
                 Memory.confidence_score >= min_memory_confidence,
                 Memory.maturity.in_([
-                    MaturityLevel.TESTED.value,
                     MaturityLevel.VALIDATED.value,
                     MaturityLevel.CANON.value,
                 ]),

@@ -98,9 +98,19 @@ def post_task_review(
             if not mem:
                 continue
 
+            # A violation means the agent wrote code that matches a known
+            # anti-pattern. If the task succeeded anyway we still credit
+            # MISTAKE_AVOIDED (the warning surfaced in review was visible and
+            # the agent's work passed). If the task failed — the warning was
+            # ignored AND there's a real negative outcome — it's a MISTAKE_MADE.
+            impact_kind = (
+                ImpactType.MISTAKE_AVOIDED.value
+                if outcome == "success"
+                else ImpactType.MISTAKE_MADE.value
+            )
             record_impact(
                 session, mem.id,
-                ImpactType.MISTAKE_AVOIDED.value if outcome == "success" else ImpactType.MISTAKE_AVOIDED.value,
+                impact_kind,
                 agent=agent, model=model, project_id=project_id,
                 trigger="Post-task review detected anti-pattern violation",
                 memory_shown=mem.title,

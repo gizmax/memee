@@ -15,11 +15,27 @@ The chain grows over time. More evidence = more trust.
 
 from __future__ import annotations
 
+import threading
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from memee.storage.models import Memory
+
+# Per-memory mutexes so two concurrent ``add_evidence`` calls on the SAME
+# memory serialise at the Python level. Without this, each thread would
+# read the same snapshot of ``evidence_chain`` and the last commit wins,
+# silently dropping evidence entries. Keyed by memory_id so calls to
+# different memories still run in parallel. The dict-level lock is only
+# held long enough to fetch-or-create the per-memory Lock.
+_evidence_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+_evidence_locks_guard = threading.Lock()
+
+
+def _lock_for(memory_id: str) -> threading.Lock:
+    with _evidence_locks_guard:
+        return _evidence_locks[memory_id]
 
 
 def add_evidence(
@@ -53,11 +69,25 @@ def add_evidence(
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    chain = list(memory.evidence_chain or [])
-    chain.append(entry)
-    memory.evidence_chain = chain
-
-    session.commit()
+    # Concurrency: two threads both reading the SAME snapshot of
+    # ``evidence_chain``, both appending, and the second commit
+    # overwriting the first entry. Serialise per-memory at the Python
+    # level and re-read the column from the DB under the lock so the
+    # append always extends the committed chain.
+    with _lock_for(memory_id):
+        # Expire so the next attribute access reads fresh JSON from the DB,
+        # not the cached copy this session loaded earlier.
+        try:
+            session.expire(memory, ["evidence_chain"])
+        except Exception:
+            # Detached / no longer in session — fall back to re-fetch.
+            memory = session.get(Memory, memory_id)
+            if not memory:
+                return {"error": f"Memory not found: {memory_id}"}
+        chain = list(memory.evidence_chain or [])
+        chain.append(entry)
+        memory.evidence_chain = chain
+        session.commit()
     return entry
 
 

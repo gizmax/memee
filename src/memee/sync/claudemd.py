@@ -45,28 +45,26 @@ def sync_claudemd(project_path: str) -> dict:
     sections = _split_sections(content)
 
     for heading, body in sections:
-        heading_lower = heading.lower()
-
         # Anti-patterns: "slepé cesty", "blind", "don't", "avoid", "gotcha"
-        if any(
-            kw in heading_lower
-            for kw in ["slepé cesty", "blind", "don't", "avoid", "gotcha", "pitfall"]
+        if _heading_matches(
+            heading,
+            ["slepé cesty", "blind", "don't", "avoid", "gotcha", "pitfall"],
         ):
             count = _extract_anti_patterns(session, proj, heading, body)
             stats["anti_patterns"] += count
 
         # Decisions: "stack", "technolog", "rozhodnut", "decision", "chose"
-        elif any(
-            kw in heading_lower
-            for kw in ["stack", "technolog", "rozhodnut", "decision", "chose"]
+        elif _heading_matches(
+            heading,
+            ["stack", "technolog", "rozhodnut", "decision", "chose"],
         ):
             count = _extract_decisions(session, proj, heading, body)
             stats["decisions"] += count
 
         # Lessons: "lesson", "learned", "note", "tip", "naučen", "poznamk"
-        elif any(
-            kw in heading_lower
-            for kw in ["lesson", "learned", "note", "tip", "naučen", "poznamk", "lekce"]
+        elif _heading_matches(
+            heading,
+            ["lesson", "learned", "note", "tip", "naučen", "poznamk", "lekce"],
         ):
             count = _extract_lessons(session, proj, heading, body)
             stats["lessons"] += count
@@ -75,14 +73,26 @@ def sync_claudemd(project_path: str) -> dict:
     return stats
 
 
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+
+
 def _split_sections(content: str) -> list[tuple[str, str]]:
-    """Split markdown content into (heading, body) tuples."""
+    """Split markdown content into (heading, body) tuples.
+
+    Respects fenced code blocks — ``## heading`` lines inside a ```` ``` ````
+    block are body text, not section boundaries.
+    """
     sections = []
     current_heading = "Root"
-    current_body = []
+    current_body: list[str] = []
+    in_fence = False
 
     for line in content.split("\n"):
-        if line.startswith("#"):
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            current_body.append(line)
+            continue
+        if not in_fence and line.startswith("#"):
             if current_body:
                 sections.append((current_heading, "\n".join(current_body)))
             current_heading = line.lstrip("#").strip()
@@ -94,6 +104,51 @@ def _split_sections(content: str) -> list[tuple[str, str]]:
         sections.append((current_heading, "\n".join(current_body)))
 
     return sections
+
+
+def _heading_tokens(heading: str) -> set[str]:
+    """Lowercase word tokens of ``heading``. Used for full-word keyword matches
+    so ``Things the parser doesn't do`` doesn't misclassify as an anti-pattern
+    via substring "don't" matching inside "doesn't".
+    """
+    return {t.lower() for t in re.findall(r"[\w']+", heading)}
+
+
+# Keywords that must match a full word token (contractions + short stems that
+# cause false positives on substring match).
+_STRICT_WORD_KEYWORDS = {"don't", "avoid", "blind", "chose"}
+
+
+def _heading_matches(heading: str, keywords: list[str]) -> bool:
+    """True if any keyword appears in the heading. Contractions and short
+    stems (see ``_STRICT_WORD_KEYWORDS``) must match as a full word token so
+    e.g. "doesn't" or "blinded" don't trigger misclassification. Everything
+    else uses the historical substring check.
+    """
+    tokens = _heading_tokens(heading)
+    hlow = heading.lower()
+    for kw in keywords:
+        kw_lower = kw.lower()
+        if kw_lower in _STRICT_WORD_KEYWORDS:
+            if kw_lower in tokens:
+                return True
+        else:
+            if kw_lower in hlow:
+                return True
+    return False
+
+
+def _link_project_memory(session, proj: Project | None, memory_id: str) -> None:
+    """Ensure a ProjectMemory link exists for (proj, memory). Idempotent."""
+    if not proj:
+        return
+    existing_link = (
+        session.query(ProjectMemory)
+        .filter_by(project_id=proj.id, memory_id=memory_id)
+        .first()
+    )
+    if existing_link is None:
+        session.add(ProjectMemory(project_id=proj.id, memory_id=memory_id))
 
 
 def _extract_anti_patterns(
@@ -109,14 +164,24 @@ def _extract_anti_patterns(
         if len(item.strip()) < 5:
             continue
 
-        # Check for duplicates
-        existing = session.query(Memory).filter_by(title=item.strip()[:500]).first()
+        title = item.strip()[:500]
+
+        # Dedup by (title, type): a "pattern" and a "lesson" with the same
+        # title must not collide. If the memory already exists, DO NOT
+        # re-create it — but DO link it to the current project so the
+        # knowledge is visible there too.
+        existing = (
+            session.query(Memory)
+            .filter_by(title=title, type=MemoryType.ANTI_PATTERN.value)
+            .first()
+        )
         if existing:
+            _link_project_memory(session, proj, existing.id)
             continue
 
         memory = Memory(
             type=MemoryType.ANTI_PATTERN.value,
-            title=item.strip()[:500],
+            title=title,
             content=item.strip(),
             tags=["imported", "claude-md"],
         )
@@ -138,9 +203,7 @@ def _extract_anti_patterns(
         )
         session.add(ap)
 
-        if proj:
-            pm = ProjectMemory(project_id=proj.id, memory_id=memory.id)
-            session.add(pm)
+        _link_project_memory(session, proj, memory.id)
 
         count += 1
 
@@ -160,14 +223,19 @@ def _extract_decisions(
         if purpose.startswith("-") or purpose.lower() in ("účel", "purpose", ""):
             continue
 
-        title = f"Decision: {tech.strip()} for {purpose.strip()}"
-        existing = session.query(Memory).filter_by(title=title[:500]).first()
+        title = f"Decision: {tech.strip()} for {purpose.strip()}"[:500]
+        existing = (
+            session.query(Memory)
+            .filter_by(title=title, type=MemoryType.DECISION.value)
+            .first()
+        )
         if existing:
+            _link_project_memory(session, proj, existing.id)
             continue
 
         memory = Memory(
             type=MemoryType.DECISION.value,
-            title=title[:500],
+            title=title,
             content=f"Chose {tech.strip()} for {purpose.strip()}",
             tags=["imported", "claude-md", "stack"],
         )
@@ -182,9 +250,7 @@ def _extract_decisions(
         )
         session.add(decision)
 
-        if proj:
-            pm = ProjectMemory(project_id=proj.id, memory_id=memory.id)
-            session.add(pm)
+        _link_project_memory(session, proj, memory.id)
 
         count += 1
 
@@ -202,22 +268,26 @@ def _extract_lessons(
         if len(item.strip()) < 10:
             continue
 
-        existing = session.query(Memory).filter_by(title=item.strip()[:500]).first()
+        title = item.strip()[:500]
+        existing = (
+            session.query(Memory)
+            .filter_by(title=title, type=MemoryType.LESSON.value)
+            .first()
+        )
         if existing:
+            _link_project_memory(session, proj, existing.id)
             continue
 
         memory = Memory(
             type=MemoryType.LESSON.value,
-            title=item.strip()[:500],
+            title=title,
             content=item.strip(),
             tags=["imported", "claude-md"],
         )
         session.add(memory)
+        session.flush()
 
-        if proj:
-            session.flush()
-            pm = ProjectMemory(project_id=proj.id, memory_id=memory.id)
-            session.add(pm)
+        _link_project_memory(session, proj, memory.id)
 
         count += 1
 
