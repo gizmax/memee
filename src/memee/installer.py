@@ -322,10 +322,16 @@ def _setup_solo():
         print(f"  {C.DIM}{label}{C.RESET}")
         print(f"      {C.BCYAN}{cmd}{C.RESET}\n")
 
-    # MCP setup hint (safe: Claude Code already wired by the auto-config step above)
-    print(f"  {C.BYELLOW}Claude Code integration{C.RESET} is already active if Claude Code was")
-    print(f"  detected. For other MCP clients, add to the settings file:")
-    print(f'      {C.DIM}{{"mcpServers": {{"memee": {{"command": "memee", "args": ["serve"]}}}}}}{C.RESET}')
+    # MCP setup — only talk about it if something wasn't auto-wired.
+    if configured_tools:
+        print(f"  {C.DIM}Your AI tools are already wired for Memee:"
+              f" {', '.join(configured_tools)}.{C.RESET}")
+        print(f"  {C.DIM}Nothing to add manually.{C.RESET}")
+    else:
+        print(f"  {C.BYELLOW}No supported AI tool was detected.{C.RESET} If you use an MCP")
+        print(f"  client (Cursor, Continue, Windsurf, Claude Code), add this to its")
+        print(f"  settings file:")
+        print(f'      {C.DIM}{{"mcpServers": {{"memee": {{"command": "memee", "args": ["serve"]}}}}}}{C.RESET}')
     print()
 
     _type(f"  {C.G4}The next pattern your agent learns is the last time your team learns it twice.{C.RESET}", delay=0.02)
