@@ -10,7 +10,9 @@
 Memee sits between your agents and the work. It records what worked, flags what didn't, and hands each agent only the 5–7 memories it actually needs for the task in front of it — instead of re-stuffing 500 patterns into every prompt.
 
 ```bash
-pip install memee
+pipx install memee            # recommended for a CLI tool
+# or:
+python3 -m pip install memee  # if you don't have pipx
 ```
 
 ---
@@ -24,7 +26,7 @@ pip install memee
 ## Install and first use (60 seconds)
 
 ```bash
-pip install memee
+pipx install memee
 memee setup
 
 # Record a pattern you just learned

@@ -279,37 +279,56 @@ def _setup_solo():
         f"  Scope:     personal (free tier)",
     ], color=C.GREEN, width=55)
 
-    # ── Quick start ──
-    _section("FIRST STEPS")
+    # ── You're done. Say so clearly. ──
+    _section("YOU'RE DONE")
 
-    print(f"  {C.BOLD}Your AI tools are configured!{C.RESET} Start using Memee naturally.")
-    print(f"  Ask your AI assistant:\n")
-    print(f"  {C.DIM}\"Search Memee for patterns about API timeouts\"{C.RESET}")
-    print(f"  {C.DIM}\"Record that we should always use connection pooling\"{C.RESET}")
-    print(f"  {C.DIM}\"Check if there are anti-patterns for PDF processing\"{C.RESET}")
+    print(f"  {C.BOLD}Memee is now live and fully automatic.{C.RESET}")
+    print()
+    print(f"  From this moment, every time your AI assistant works on a task:")
+    print(f"  {C.GREEN}•{C.RESET} it sees only the memories that matter for that task (routed)")
+    print(f"  {C.GREEN}•{C.RESET} what it learns is recorded, scored, and shared with other models")
+    print(f"    ({C.BCYAN}Claude ↔ GPT ↔ Gemini ↔ Llama{C.RESET}) and other projects on this machine")
+    print(f"  {C.GREEN}•{C.RESET} mistakes it catches are remembered org-wide, forever")
+    print()
+    print(f"  {C.DIM}With Memee Team (from $49/mo), the same memory is shared across")
+    print(f"  every developer in your company, not just your laptop.{C.RESET}")
     print()
 
-    _section("USEFUL COMMANDS")
+    _section("YOU CAN JUST TALK TO YOUR AGENT")
+
+    print(f"  The MCP hooks are wired. You don't need any of the commands below.")
+    print(f"  Just ask your AI assistant, in plain English:")
+    print()
+    print(f"  {C.BCYAN}\"Search Memee for patterns about API timeouts\"{C.RESET}")
+    print(f"  {C.BCYAN}\"Record that we should always use connection pooling\"{C.RESET}")
+    print(f"  {C.BCYAN}\"Check if there are anti-patterns for PDF processing\"{C.RESET}")
+    print()
+
+    _section("CLI (OPTIONAL)")
+
+    print(f"  {C.DIM}If you prefer the command line, these shortcuts work.")
+    print(f"  Paste the command itself, not the leading prompt marker.{C.RESET}")
+    print()
 
     commands = [
-        ("Record a pattern", "memee record pattern \"Always use timeout\" -t python,api"),
-        ("Search memories", "memee search \"timeout API\""),
-        ("Check anti-patterns", "memee check \"processing PDF files\""),
-        ("Run dashboard", "memee dashboard"),
-        ("Run benchmark", "memee benchmark"),
+        ("Record a pattern", 'memee record pattern "Always use timeout" -t python,api'),
+        ("Search memories",  'memee search "timeout API"'),
+        ("Check anti-patterns", 'memee check "processing PDF files"'),
+        ("Run the dashboard", 'memee dashboard'),
+        ("Reproduce the benchmarks", 'memee benchmark'),
     ]
 
     for label, cmd in commands:
-        print(f"  {C.DIM}{label}:{C.RESET}")
-        print(f"  {C.BCYAN}$ {cmd}{C.RESET}\n")
+        print(f"  {C.DIM}{label}{C.RESET}")
+        print(f"      {C.BCYAN}{cmd}{C.RESET}\n")
 
-    # MCP setup hint
-    print(f"  {C.BYELLOW}━━━ Claude Code Integration ━━━{C.RESET}")
-    print(f"  Add to ~/.claude/settings.json:")
-    print(f'  {C.DIM}{{"mcpServers": {{"memee": {{"command": "memee", "args": ["serve"]}}}}}}{C.RESET}')
+    # MCP setup hint (safe: Claude Code already wired by the auto-config step above)
+    print(f"  {C.BYELLOW}Claude Code integration{C.RESET} is already active if Claude Code was")
+    print(f"  detected. For other MCP clients, add to the settings file:")
+    print(f'      {C.DIM}{{"mcpServers": {{"memee": {{"command": "memee", "args": ["serve"]}}}}}}{C.RESET}')
     print()
 
-    _type(f"  {C.G4}Happy learning! Your agents will never forget again.{C.RESET}", delay=0.02)
+    _type(f"  {C.G4}The next pattern your agent learns is the last time your team learns it twice.{C.RESET}", delay=0.02)
 
 
 def _setup_join():

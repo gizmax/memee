@@ -166,7 +166,7 @@ If you are 1 dev, stay on OSS forever. If you are a team of agents, the team tie
 ```
 If your agent fleet is re-learning "add timeout to requests.get" every Monday, that is a line item.
 
-pip install memee && memee setup
+pipx install memee && memee setup
 github.com/<org>/memee
 memee.eu
 
