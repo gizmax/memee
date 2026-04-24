@@ -1,0 +1,1675 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Memee · One lesson. Every agent. Every team. Every model.</title>
+  <meta name="description" content="Shared memory for AI agent teams. Your agents stop re-solving the same problems, your prompts shrink 96%, and every model reads from one canon." />
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-ZN1K4G2TCZ');
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+/* ============================================================
+   MEMEE v2 — Stripe Press / Monocle
+   Off-black / Bone / Signal orange / Slate
+   Terser. Louder. More modern.
+   ============================================================ */
+
+:root {
+  /* MIDNIGHT LAB — dark-first. Graphite + cyan + magenta.
+     Zero cream, zero sand, zero warm paper. */
+  --ink: #EDEFF4;              /* "ink" is now light — text on dark */
+  --ink-80: #EDEFF4d9;
+  --ink-60: #EDEFF499;
+  --ink-40: #EDEFF466;
+  --ink-20: #EDEFF422;
+  --ink-10: #EDEFF411;
+  --bone: #0E1116;             /* PAGE bg — deep graphite, not black */
+  --bone-dim: #161A22;         /* panel one step up */
+  --orange: #00E5C7;           /* CYAN-MINT — primary accent */
+  --orange-soft: #00E5C71a;
+  --lime: #FF4D8F;             /* HOT MAGENTA — data/success accent */
+  --slate: #1E2330;            /* deep indigo panel */
+
+  --grotesk: "Inter Tight", "Söhne", "Neue Haas Grotesk", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --serif: "Source Serif 4", "Tiempos", Georgia, serif;
+  --mono: "JetBrains Mono", "Berkeley Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --rule: 1px solid var(--ink);
+  --hairline: 1px solid var(--ink-20);
+
+  --pad-x: clamp(20px, 4vw, 72px);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+html {
+  background: var(--bone);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--grotesk);
+  font-size: 17px;
+  line-height: 1.45;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  background: var(--bone);
+}
+
+a { color: inherit; text-decoration: none; }
+
+main, header, footer, section { position: relative; z-index: 1; }
+
+.shell {
+  padding-inline: var(--pad-x);
+  max-width: 1480px;
+  margin-inline: auto;
+}
+
+.display {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+  text-wrap: balance;
+}
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-60);
+}
+.eyebrow .mark { color: var(--orange); margin-right: 8px; }
+
+section { padding-block: clamp(72px, 9vw, 140px); }
+
+.rule-top { border-top: var(--rule); }
+
+/* ============================================================
+   MASTHEAD — minimal, sticky
+   ============================================================ */
+.masthead {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(233, 226, 211, 0.85);
+  backdrop-filter: saturate(140%) blur(8px);
+  -webkit-backdrop-filter: saturate(140%) blur(8px);
+  border-bottom: var(--hairline);
+}
+.masthead-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-block: 14px;
+  gap: 24px;
+}
+.wordmark {
+  font-family: var(--grotesk);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+  display: inline-flex; align-items: center; gap: 10px;
+}
+.wordmark .dot {
+  width: 8px; height: 8px;
+  background: var(--orange);
+  border-radius: 999px;
+  display: inline-block;
+}
+.nav {
+  display: flex; gap: 26px;
+  font-family: var(--grotesk);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--ink-80);
+}
+.nav a:hover { color: var(--orange); }
+.nav .pill {
+  padding: 7px 12px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 120ms linear, color 120ms linear;
+}
+.nav .pill:hover { background: var(--ink); color: var(--bone); }
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
+.btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 14px 20px;
+  font-family: var(--grotesk);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  border: 1.5px solid var(--ink);
+  background: var(--ink);
+  color: var(--bone);
+  border-radius: 999px;
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease, border-color 140ms ease;
+  cursor: pointer;
+}
+.btn:hover { background: var(--orange); border-color: var(--orange); }
+.btn--ghost { background: transparent; color: var(--ink); }
+.btn--ghost:hover { background: var(--ink); color: var(--bone); border-color: var(--ink); }
+.btn .arrow { transition: transform 140ms ease; }
+.btn:hover .arrow { transform: translateX(3px); }
+
+/* ============================================================
+   S1 HERO — punchy, one idea
+   ============================================================ */
+.hero { padding-top: clamp(56px, 7vw, 120px); padding-bottom: 40px; }
+.hero-eyebrow {
+  margin-bottom: 28px;
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.hero-eyebrow span { display: inline-flex; align-items: center; gap: 8px; }
+.hero-eyebrow .dot {
+  width: 6px; height: 6px; border-radius: 999px; background: var(--orange);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+
+.hero-head {
+  font-size: clamp(52px, 9.8vw, 156px);
+  margin: 0;
+  max-width: 16ch;
+}
+.hero-head .accent { color: var(--orange); }
+.hero-head .strike { position: relative; display: inline-block; }
+.hero-head .strike::after {
+  content: "";
+  position: absolute; left: -2%; right: -2%;
+  top: 52%;
+  height: 6px;
+  background: var(--orange);
+  border-radius: 2px;
+  transform: rotate(-2deg);
+}
+
+.hero-sub {
+  margin-top: clamp(32px, 3.6vw, 56px);
+  display: grid;
+  grid-template-columns: 1.1fr auto;
+  gap: 32px;
+  align-items: end;
+}
+.hero-sub p {
+  margin: 0;
+  font-size: clamp(19px, 1.6vw, 24px);
+  line-height: 1.4;
+  max-width: 48ch;
+  color: var(--ink-80);
+}
+.hero-ctas { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* Stat strip */
+.stats {
+  margin-top: clamp(72px, 9vw, 140px);
+  border-top: var(--rule);
+  border-bottom: var(--rule);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.stat {
+  padding: 28px clamp(16px, 2vw, 32px);
+  border-left: var(--hairline);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.stat:first-child { border-left: 0; }
+.stat .num {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: clamp(34px, 3.4vw, 52px);
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.stat .num .unit { font-size: 0.55em; color: var(--ink-60); margin-left: 4px; }
+.stat .num.orange { color: var(--orange); }
+.stat .num.lime { color: var(--orange); background: var(--lime); padding: 0 8px; border-radius: 6px; display: inline-block; }
+.stat .lbl {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-60);
+}
+
+/* ============================================================
+   S2 VALUE / BENEFITS — plain-English USPs
+   ============================================================ */
+.value { border-top: var(--rule); }
+.value-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-items: end;
+  margin-bottom: clamp(40px, 5vw, 72px);
+}
+.value-head h2 {
+  margin: 0;
+  font-size: clamp(40px, 5.4vw, 80px);
+  max-width: 14ch;
+}
+.value-head .lede {
+  margin: 0;
+  font-size: clamp(18px, 1.3vw, 22px);
+  color: var(--ink-80);
+  max-width: 44ch;
+  font-family: var(--serif);
+  font-style: italic;
+}
+.usps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+.usp {
+  padding: clamp(26px, 2.4vw, 40px);
+  border-radius: 20px;
+  background: var(--bone-dim);
+  display: flex; flex-direction: column;
+  min-height: 340px;
+  position: relative;
+  border: 1px solid transparent;
+  transition: transform 200ms ease, border-color 200ms ease;
+}
+.usp:hover { transform: translateY(-4px); border-color: var(--ink-20); }
+.usp .num {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--orange);
+  margin: 0 0 28px;
+  display: block;
+}
+.usp h3 {
+  margin: 0 0 16px;
+  font-size: clamp(24px, 2.2vw, 32px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  max-width: 16ch;
+  text-wrap: balance;
+}
+.usp h3 strong { color: var(--orange); font-weight: 600; }
+.usp .benefit {
+  margin: 0 0 14px;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink-80);
+  max-width: 32ch;
+}
+.usp .proof {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--ink-20);
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-60);
+}
+.usp .benefit { margin: 0 0 20px; font-size: 15px; line-height: 1.5; color: var(--ink-80); max-width: 34ch; }
+.usp .proof strong {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  color: var(--lime);
+  text-transform: none;
+}
+
+/* ============================================================
+   SHARING DIAGRAM — how memory travels
+   ============================================================ */
+.share { border-top: var(--rule); background: var(--slate); color: var(--ink); }
+.share .shell {
+  padding-inline: var(--pad-x);
+  padding-block: clamp(48px, 6vw, 96px);
+}
+.share-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-items: end;
+  margin-bottom: clamp(28px, 3.5vw, 56px);
+}
+.share-head .kicker {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--orange);
+  margin-bottom: 14px;
+}
+.share-head h2 {
+  margin: 0;
+  font-size: clamp(38px, 5vw, 72px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  max-width: 16ch;
+}
+.share-head .lede {
+  margin: 0;
+  font-size: clamp(17px, 1.3vw, 20px);
+  line-height: 1.5;
+  color: #EDEFF4b0;
+  max-width: 44ch;
+}
+
+.diagram {
+  position: relative;
+  border: 1px solid #EDEFF422;
+  border-radius: 24px;
+  background: #00000026;
+  padding: clamp(28px, 3vw, 48px);
+  margin-bottom: 20px;
+}
+.diagram svg { width: 100%; height: auto; display: block; }
+
+/* diagram legend pills */
+.share-legend {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  margin-top: 20px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.share-legend .pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #EDEFF410;
+  border: 1px solid #EDEFF422;
+  color: #EDEFF4cc;
+}
+.share-legend .pill .sw {
+  width: 10px; height: 10px; border-radius: 999px; display: inline-block;
+}
+
+/* three-step rail below diagram */
+.share-steps {
+  margin-top: 36px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  border-top: 1px solid #EDEFF422;
+}
+.share-step {
+  padding: 24px 20px 4px 20px;
+  border-left: 1px solid #EDEFF422;
+}
+.share-step:first-child { border-left: 0; padding-left: 0; }
+.share-step:last-child { padding-right: 0; }
+.share-step .n {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--orange);
+  margin-bottom: 10px;
+}
+.share-step h4 {
+  margin: 0 0 8px;
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: clamp(18px, 1.6vw, 22px);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.share-step p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #EDEFF4aa;
+  max-width: 32ch;
+}
+
+/* Responsive for Value + Share sections */
+@media (max-width: 960px) {
+  .value-head, .share-head { grid-template-columns: 1fr; gap: 16px; }
+  .usps { grid-template-columns: 1fr; }
+  .share-steps { grid-template-columns: 1fr; border-top: 0; }
+  .share-step {
+    border-left: 0;
+    border-top: 1px solid var(--ink-20);
+    padding: 20px 0 8px;
+  }
+  .share-step:first-child { border-top: 0; padding-top: 8px; }
+}
+
+/* ============================================================
+   S5 TOKEN MATH — giant numbers
+   ============================================================ */
+.math-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-items: end;
+  margin-bottom: clamp(48px, 6vw, 80px);
+}
+.math-head h2 {
+  margin: 0;
+  font-size: clamp(40px, 5.4vw, 80px);
+  max-width: 12ch;
+}
+.math-head .lede {
+  font-size: clamp(17px, 1.3vw, 20px);
+  color: var(--ink-80);
+  max-width: 44ch;
+  margin: 0;
+}
+.math-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.1fr;
+  gap: 14px;
+}
+.math-card {
+  border: 1px solid var(--ink-20);
+  background: transparent;
+  border-radius: 20px;
+  padding: clamp(28px, 2.8vw, 44px);
+  display: flex; flex-direction: column; gap: 20px;
+  min-height: 300px;
+  position: relative;
+  overflow: hidden;
+}
+.math-card.without { background: var(--bone-dim); }
+.math-card.with { background: var(--ink); color: var(--bone); border-color: var(--ink); }
+.math-card.savings { background: var(--lime); color: var(--ink); border-color: var(--lime); }
+.math-card .cap {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+.math-card .big {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: clamp(52px, 7vw, 110px);
+  letter-spacing: -0.045em;
+  line-height: 0.9;
+  font-variant-numeric: tabular-nums;
+  margin: auto 0;
+}
+.math-card .big .suffix {
+  font-size: 0.38em;
+  letter-spacing: -0.01em;
+  display: block;
+  margin-top: 8px;
+  opacity: 0.65;
+}
+.math-card.savings .big { font-size: clamp(72px, 9vw, 140px); }
+.math-card .sub {
+  font-family: var(--grotesk);
+  font-weight: 400;
+  font-size: 12.5px;
+  line-height: 1.4;
+  opacity: 0.72;
+  margin-top: 10px;
+}
+.math-card .per {
+  border-top: 1px solid currentColor;
+  border-color: rgba(20,20,20,0.12);
+  padding-top: 14px;
+  display: flex; justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.math-card.with .per { border-color: rgba(255,255,255,0.15); }
+
+.math-foot {
+  margin-top: 32px;
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 24px;
+  align-items: center;
+}
+.math-pull {
+  margin: 0;
+  font-size: clamp(26px, 3vw, 44px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  max-width: 18ch;
+}
+.math-pull em { font-family: var(--serif); font-style: italic; color: var(--orange); font-weight: 400; }
+.math-note {
+  font-family: var(--grotesk);
+  font-size: 13px;
+  letter-spacing: 0;
+  color: var(--ink-80);
+  line-height: 1.55;
+  text-align: left;
+  max-width: 52ch;
+  padding-left: clamp(16px, 2vw, 28px);
+  border-left: 2px solid var(--orange);
+}
+.math-note em {
+  font-family: var(--serif);
+  font-style: italic;
+  color: var(--ink);
+}
+.math-note strong { color: var(--ink); font-weight: 600; }
+.math-note code { font-family: var(--mono); font-size: 11.5px; }
+.math-note a { color: var(--orange); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ============================================================
+   S7 PROOF
+   ============================================================ */
+.proof { border-top: var(--rule); }
+.proof-inner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(32px, 5vw, 80px);
+  align-items: center;
+}
+.proof-quote {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(26px, 2.8vw, 40px);
+  line-height: 1.2;
+  margin: 0;
+  max-width: 22ch;
+  letter-spacing: -0.01em;
+}
+.proof-quote::before {
+  content: "\201C";
+  display: block;
+  color: var(--orange);
+  font-size: 1.6em;
+  line-height: 0.6;
+  margin-bottom: 8px;
+  font-family: var(--serif);
+}
+.proof cite {
+  display: block;
+  margin-top: 24px;
+  font-family: var(--mono);
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-60);
+}
+.proof cite strong { color: var(--orange); font-weight: 500; }
+
+.proof-nums {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.proof-num {
+  padding: 24px;
+  border-radius: 14px;
+  background: var(--bone-dim);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.proof-num .n {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: clamp(32px, 3vw, 48px);
+  letter-spacing: -0.035em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.proof-num .n .delta { color: var(--orange); font-size: 0.6em; margin-left: 6px; }
+.proof-num .l {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-60);
+}
+.proof-num.hi { background: var(--ink); color: var(--bone); grid-column: 1 / -1; }
+.proof-num.hi .l { color: #EDEFF488; }
+
+/* ============================================================
+   S8 PRICING — card tier strip
+   ============================================================ */
+.pricing { border-top: var(--rule); }
+.pricing-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-items: end;
+  margin-bottom: clamp(32px, 4vw, 56px);
+}
+.pricing-head h2 {
+  margin: 0;
+  font-size: clamp(40px, 5.4vw, 80px);
+  max-width: 14ch;
+}
+.pricing-head .lede {
+  font-size: clamp(17px, 1.3vw, 20px);
+  color: var(--ink-80);
+  max-width: 44ch;
+  margin: 0;
+  font-style: italic;
+  font-family: var(--serif);
+}
+
+.ptiers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.ptier {
+  padding: 28px 24px;
+  border: 1px solid var(--ink-20);
+  border-radius: 18px;
+  background: transparent;
+  display: flex; flex-direction: column; gap: 16px;
+  transition: border-color 140ms ease, transform 140ms ease, background 140ms ease;
+}
+.ptier:hover { border-color: var(--ink); transform: translateY(-3px); }
+.ptier.featured { background: var(--ink); color: var(--bone); border-color: var(--ink); }
+.ptier.featured:hover { transform: translateY(-3px); }
+.ptier .tier-name {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  display: flex; align-items: center; gap: 10px;
+}
+.ptier.featured .tier-name::after {
+  content: "Recommended";
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--orange);
+  color: var(--ink);
+  font-weight: 500;
+}
+.ptier .price {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: clamp(34px, 2.8vw, 44px);
+  letter-spacing: -0.035em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.ptier .price .per {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: currentColor;
+  opacity: 0.6;
+  display: block;
+  margin-top: 8px;
+}
+.ptier .tagline {
+  font-size: 14px;
+  line-height: 1.45;
+  opacity: 0.8;
+}
+.ptier .features {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+  display: flex; flex-direction: column; gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.ptier .features li {
+  position: relative;
+  padding-left: 18px;
+}
+.ptier .features li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.55em;
+  width: 8px; height: 1px;
+  background: currentColor;
+  opacity: 0.5;
+}
+.ptier .features strong { font-weight: 600; }
+.ptier .pbtn {
+  margin-top: auto;
+  padding: 11px 16px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  transition: background 140ms, color 140ms;
+}
+.ptier .pbtn:hover { background: var(--orange); border-color: var(--orange); color: var(--ink); }
+
+/* Details table (collapsible look) */
+.pdetail {
+  border-top: var(--hairline);
+  padding-top: 32px;
+}
+.pdetail summary {
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-60);
+  display: inline-flex; gap: 10px; align-items: center;
+}
+.pdetail summary::-webkit-details-marker { display: none; }
+.pdetail summary::after { content: "+"; color: var(--orange); font-size: 16px; }
+.pdetail[open] summary::after { content: "–"; }
+.ptable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 24px;
+  font-size: 14px;
+}
+.ptable th, .ptable td {
+  padding: 14px 14px;
+  border-bottom: var(--hairline);
+  text-align: left;
+  vertical-align: top;
+}
+.ptable thead th {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--ink-60);
+}
+.ptable th:first-child, .ptable td:first-child {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-60);
+  width: 28%;
+}
+.ptable .check { color: var(--orange); font-weight: 600; }
+.ptable .mute { color: var(--ink-40); font-size: 12px; }
+
+.pfoot {
+  margin-top: 32px;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(17px, 1.4vw, 22px);
+  color: var(--ink-80);
+  max-width: 60ch;
+}
+.pfoot a { color: var(--orange); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ============================================================
+   S9 ORDER — three cards
+   ============================================================ */
+.order { border-top: var(--rule); }
+.order-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-items: end;
+  margin-bottom: clamp(40px, 5vw, 72px);
+}
+.order-head h2 {
+  margin: 0;
+  font-size: clamp(40px, 5.4vw, 80px);
+  max-width: 12ch;
+}
+.order-head .lede {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(17px, 1.3vw, 20px);
+  color: var(--ink-80);
+  margin: 0;
+}
+.lanes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+.lane {
+  padding: 28px;
+  border-radius: 20px;
+  background: var(--bone-dim);
+  display: flex; flex-direction: column;
+  min-height: 340px;
+}
+.lane.dark { background: var(--ink); color: var(--bone); }
+.lane-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--orange);
+  margin-bottom: 12px;
+}
+.lane h3 {
+  margin: 0 0 18px;
+  font-size: clamp(26px, 2.4vw, 34px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.lane p {
+  margin: 0 0 18px;
+  font-size: 15px;
+  line-height: 1.5;
+  opacity: 0.85;
+  max-width: 32ch;
+}
+.cli {
+  display: block;
+  background: var(--ink);
+  color: var(--bone);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  margin-bottom: 14px;
+  user-select: all;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.lane.dark .cli { background: #00000044; }
+.cli::before { content: "$ "; color: var(--orange); }
+.lane-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.lane-form input {
+  font-family: var(--grotesk);
+  font-size: 14px;
+  padding: 11px 13px;
+  border: 1px solid var(--ink-20);
+  background: transparent;
+  color: inherit;
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 120ms linear;
+}
+.lane.dark .lane-form input { border-color: #EDEFF433; color: var(--bone); }
+.lane.dark .lane-form input::placeholder { color: #EDEFF466; }
+.lane-form input:focus { border-color: var(--orange); }
+.lane-form input::placeholder { color: var(--ink-40); }
+.lane-form input.full { grid-column: 1 / -1; }
+.lane .tiny {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+  margin-top: auto;
+}
+
+/* ============================================================
+   FOOTER
+   ============================================================ */
+.foot {
+  border-top: var(--rule);
+  padding-block: 48px 40px;
+}
+.foot-big {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: clamp(56px, 11vw, 180px);
+  letter-spacing: -0.05em;
+  line-height: 0.9;
+  color: var(--ink);
+  margin: 0 0 40px;
+}
+.foot-big .orange { color: var(--orange); }
+.foot-inner {
+  display: grid;
+  grid-template-columns: 1.5fr 1.2fr 1fr;
+  gap: 24px;
+  align-items: start;
+  border-top: var(--hairline);
+  padding-top: 28px;
+}
+.foot-inner p {
+  margin: 0;
+  max-width: 40ch;
+  font-size: 14px;
+  color: var(--ink-80);
+}
+.foot-nav {
+  display: flex; flex-wrap: wrap; gap: 8px 18px;
+  font-family: var(--grotesk);
+  font-size: 14px;
+  font-weight: 500;
+}
+.foot-nav a:hover { color: var(--orange); }
+.foot-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-60);
+  line-height: 1.6;
+  text-align: right;
+}
+
+/* ============================================================
+   REVEAL — no-JS fallback: show by default. JS hides, observer unhides.
+   ============================================================ */
+html.js-ready .reveal {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 400ms ease, transform 400ms ease;
+}
+html.js-ready .reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  html.js-ready .reveal,
+  html.js-ready .reveal.in { opacity: 1; transform: none; transition: none; }
+}
+
+/* ============================================================
+   RESPONSIVE — use screen-only so print keeps the multi-col layout.
+   ============================================================ */
+@media screen and (max-width: 960px) {
+  body { font-size: 16px; }
+  .nav { gap: 14px; font-size: 13px; }
+  .nav .pill { padding: 6px 10px; font-size: 12px; }
+  .hero-head { font-size: clamp(44px, 12vw, 88px); max-width: 100%; }
+  .hero-sub { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: 1fr 1fr; }
+  .stat:nth-child(3) { border-left: 0; border-top: var(--hairline); }
+  .stat { border-top: var(--hairline); }
+  .stat:nth-child(-n+2) { border-top: 0; }
+
+  .math-head, .pricing-head, .order-head {
+    grid-template-columns: 1fr; gap: 16px;
+  }
+
+  .math-grid { grid-template-columns: 1fr; }
+  .math-foot { grid-template-columns: 1fr; }
+  .math-note { text-align: left; }
+
+  .proof-inner { grid-template-columns: 1fr; }
+  .ptiers { grid-template-columns: 1fr; }
+  .lanes { grid-template-columns: 1fr; }
+
+  .foot-inner { grid-template-columns: 1fr; }
+  .foot-meta { text-align: left; }
+  .foot-big { font-size: clamp(48px, 16vw, 100px); }
+}
+
+/* ============================================================
+   MIDNIGHT LAB — inversion fixups.
+   --ink is now LIGHT, --bone is DARK. These rules repin
+   surfaces that were originally "dark panel over cream".
+   ============================================================ */
+
+/* Body grain: soften on dark */
+body::before { display: none; }
+
+/* Masthead: translucent dark, not translucent cream */
+.masthead {
+  background: rgba(14, 17, 22, 0.78);
+  backdrop-filter: saturate(160%) blur(10px);
+  -webkit-backdrop-filter: saturate(160%) blur(10px);
+  border-bottom: 1px solid var(--ink-20);
+}
+.nav .pill {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.nav .pill:hover { background: var(--orange); color: var(--bone); border-color: var(--orange); }
+
+/* Primary button: cyan-mint on graphite */
+.btn {
+  border-color: var(--orange);
+  background: var(--orange);
+  color: var(--bone);
+}
+.btn:hover { background: var(--lime); border-color: var(--lime); color: var(--bone); }
+.btn--ghost {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--ink-40);
+}
+.btn--ghost:hover { background: var(--ink); color: var(--bone); border-color: var(--ink); }
+
+/* Rule lines on dark shouldn't be full white — tone to 20% */
+.rule-top, .rule-bottom,
+.stats, .math-table tr:last-child td,
+.math, .proof, .pricing, .order, .foot {
+  border-color: var(--ink-20) !important;
+}
+
+/* Hero strike-through: cyan-mint */
+.hero-head .strike::after { background: var(--orange); opacity: 0.75; }
+
+/* Stats */
+.stat { border-left-color: var(--ink-20); }
+
+/* Token math cards */
+.math-card { border-color: var(--ink-20); }
+.math-card.without { background: var(--bone-dim); color: var(--ink); }
+.math-card.with { background: var(--slate); color: var(--ink); border-color: var(--slate); }
+.math-card.with .per { border-color: var(--ink-20); }
+.math-card.savings { background: var(--lime); color: #0E1116; border-color: var(--lime); }
+.math-pull em { color: var(--orange); }
+
+/* Proof */
+.proof-quote::before { color: var(--orange); }
+.proof cite strong { color: var(--lime); }
+.proof-num { background: var(--bone-dim); color: var(--ink); }
+.proof-num.hi { background: var(--slate); color: var(--ink); }
+.proof-num .n .delta { color: var(--lime); }
+
+/* Pricing */
+.ptier { border-color: var(--ink-20); }
+.ptier:hover { border-color: var(--orange); }
+.ptier.featured { background: var(--slate); color: var(--ink); border-color: var(--orange); }
+.ptier.featured .tier-name::after { background: var(--orange); color: var(--bone); }
+.pdetail summary { color: var(--ink-60); }
+.pdetail summary::after { color: var(--orange); }
+
+/* Order lanes */
+.lane { background: var(--bone-dim); color: var(--ink); }
+.lane.dark { background: var(--slate); color: var(--ink); }
+.lane-num { color: var(--orange); }
+.cli { background: #070A0F; color: var(--ink); }
+.lane.dark .cli { background: #00000055; }
+.cli::before { color: var(--lime); }
+.lane-form input { border-color: var(--ink-20); color: var(--ink); }
+.lane-form input:focus { border-color: var(--orange); }
+.lane.dark .lane-form input { border-color: var(--ink-20); color: var(--ink); }
+.lane.dark .lane-form input::placeholder { color: var(--ink-40); }
+
+/* Footer */
+.foot-big .orange { color: var(--orange); }
+.foot-inner p strong { color: var(--ink) !important; }
+
+/* Wordmark dot: cyan-mint */
+.wordmark .dot { background: var(--orange); }
+.hero-eyebrow .dot { background: var(--orange); }
+
+/* Hero eyebrow mark */
+.hero-eyebrow .mark { color: var(--lime); }
+
+/* Math card internal border */
+.math-card .per { border-color: currentColor; opacity: 1; }
+.math-card.without .per { border-color: var(--ink-20); }
+
+/* Reveal still works — opacity transitions are color-agnostic */
+
+:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 3px;
+}
+
+</style>
+</head>
+<body>
+
+  <!-- MASTHEAD -->
+  <header class="masthead">
+    <div class="shell masthead-inner">
+      <a class="wordmark" href="#top"><span class="dot"></span>Memee</a>
+      <nav class="nav" aria-label="Primary">
+        <a href="#value">Why</a>
+        <a href="#share">How it works</a>
+        <a href="#math">Numbers</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#order" class="pill">Install →</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+
+    <!-- S1 HERO — one clear promise -->
+    <section class="hero shell">
+      <div class="hero-eyebrow eyebrow reveal">
+        <span><span class="dot"></span>Shared memory for AI agent teams</span>
+        <span><span class="mark">·</span> MIT-licensed core on GitHub</span>
+      </div>
+
+      <h1 class="hero-head display reveal">
+        One lesson.<br />
+        Every <span class="accent">agent</span>. Every team. Every&nbsp;model.
+      </h1>
+
+      <div class="hero-sub">
+        <p class="reveal">
+          Memee is the memory your agents share. Claude learns it, GPT
+          confirms it, Gemini uses it tomorrow, on another team, on
+          another codebase. No retraining. No prompt tutorial. No more
+          re-solving what someone already solved.
+        </p>
+        <div class="hero-ctas reveal">
+          <a class="btn" href="#order">Install free <span class="arrow">→</span></a>
+          <a class="btn btn--ghost" href="#share">See how it works</a>
+        </div>
+      </div>
+
+      <div class="stats reveal" aria-label="Key figures">
+        <div class="stat">
+          <div class="num">96<span class="unit">%</span></div>
+          <div class="lbl">Fewer tokens per task</div>
+        </div>
+        <div class="stat">
+          <div class="num">7–10<span class="unit">×</span></div>
+          <div class="lbl">ROI, typical</div>
+        </div>
+        <div class="stat">
+          <div class="num orange">4</div>
+          <div class="lbl">Model families, one canon</div>
+        </div>
+        <div class="stat">
+          <div class="num">$0</div>
+          <div class="lbl">To start. Forever.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- S2 VALUE — plain-English USPs -->
+    <section class="value shell" id="value">
+      <div class="value-head">
+        <h2 class="display reveal">What Memee actually gives you.</h2>
+        <p class="lede reveal">Three concrete things. No dashboards, no copilots, no magic.</p>
+      </div>
+
+      <div class="usps">
+        <article class="usp reveal">
+          <span class="num">01 · Stop re-solving</span>
+          <h3>Every lesson <strong>learned once</strong>, reused forever.</h3>
+          <p class="benefit">When any agent figures something out (a retry pattern, a PII rule, an edge case), Memee writes it down, scores it, and hands it to the next agent that needs it. No one re-discovers what the team already knows.</p>
+          <div class="proof"><span>Patterns in canon</span><strong>89 and growing</strong></div>
+        </article>
+
+        <article class="usp reveal">
+          <span class="num">02 · Cut the prompt bloat</span>
+          <h3>Send <strong>500 tokens</strong>, not 14,550.</h3>
+          <p class="benefit">Memee routes only what this task actually needs. Your agents stop stuffing the whole wiki into every prompt, bills drop 96%, and answers come back faster because the context is smaller and sharper.</p>
+          <div class="proof"><span>Token reduction</span><strong>96%</strong></div>
+        </article>
+
+        <article class="usp reveal">
+          <span class="num">03 · One truth, every model</span>
+          <h3>Canon that <strong>survives</strong> the model you pick.</h3>
+          <p class="benefit">Claude, GPT, Gemini, Llama: all read from the same memory. Switch vendors without retraining your knowledge. A pattern only becomes canonical once two model families agree it works.</p>
+          <div class="proof"><span>Model families supported</span><strong>4</strong></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- S3 HOW MEMORY TRAVELS — visualization -->
+    <section class="share" id="share">
+      <div class="shell">
+        <div class="share-head">
+          <div class="reveal">
+            <div class="kicker">How it works</div>
+            <h2 class="display">One lesson travels everywhere.</h2>
+          </div>
+          <p class="lede reveal">A pattern learned by Claude on a payments service in Prague shows up in Gemini&rsquo;s next session on a billing service in Brno. Signed, scored, ready.</p>
+        </div>
+
+        <div class="diagram reveal" role="img" aria-label="Diagram: a lesson learned by one agent propagates through team and org memory to every other agent and model.">
+          <svg viewBox="0 0 1200 500" xmlns="http://www.w3.org/2000/svg" fill="none">
+            <defs>
+              <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0,0 L10,5 L0,10 z" fill="#00E5C7"/>
+              </marker>
+              <marker id="arrDim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M0,0 L10,5 L0,10 z" fill="#EDEFF488"/>
+              </marker>
+              <linearGradient id="flow" x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0%" stop-color="#00E5C7" stop-opacity="0"/>
+                <stop offset="50%" stop-color="#00E5C7" stop-opacity="1"/>
+                <stop offset="100%" stop-color="#00E5C7" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+
+            <!-- LEFT: source agent -->
+            <g transform="translate(40,170)">
+              <rect x="0" y="0" width="200" height="180" rx="14" fill="#1E2330" stroke="#00E5C7" stroke-width="1.5"/>
+              <text x="16" y="28" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2" fill="#00E5C7">01 &#183; SOURCE</text>
+              <text x="16" y="62" font-family="Inter Tight, sans-serif" font-size="22" font-weight="600" fill="#EDEFF4">Claude</text>
+              <text x="16" y="82" font-family="Inter Tight, sans-serif" font-size="13" fill="#EDEFF4aa">agent-07 &#183; payments-prg</text>
+              <line x1="16" y1="96" x2="184" y2="96" stroke="#EDEFF422"/>
+              <text x="16" y="118" font-family="JetBrains Mono, monospace" font-size="11" fill="#EDEFF4cc">learns:</text>
+              <text x="16" y="138" font-family="Inter Tight, sans-serif" font-size="14" font-weight="500" fill="#FF4D8F">retry-after-jitter</text>
+              <text x="16" y="156" font-family="JetBrains Mono, monospace" font-size="10" fill="#EDEFF488">1 test passed &#183; 14:02</text>
+            </g>
+
+            <!-- Flow 1: record -->
+            <path d="M 240 260 C 320 260, 360 260, 410 260" stroke="url(#flow)" stroke-width="2" marker-end="url(#arr)"/>
+            <text x="325" y="260" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="1" fill="#00E5C7cc" text-anchor="middle" dominant-baseline="central">RECORDS</text>
+
+            <!-- CENTER: Memee core -->
+            <g transform="translate(410,100)">
+              <rect x="0" y="0" width="380" height="320" rx="18" fill="#161A22" stroke="#00E5C7" stroke-width="2"/>
+              <rect x="0" y="0" width="380" height="44" rx="18" fill="#00E5C7"/>
+              <rect x="0" y="26" width="380" height="18" fill="#00E5C7"/>
+              <text x="20" y="29" font-family="Inter Tight, sans-serif" font-size="15" font-weight="600" fill="#161A22">Memee &#183; shared memory</text>
+              <text x="360" y="29" font-family="JetBrains Mono, monospace" font-size="11" fill="#161A22" text-anchor="end">/canon/</text>
+
+              <text x="20" y="72" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2" fill="#EDEFF488">SCOPE</text>
+
+              <!-- personal -->
+              <rect x="20" y="84" width="340" height="46" rx="10" fill="#EDEFF408" stroke="#EDEFF422"/>
+              <circle cx="40" cy="107" r="6" fill="#EDEFF466"/>
+              <text x="56" y="104" font-family="Inter Tight, sans-serif" font-size="13" font-weight="600" fill="#EDEFF4">Personal</text>
+              <text x="56" y="120" font-family="JetBrains Mono, monospace" font-size="10" fill="#EDEFF488">1 user &#183; 12 patterns</text>
+
+              <!-- team -->
+              <rect x="20" y="138" width="340" height="46" rx="10" fill="#00E5C722" stroke="#00E5C788"/>
+              <circle cx="40" cy="161" r="6" fill="#00E5C7"/>
+              <text x="56" y="158" font-family="Inter Tight, sans-serif" font-size="13" font-weight="600" fill="#EDEFF4">Team</text>
+              <text x="56" y="174" font-family="JetBrains Mono, monospace" font-size="10" fill="#EDEFF4aa">8 engineers &#183; 47 patterns</text>
+              <text x="340" y="164" font-family="JetBrains Mono, monospace" font-size="10" fill="#FF4D8F" text-anchor="end">propagating &#8592;</text>
+
+              <!-- org -->
+              <rect x="20" y="192" width="340" height="46" rx="10" fill="#FF4D8F22" stroke="#FF4D8F88"/>
+              <circle cx="40" cy="215" r="6" fill="#FF4D8F"/>
+              <text x="56" y="212" font-family="Inter Tight, sans-serif" font-size="13" font-weight="600" fill="#EDEFF4">Organization</text>
+              <text x="56" y="228" font-family="JetBrains Mono, monospace" font-size="10" fill="#EDEFF4aa">4 teams &#183; 89 canonical</text>
+
+              <line x1="20" y1="260" x2="360" y2="260" stroke="#EDEFF422"/>
+              <text x="20" y="282" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2" fill="#EDEFF488">SCORE</text>
+              <text x="20" y="302" font-family="Inter Tight, sans-serif" font-size="13" fill="#EDEFF4">cross-model &#215;1.3 &#183; cross-project &#215;1.5</text>
+              <text x="360" y="302" font-family="JetBrains Mono, monospace" font-size="13" font-weight="600" fill="#FF4D8F" text-anchor="end">&#215;1.95</text>
+            </g>
+
+            <!-- Flow 2: to receivers -->
+            <path d="M 790 200 C 860 200, 900 180, 970 170" stroke="url(#flow)" stroke-width="2" marker-end="url(#arr)"/>
+            <path d="M 790 260 C 860 260, 900 260, 970 260" stroke="url(#flow)" stroke-width="2" marker-end="url(#arr)"/>
+            <path d="M 790 320 C 860 320, 900 340, 970 350" stroke="url(#flow)" stroke-width="2" marker-end="url(#arr)"/>
+
+            <text x="880" y="260" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="1" fill="#00E5C7cc" text-anchor="middle" dominant-baseline="central">ROUTES</text>
+
+            <!-- RIGHT: receivers -->
+            <g transform="translate(970,110)">
+              <rect x="0" y="0" width="190" height="100" rx="12" fill="#1E2330" stroke="#EDEFF422"/>
+              <text x="14" y="22" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2" fill="#FF4D8F">GETS IT</text>
+              <text x="14" y="46" font-family="Inter Tight, sans-serif" font-size="16" font-weight="600" fill="#EDEFF4">GPT</text>
+              <text x="14" y="63" font-family="Inter Tight, sans-serif" font-size="11" fill="#EDEFF4aa">agent-11 &#183; billing-brno</text>
+              <text x="14" y="84" font-family="JetBrains Mono, monospace" font-size="10" fill="#FF4D8F">&#10003; retry-after-jitter</text>
+
+              <rect x="0" y="110" width="190" height="100" rx="12" fill="#1E2330" stroke="#EDEFF422"/>
+              <text x="14" y="132" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2" fill="#FF4D8F">GETS IT</text>
+              <text x="14" y="156" font-family="Inter Tight, sans-serif" font-size="16" font-weight="600" fill="#EDEFF4">Gemini</text>
+              <text x="14" y="173" font-family="Inter Tight, sans-serif" font-size="11" fill="#EDEFF4aa">agent-03 &#183; payments-prg</text>
+              <text x="14" y="194" font-family="JetBrains Mono, monospace" font-size="10" fill="#FF4D8F">&#10003; retry-after-jitter</text>
+
+              <rect x="0" y="220" width="190" height="100" rx="12" fill="#1E2330" stroke="#EDEFF422"/>
+              <text x="14" y="242" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2" fill="#FF4D8F">GETS IT</text>
+              <text x="14" y="266" font-family="Inter Tight, sans-serif" font-size="16" font-weight="600" fill="#EDEFF4">Llama</text>
+              <text x="14" y="283" font-family="Inter Tight, sans-serif" font-size="11" fill="#EDEFF4aa">agent-22 &#183; checkout-ba</text>
+              <text x="14" y="304" font-family="JetBrains Mono, monospace" font-size="10" fill="#FF4D8F">&#10003; retry-after-jitter</text>
+            </g>
+
+            <!-- axis labels -->
+            <text x="140" y="400" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2" fill="#EDEFF488" text-anchor="middle">ONE AGENT LEARNS</text>
+            <text x="600" y="440" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2" fill="#EDEFF488" text-anchor="middle">SHARED MEMORY &#183; SCORED, SIGNED, DATED</text>
+            <text x="1065" y="400" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2" fill="#EDEFF488" text-anchor="middle">EVERY OTHER AGENT BENEFITS</text>
+
+            <!-- bottom nightly consolidation -->
+            <path d="M 600 425 C 600 455, 600 465, 600 472" stroke="#EDEFF444" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arrDim)"/>
+            <text x="600" y="488" font-family="JetBrains Mono, monospace" font-size="10" fill="#EDEFF488" text-anchor="middle">nightly: dream mode consolidates &amp; retires the stale</text>
+          </svg>
+
+          <div class="share-legend" aria-hidden="true">
+            <span class="pill"><span class="sw" style="background:#EDEFF466"></span>Personal scope</span>
+            <span class="pill"><span class="sw" style="background:#00E5C7"></span>Team scope</span>
+            <span class="pill"><span class="sw" style="background:#FF4D8F"></span>Org scope</span>
+            <span class="pill"><span class="sw" style="background:#EDEFF444;border:1px dashed #EDEFF4"></span>Nightly consolidation</span>
+          </div>
+        </div>
+
+        <div class="share-steps">
+          <div class="share-step reveal">
+            <div class="n">Step 01 · Records</div>
+            <h4>One agent learns.</h4>
+            <p>A Claude agent solves a retry bug on the payments service. Memee writes the pattern down with the test that proved it.</p>
+          </div>
+          <div class="share-step reveal">
+            <div class="n">Step 02 · Scores</div>
+            <h4>Two models agree.</h4>
+            <p>When a different model family hits the same pattern, the score jumps &times;1.3. When another project uses it, &times;1.5. It becomes canon.</p>
+          </div>
+          <div class="share-step reveal">
+            <div class="n">Step 03 · Routes</div>
+            <h4>Every agent benefits.</h4>
+            <p>Tomorrow, a Gemini agent in another team on another codebase starts its task already knowing. 500 tokens. No prompt tutorial.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- S5 TOKEN MATH -->
+    <section class="math shell" id="math">
+      <div class="math-head">
+        <h2 class="display reveal">The token math.</h2>
+        <p class="lede reveal">
+          Internal micro-benchmark. Reproducible with
+          <code>memee&nbsp;benchmark</code>. Your bill depends on model,
+          task volume, and team size &mdash; scroll for the assumptions.
+        </p>
+      </div>
+
+      <div class="math-grid">
+        <div class="math-card without reveal">
+          <div class="cap">Without Memee</div>
+          <div class="big">14,550<span class="suffix">tokens / task</span></div>
+          <div class="per"><span>Per agent-year</span><span>$27,000</span></div>
+          <div class="sub">Full pattern library dumped into every prompt.</div>
+        </div>
+        <div class="math-card with reveal">
+          <div class="cap">With Memee</div>
+          <div class="big">500<span class="suffix">tokens / task</span></div>
+          <div class="per"><span>Per agent-year</span><span>$1,100</span></div>
+          <div class="sub">Router&rsquo;s default 500-token budget per task.</div>
+        </div>
+        <div class="math-card savings reveal">
+          <div class="cap">You keep</div>
+          <div class="big">96%</div>
+          <div class="per"><span>Annual savings, typical</span><span>~$25,900</span></div>
+          <div class="sub">Difference, under the same assumptions.</div>
+        </div>
+      </div>
+
+      <div class="math-foot">
+        <p class="math-pull reveal">Fewer tokens&nbsp;spent. <em>More software shipped.</em></p>
+        <div class="math-note reveal">
+          <strong>How we get to these numbers.</strong><br />
+          <em>Tokens per task</em> &mdash; measured on a 500-pattern knowledge base.
+          The &ldquo;without&rdquo; number is the full library injected into context;
+          the &ldquo;with&rdquo; number is the router&rsquo;s configurable budget (default 500).<br />
+          <em>Dollars per agent-year</em> &mdash; assumes 100 tasks/day &times; 250 working
+          days = 25,000 tasks/year, priced at Claude Opus output
+          ($75 / 1M tokens). Sonnet is ~5&times; cheaper; small teams divide
+          proportionally.<br />
+          <em>These are internal simulations, not customer case studies.</em>
+          Full methodology + reproducibility:
+          <code>memee benchmark</code> &middot;
+          <a href="https://github.com/gizmax-cz/memee/blob/main/docs/benchmarks.md"
+             rel="external">docs/benchmarks.md</a>.
+        </div>
+      </div>
+    </section>
+
+    <!-- S7 PROOF -->
+    <section class="proof shell">
+      <div class="proof-inner">
+        <div class="reveal">
+          <blockquote class="proof-quote">
+            A hundred agents across two hundred projects. Eighteen months.
+            Incidents fell from twelve a month to three. That&rsquo;s the
+            whole pitch.
+          </blockquote>
+          <cite><strong>Internal simulation,</strong> <code>test_gigacorp</code>, marked as such.</cite>
+        </div>
+        <div class="proof-nums reveal">
+          <div class="proof-num hi">
+            <div class="n">501M<span class="delta">tokens saved</span></div>
+            <div class="l">Across 18-month simulation</div>
+          </div>
+          <div class="proof-num">
+            <div class="n">12 → 3</div>
+            <div class="l">Incidents / month</div>
+          </div>
+          <div class="proof-num">
+            <div class="n">200</div>
+            <div class="l">Projects</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- S8 PRICING -->
+    <section class="pricing shell" id="pricing">
+      <div class="pricing-head">
+        <h2 class="display reveal">Pick your scope.</h2>
+        <p class="lede reveal">Memee is a memory layer, not a model. It&rsquo;s priced like shared infrastructure &mdash; flat per team, not per seat.</p>
+      </div>
+
+      <div class="ptiers">
+        <div class="ptier reveal">
+          <div class="tier-name">Free</div>
+          <div class="price">$0<span class="per">forever &middot; MIT-licensed</span></div>
+          <div class="tagline">For solo developers. Self-hosted. Personal memory only.</div>
+          <ul class="features">
+            <li>The full engine: router, quality gate, dream-mode, CMAM sync</li>
+            <li>All 4 model families (Claude, GPT, Gemini, Llama)</li>
+            <li>Personal scope, local SQLite</li>
+            <li>GitHub issues support</li>
+          </ul>
+          <a class="pbtn" href="#order">Install from GitHub</a>
+        </div>
+        <div class="ptier featured reveal">
+          <div class="tier-name">Team</div>
+          <div class="price">$49<span class="per">flat / month &middot; up to 15 seats &middot; annual</span></div>
+          <div class="tagline">For teams that want shared memory, SSO, and an audit trail.</div>
+          <ul class="features">
+            <li><strong>Team + org scope</strong> with promotion workflows</li>
+            <li><strong>SSO</strong> (SAML / OIDC) and RBAC</li>
+            <li>Audit log export, Postgres / Turso backend</li>
+            <li>Cross-project propagation, multi-agent dashboard</li>
+            <li>Email support, 24h SLA</li>
+          </ul>
+          <a class="pbtn" href="#order">Start 14-day trial</a>
+        </div>
+        <div class="ptier reveal">
+          <div class="tier-name">Enterprise</div>
+          <div class="price" style="font-size:clamp(26px,2.4vw,34px);letter-spacing:-0.025em">from $12k<span class="per">per year &middot; unlimited seats &middot; custom MSA</span></div>
+          <div class="tagline">For regulated industries, air-gap, SOC 2.</div>
+          <ul class="features">
+            <li>Everything in Team, at any scale</li>
+            <li><strong>SOC 2 Type II</strong>, DPA, SCIM provisioning</li>
+            <li>On-prem license key, air-gap deployment</li>
+            <li>Dedicated CSM, 4h SLA, quarterly reviews</li>
+            <li>Custom MCP integrations</li>
+          </ul>
+          <a class="pbtn" href="#order">Talk to sales</a>
+        </div>
+      </div>
+
+      <p class="pfoot reveal">Free has every AI feature. Team adds multi-user scope, SSO, and audit. Enterprise adds SOC 2, on-prem, and SLA. Between 15 and 100 seats and don&rsquo;t need SOC 2? Email <a href="mailto:info@memee.eu">info@memee.eu</a> for a custom Growth plan.</p>
+    </section>
+
+    <!-- S9 ORDER -->
+    <section class="order shell" id="order">
+      <div class="order-head">
+        <h2 class="display reveal">Order it.</h2>
+        <p class="lede reveal">Three ways to start, depending on who you are.</p>
+      </div>
+
+      <div class="lanes">
+        <div class="lane dark reveal">
+          <span class="lane-num">01 · Free</span>
+          <h3>One command.</h3>
+          <code class="cli" id="cli-install">pip install memee &amp;&amp; memee setup</code>
+          <p>The engine, on your machine, by tea-time. Bring your own keys.</p>
+          <span class="tiny" id="cli-copied">Click to copy.</span>
+        </div>
+
+        <div class="lane reveal">
+          <span class="lane-num">02 · Team</span>
+          <h3>One form.</h3>
+          <form class="lane-form" id="team-form"
+                action="https://formsubmit.co/info@memee.eu" method="POST">
+            <!-- FormSubmit config — delivered to info@memee.eu on submit -->
+            <input type="hidden" name="_subject" value="Memee Team — trial request" />
+            <input type="hidden" name="_template" value="table" />
+            <input type="hidden" name="_captcha" value="false" />
+            <input type="hidden" name="_honey" value="" />
+            <input type="text" name="company" aria-label="Company" placeholder="Company" required />
+            <input type="number" name="seats" aria-label="Number of seats" placeholder="Seats" min="1" required />
+            <input type="email" name="email" class="full" aria-label="Contact email" placeholder="Contact email" required />
+            <input type="date" name="start" class="full" aria-label="Preferred start date" required />
+            <button type="submit" class="btn" style="grid-column:1/-1;margin-top:4px;justify-content:center">Start 14-day trial <span class="arrow">→</span></button>
+          </form>
+          <span class="tiny">No card until day fifteen. Cancel by reply.</span>
+        </div>
+
+        <div class="lane reveal">
+          <span class="lane-num">03 · Enterprise</span>
+          <h3>One call.</h3>
+          <p>Twenty minutes. If you need SSO, self-hosting, or a DPA, we start here, and end with a signature.</p>
+          <a class="btn" href="mailto:info@memee.eu?subject=Memee%20Enterprise%20intro%20call" style="align-self:flex-start">Book 20 minutes <span class="arrow">→</span></a>
+          <span class="tiny" style="margin-top:auto">Typical reply: same working day, CET.</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="foot">
+    <div class="shell">
+      <h2 class="foot-big">Remember<span class="orange">.</span></h2>
+      <div class="foot-inner">
+        <div>
+          <p><strong style="font-weight:600;color:var(--ink)">Memee.</strong> Built by a company that got tired of teaching the same lesson to every new model.</p>
+        </div>
+        <nav class="foot-nav" aria-label="Footer">
+          <a href="#value">Why</a>
+          <a href="#share">How it works</a>
+          <a href="#pricing">Pricing</a>
+          <a href="https://github.com/gizmax-cz/memee" rel="external">Docs</a>
+          <a href="https://github.com/gizmax-cz/memee" rel="external">GitHub</a>
+          <a href="https://github.com/gizmax-cz/memee/blob/main/CHANGELOG.md" rel="external">Changelog</a>
+        </nav>
+        <div class="foot-meta">
+          © 2026 Memee<br />
+          MIT-licensed core<br />
+          memee.eu
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+(function () {
+  'use strict';
+
+  // Flip `js-ready` on <html> BEFORE paint so the no-JS-visible baseline
+  // transitions into the animated state without a flash. Without JS the
+  // class never lands and everything stays visible — graceful degradation.
+  document.documentElement.classList.add('js-ready');
+
+  // Absolute backstop — if the observer never fires (blocked scripts,
+  // cache restores, broken viewport math), reveal everything within 400ms.
+  const reveals = document.querySelectorAll('.reveal');
+  const showAll = () => reveals.forEach((el) => el.classList.add('in'));
+  const backstop = setTimeout(showAll, 400);
+
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) {
+          e.target.classList.add('in');
+          io.unobserve(e.target);
+        }
+      }
+    }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+    reveals.forEach((el) => io.observe(el));
+    // Reveal elements already in the viewport on first paint.
+    requestAnimationFrame(() => {
+      reveals.forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.top < window.innerHeight && r.bottom > 0) {
+          el.classList.add('in');
+          io.unobserve(el);
+        }
+      });
+      clearTimeout(backstop);
+    });
+  } else {
+    // No observer → skip animations entirely.
+    showAll();
+    clearTimeout(backstop);
+  }
+
+  // ---- Team form — POST to FormSubmit.co, async so the page stays put.
+  //      FormSubmit forwards to info@memee.eu. Falls back to a mailto: link
+  //      pre-filled with the form data if the fetch fails (offline, blocked,
+  //      or FormSubmit down).
+  const form = document.getElementById('team-form');
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button');
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Sending\u2026';
+      const url = form.getAttribute('action').replace(
+        'https://formsubmit.co/',
+        'https://formsubmit.co/ajax/'
+      );
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          body: new FormData(form),
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        btn.textContent = 'Sent. We\u2019ll be in touch. \u2192';
+        form.reset();
+      } catch (err) {
+        const fd = new FormData(form);
+        const body = encodeURIComponent(
+          'Company: ' + (fd.get('company') || '') + '\n' +
+          'Seats: '   + (fd.get('seats')   || '') + '\n' +
+          'Contact: ' + (fd.get('email')   || '') + '\n' +
+          'Start: '   + (fd.get('start')   || '')
+        );
+        location.href =
+          'mailto:info@memee.eu?subject=Memee%20Team%20trial&body=' + body;
+        btn.textContent = 'Opening mail client\u2026';
+      } finally {
+        setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 4200);
+      }
+    });
+  }
+
+  // ---- Copy CLI
+  const cli = document.getElementById('cli-install');
+  if (cli) {
+    cli.addEventListener('click', () => {
+      const txt = cli.textContent.trim().replace(/^\$\s*/, '');
+      if (navigator.clipboard) navigator.clipboard.writeText(txt).catch(() => {});
+      const label = document.getElementById('cli-copied');
+      if (label) {
+        label.textContent = 'Copied.';
+        setTimeout(() => { label.textContent = 'Click to copy.'; }, 1800);
+      }
+    });
+  }
+})();
+
+</script>
+</body>
+</html>

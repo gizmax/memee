@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memee"
+version = "1.0.0"
+description = "Institutional memory for AI agent teams: multi-model, cross-project, token-budgeted."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Memee", email = "info@memee.eu" }]
+keywords = ["ai", "agents", "memory", "llm", "mcp", "claude", "gpt", "gemini", "llama", "rag"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "click>=8.1",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "mcp[cli]>=1.0",
+]
+
+[project.urls]
+Homepage = "https://memee.eu"
+Documentation = "https://github.com/gizmax/memee#readme"
+Repository = "https://github.com/gizmax/memee"
+Issues = "https://github.com/gizmax/memee/issues"
+Changelog = "https://github.com/gizmax/memee/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+vectors = [
+    "sentence-transformers>=3.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "ruff>=0.3",
+    "sentence-transformers>=3.0",
+]
+all = [
+    "memee[vectors]",
+]
+
+[project.scripts]
+memee = "memee.cli:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memee"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
