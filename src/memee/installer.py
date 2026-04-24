@@ -11,6 +11,7 @@ Uses ANSI colors, box drawing, animations, and progressive disclosure.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -34,22 +35,44 @@ class C:
     BYELLOW = "\033[93m"
     BRED = "\033[91m"
     BMAGENTA = "\033[95m"
-    # Gradient helpers
-    G1 = "\033[38;5;39m"   # Blue
-    G2 = "\033[38;5;75m"   # Light blue
-    G3 = "\033[38;5;111m"  # Lavender
-    G4 = "\033[38;5;147m"  # Purple
-    G5 = "\033[38;5;183m"  # Pink
+    # Gradient helpers (kept for compatibility; not used by LOGO any more)
+    G1 = "\033[38;5;39m"
+    G2 = "\033[38;5;75m"
+    G3 = "\033[38;5;111m"
+    G4 = "\033[38;5;147m"
+    G5 = "\033[38;5;183m"
     BG_DARK = "\033[48;5;234m"
+    # Brand accent — cyan-mint #00E5C7, same as `.accent` on memee.eu.
+    # Uses truecolor (24-bit) ANSI; degrades to bright cyan on legacy terms.
+    BRAND = "\033[38;2;0;229;199m"
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _visible_len(s: str) -> int:
+    """Length of `s` ignoring ANSI colour escapes, so box padding lands correctly."""
+    return len(_ANSI_RE.sub("", s))
 
 
 LOGO = f"""
-{C.G1}  ███╗   ███╗{C.G2}███████╗{C.G3}███╗   ███╗{C.G4}███████╗{C.G5}███████╗
-{C.G1}  ████╗ ████║{C.G2}██╔════╝{C.G3}████╗ ████║{C.G4}██╔════╝{C.G5}██╔════╝
-{C.G1}  ██╔████╔██║{C.G2}█████╗  {C.G3}██╔████╔██║{C.G4}█████╗  {C.G5}█████╗
-{C.G1}  ██║╚██╔╝██║{C.G2}██╔══╝  {C.G3}██║╚██╔╝██║{C.G4}██╔══╝  {C.G5}██╔══╝
-{C.G1}  ██║ ╚═╝ ██║{C.G2}███████╗{C.G3}██║ ╚═╝ ██║{C.G4}███████╗{C.G5}███████╗
-{C.G1}  ╚═╝     ╚═╝{C.G2}╚══════╝{C.G3}╚═╝     ╚═╝{C.G4}╚══════╝{C.G5}╚══════╝{C.RESET}
+{C.BRAND}  ███╗   ███╗███████╗███╗   ███╗███████╗███████╗
+{C.BRAND}  ████╗ ████║██╔════╝████╗ ████║██╔════╝██╔════╝
+{C.BRAND}  ██╔████╔██║█████╗  ██╔████╔██║█████╗  █████╗
+{C.BRAND}  ██║╚██╔╝██║██╔══╝  ██║╚██╔╝██║██╔══╝  ██╔══╝
+{C.BRAND}  ██║ ╚═╝ ██║███████╗██║ ╚═╝ ██║███████╗███████╗
+{C.BRAND}  ╚═╝     ╚═╝╚══════╝╚═╝     ╚═╝╚══════╝╚══════╝{C.RESET}
+"""
+
+# Farewell logo, same ANSI-Shadow font, same brand colour.
+# R E M E M B E R  (70 columns wide)
+LOGO_REMEMBER = f"""
+{C.BRAND}  ██████╗ ███████╗███╗   ███╗███████╗███╗   ███╗██████╗ ███████╗██████╗
+{C.BRAND}  ██╔══██╗██╔════╝████╗ ████║██╔════╝████╗ ████║██╔══██╗██╔════╝██╔══██╗
+{C.BRAND}  ██████╔╝█████╗  ██╔████╔██║█████╗  ██╔████╔██║██████╔╝█████╗  ██████╔╝
+{C.BRAND}  ██╔══██╗██╔══╝  ██║╚██╔╝██║██╔══╝  ██║╚██╔╝██║██╔══██╗██╔══╝  ██╔══██╗
+{C.BRAND}  ██║  ██║███████╗██║ ╚═╝ ██║███████╗██║ ╚═╝ ██║██████╔╝███████╗██║  ██║
+{C.BRAND}  ╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚══════╝╚═╝     ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝{C.RESET}
 """
 
 TAGLINE = f"  {C.DIM}Your agents forget. Memee doesn't.{C.RESET}"
@@ -70,11 +93,12 @@ def _type(text: str, delay: float = 0.015):
 
 
 def _box(lines: list[str], color: str = C.CYAN, width: int = 60):
-    """Draw a box around text."""
+    """Draw a box around text. Padding is ANSI-escape aware, so colored
+    lines land on the right border instead of falling short by ~8 chars."""
     print(f"  {color}╭{'─' * width}╮{C.RESET}")
     for line in lines:
-        padded = line.ljust(width - 2)
-        print(f"  {color}│{C.RESET} {padded} {color}│{C.RESET}")
+        pad = max(0, (width - 2) - _visible_len(line))
+        print(f"  {color}│{C.RESET} {line}{' ' * pad} {color}│{C.RESET}")
     print(f"  {color}╰{'─' * width}╯{C.RESET}")
 
 
@@ -334,7 +358,8 @@ def _setup_solo():
         print(f'      {C.DIM}{{"mcpServers": {{"memee": {{"command": "memee", "args": ["serve"]}}}}}}{C.RESET}')
     print()
 
-    _type(f"  {C.G4}The next pattern your agent learns is the last time your team learns it twice.{C.RESET}", delay=0.02)
+    _type(f"  {C.DIM}The next pattern your agent learns is the last time your team learns it twice.{C.RESET}", delay=0.02)
+    print(LOGO_REMEMBER)
 
 
 def _setup_join():

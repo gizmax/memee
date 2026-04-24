@@ -427,7 +427,7 @@ section { padding-block: clamp(72px, 9vw, 140px); }
 /* ============================================================
    SHARING DIAGRAM — how memory travels
    ============================================================ */
-.share { border-top: var(--rule); background: var(--slate); color: var(--ink); }
+.share { border-top: var(--rule); background: var(--slate); color: var(--ink); padding-block: 0; }
 .share .shell {
   padding-inline: var(--pad-x);
   padding-block: clamp(28px, 3.5vw, 56px);
@@ -980,7 +980,10 @@ section { padding-block: clamp(72px, 9vw, 140px); }
   cursor: pointer;
 }
 .lane.dark .cli { background: #00000044; }
+.cli { margin: 0 0 14px; white-space: pre; }
 .cli::before { content: "$ "; color: var(--orange); }
+.cli .cli-cmd { display: block; }
+.cli .cli-note { display: block; opacity: 0.55; font-size: 12px; margin-top: 4px; }
 .lane-form {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1632,10 +1635,11 @@ body::before { display: none; }
         <div class="lane dark reveal">
           <span class="lane-num">01 · Free</span>
           <h3>Two commands.</h3>
-          <code class="cli" id="cli-install">pipx install memee &amp;&amp; memee setup</code>
+          <pre class="cli" id="cli-install"><span class="cli-cmd">pipx install memee &amp;&amp; memee setup</span>
+<span class="cli-note"># already installed? pipx upgrade memee</span></pre>
           <p>The engine, on your machine, by tea-time. Bring your own keys.</p>
           <span class="tiny">No pipx? <code>brew install pipx</code>, or fall back to <code>python3 -m pip install memee</code>.</span>
-          <span class="tiny" id="cli-copied">Click to copy.</span>
+          <span class="tiny" id="cli-copied">Click the command to copy.</span>
         </div>
 
         <div class="lane reveal">
@@ -1778,16 +1782,18 @@ body::before { display: none; }
     });
   }
 
-  // ---- Copy CLI
+  // ---- Copy CLI (copies only the command line, not the # comment below)
   const cli = document.getElementById('cli-install');
   if (cli) {
     cli.addEventListener('click', () => {
-      const txt = cli.textContent.trim().replace(/^\$\s*/, '');
+      const cmdEl = cli.querySelector('.cli-cmd');
+      const txt = (cmdEl ? cmdEl.textContent : cli.textContent)
+        .trim().replace(/^\$\s*/, '');
       if (navigator.clipboard) navigator.clipboard.writeText(txt).catch(() => {});
       const label = document.getElementById('cli-copied');
       if (label) {
         label.textContent = 'Copied.';
-        setTimeout(() => { label.textContent = 'Click to copy.'; }, 1800);
+        setTimeout(() => { label.textContent = 'Click the command to copy.'; }, 1800);
       }
     });
   }
