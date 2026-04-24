@@ -16,10 +16,7 @@ Auto-fixes:
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 # ── ANSI ──
@@ -224,7 +221,6 @@ def get_knowledge_health() -> dict:
         from memee.storage.database import get_session, init_db
         from memee.storage.models import Memory, MaturityLevel, MemoryConnection
         from sqlalchemy import func
-        from datetime import datetime, timedelta, timezone
 
         session = get_session(init_db())
         total = session.query(func.count(Memory.id)).scalar() or 0

@@ -19,7 +19,6 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
 
-from memee.config import Settings
 from memee.storage.database import get_engine, get_session, init_db
 from memee.storage.models import Organization
 

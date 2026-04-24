@@ -7,7 +7,6 @@ Falls back gracefully if sentence-transformers is not installed.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 

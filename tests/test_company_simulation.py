@@ -18,7 +18,6 @@ Run: pytest tests/test_company_simulation.py -v -s
 import random
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import func
@@ -30,22 +29,15 @@ from memee.engine.lifecycle import run_aging_cycle
 from memee.engine.predictive import scan_project_for_warnings
 from memee.engine.propagation import run_propagation_cycle
 from memee.engine.review import review_diff
-from memee.engine.search import search_anti_patterns, search_memories
 from memee.storage.models import (
     AntiPattern,
     Decision,
     MaturityLevel,
     Memory,
-    MemoryConnection,
     MemoryType,
     MemoryValidation,
-    Organization,
     Project,
     ProjectMemory,
-    ResearchExperiment,
-    ResearchIteration,
-    ResearchStatus,
-    Severity,
 )
 
 random.seed(42)
@@ -376,8 +368,8 @@ class TestCompanySimulation:
         start_time = time.time()
 
         print("\n" + "=" * 80)
-        print(f"  NOVATECH — 6-MONTH ORGANIZATIONAL LEARNING JOURNEY")
-        print(f"  6 teams | 11 projects | 10 agents | 24 weeks")
+        print("  NOVATECH — 6-MONTH ORGANIZATIONAL LEARNING JOURNEY")
+        print("  6 teams | 11 projects | 10 agents | 24 weeks")
         print("=" * 80)
 
         for week in range(1, 25):
@@ -618,7 +610,7 @@ class TestCompanySimulation:
         # ═══════════════════════════════════
 
         print(f"\n{'─' * 80}")
-        print(f"  MONTH 1 (Weeks 1-4): CHAOS PHASE")
+        print("  MONTH 1 (Weeks 1-4): CHAOS PHASE")
         print(f"{'─' * 80}")
         for wm in weekly_metrics[:4]:
             if wm["events"]:
@@ -627,7 +619,7 @@ class TestCompanySimulation:
                     print(f"    {e}")
 
         print(f"\n{'─' * 80}")
-        print(f"  MONTH 2 (Weeks 5-8): DISCOVERY PHASE")
+        print("  MONTH 2 (Weeks 5-8): DISCOVERY PHASE")
         print(f"{'─' * 80}")
         for wm in weekly_metrics[4:8]:
             if wm["events"]:
@@ -636,7 +628,7 @@ class TestCompanySimulation:
                     print(f"    {e}")
 
         print(f"\n{'─' * 80}")
-        print(f"  MONTH 3 (Weeks 9-12): LEARNING PHASE")
+        print("  MONTH 3 (Weeks 9-12): LEARNING PHASE")
         print(f"{'─' * 80}")
         for wm in weekly_metrics[8:12]:
             if wm["events"]:
@@ -645,7 +637,7 @@ class TestCompanySimulation:
                     print(f"    {e}")
 
         print(f"\n{'─' * 80}")
-        print(f"  MONTHS 4-6 (Weeks 13-24): MATURITY → MASTERY")
+        print("  MONTHS 4-6 (Weeks 13-24): MATURITY → MASTERY")
         print(f"{'─' * 80}")
         for wm in weekly_metrics[12:]:
             if wm["events"]:
@@ -655,7 +647,7 @@ class TestCompanySimulation:
 
         # ── Incident Timeline ──
         print(f"\n{'═' * 80}")
-        print(f"  INCIDENT TIMELINE — Historical mistakes & how org responded")
+        print("  INCIDENT TIMELINE — Historical mistakes & how org responded")
         print(f"{'═' * 80}")
         for inc in incident_log:
             # Find if this was later avoided by others
@@ -670,7 +662,7 @@ class TestCompanySimulation:
 
         # ── Anti-Pattern Avoidance Story ──
         print(f"\n{'═' * 80}")
-        print(f"  ANTI-PATTERN AVOIDANCE — Mistakes prevented by Memee")
+        print("  ANTI-PATTERN AVOIDANCE — Mistakes prevented by Memee")
         print(f"{'═' * 80}")
         avoidance_by_week = defaultdict(int)
         for a in avoidance_log:
@@ -687,7 +679,7 @@ class TestCompanySimulation:
         # ── Code Review Effectiveness ──
         if review_results:
             print(f"\n{'═' * 80}")
-            print(f"  CODE REVIEW — Institutional knowledge in action")
+            print("  CODE REVIEW — Institutional knowledge in action")
             print(f"{'═' * 80}")
             for rev in review_results:
                 status = "CORRECT" if rev["caught_correctly"] else "MISSED"
@@ -698,7 +690,7 @@ class TestCompanySimulation:
 
         # ── Knowledge Growth ──
         print(f"\n{'═' * 80}")
-        print(f"  KNOWLEDGE GROWTH OVER 6 MONTHS")
+        print("  KNOWLEDGE GROWTH OVER 6 MONTHS")
         print(f"{'═' * 80}")
         print(f"\n  {'Week':>4s} | {'Total':>5s} | {'Canon':>5s} | {'Valid':>5s} | "
               f"{'Tested':>6s} | {'Conf':>5s} | Maturity Distribution")
@@ -715,7 +707,7 @@ class TestCompanySimulation:
 
         # ── Agent Report Card ──
         print(f"\n{'═' * 80}")
-        print(f"  AGENT REPORT CARDS")
+        print("  AGENT REPORT CARDS")
         print(f"{'═' * 80}")
         print(f"\n  {'Agent':>8s} | {'Team':>10s} | {'Created':>7s} | "
               f"{'Mistakes':>8s} | {'Saves':>5s} | Learning")
@@ -731,7 +723,7 @@ class TestCompanySimulation:
 
         # ── Org IQ Over Time ──
         print(f"\n{'═' * 80}")
-        print(f"  ORGANIZATIONAL IQ EVOLUTION")
+        print("  ORGANIZATIONAL IQ EVOLUTION")
         print(f"{'═' * 80}")
         final = weekly_metrics[-1]
         total = max(final["total"], 1)
@@ -763,7 +755,7 @@ class TestCompanySimulation:
 
         # ── Key Takeaways ──
         print(f"\n{'═' * 80}")
-        print(f"  KEY TAKEAWAYS")
+        print("  KEY TAKEAWAYS")
         print(f"{'═' * 80}")
         print(f"""
   1. CHAOS → ORDER: 7 real incidents in months 1-3, but each one became

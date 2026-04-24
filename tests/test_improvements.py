@@ -2,7 +2,6 @@
 
 import pytest
 
-from memee.engine.confidence import update_confidence
 from memee.engine.dream import run_dream_cycle
 from memee.engine.inheritance import compute_stack_similarity, inherit_memories
 from memee.engine.predictive import scan_all_projects, scan_project_for_warnings
@@ -13,10 +12,8 @@ from memee.storage.models import (
     MaturityLevel,
     Memory,
     MemoryType,
-    Organization,
     Project,
     ProjectMemory,
-    Severity,
 )
 
 

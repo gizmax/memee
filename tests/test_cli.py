@@ -1,7 +1,5 @@
 """Tests for CLI commands."""
 
-import os
-from pathlib import Path
 
 from click.testing import CliRunner
 

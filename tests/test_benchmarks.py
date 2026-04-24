@@ -18,8 +18,6 @@ Run: pytest tests/test_benchmarks.py -v -s
 
 import random
 import time
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import func
@@ -36,10 +34,8 @@ from memee.storage.models import (
     MemoryConnection,
     MemoryType,
     MemoryValidation,
-    Organization,
     Project,
     ProjectMemory,
-    Severity,
 )
 
 random.seed(2026)
@@ -151,7 +147,7 @@ class TestRawPerformance:
             session.commit()
 
         print(f"\n{'═' * 60}")
-        print(f"  INSERT THROUGHPUT")
+        print("  INSERT THROUGHPUT")
         print(f"{'═' * 60}")
         print(f"  {'N':>6s} | {'Time':>8s} | {'ops/s':>10s} | Bar")
         print(f"  {'─'*6} | {'─'*8} | {'─'*10} | {'─'*30}")
@@ -210,7 +206,7 @@ class TestRawPerformance:
                 times_hybrid.append(elapsed)
 
         print(f"\n{'═' * 60}")
-        print(f"  SEARCH LATENCY (2000 memories, 5 queries)")
+        print("  SEARCH LATENCY (2000 memories, 5 queries)")
         print(f"{'═' * 60}")
 
         avg_bm25 = sum(times_bm25) / len(times_bm25)
@@ -222,7 +218,7 @@ class TestRawPerformance:
             p95_hybrid = sorted(times_hybrid)[int(len(times_hybrid) * 0.95)]
             print(f"  Hybrid (BM25+Vec): avg={avg_hybrid:.1f}ms  p95={p95_hybrid:.1f}ms")
 
-        print(f"\n  Per-query breakdown:")
+        print("\n  Per-query breakdown:")
         for i, q in enumerate(queries):
             line = f"    {q:35s} BM25={times_bm25[i]:5.1f}ms"
             if times_hybrid:
@@ -355,19 +351,19 @@ class TestCompetitiveScenarios:
         ).count()
 
         print(f"\n{'═' * 60}")
-        print(f"  SCENARIO: Cross-Project Knowledge Transfer")
+        print("  SCENARIO: Cross-Project Knowledge Transfer")
         print(f"{'═' * 60}")
-        print(f"  50 patterns in 3 projects, 12 other projects waiting")
-        print(f"")
-        print(f"  Competitor (pull-only):")
+        print("  50 patterns in 3 projects, 12 other projects waiting")
+        print("")
+        print("  Competitor (pull-only):")
         print(f"    Agent must search manually: finds {competitor_found}/10 patterns")
         print(f"    Project 5 auto-has: {proj5_before} patterns")
-        print(f"")
-        print(f"  Memee (auto-propagation):")
+        print("")
+        print("  Memee (auto-propagation):")
         print(f"    Propagated: {prop_stats['total_new_links']} new links")
         print(f"    Projects reached: {prop_stats['projects_reached']}")
         print(f"    Project 5 auto-has: {proj5_after} patterns")
-        print(f"")
+        print("")
         print(f"  ADVANTAGE: Memee delivers {proj5_after}x more patterns without manual search")
 
         assert proj5_after > 0, "Propagation should push patterns to project 5"
@@ -422,18 +418,18 @@ class TestCompetitiveScenarios:
         memee_rate = memee_avoidances / memee_checks
 
         print(f"\n{'═' * 60}")
-        print(f"  SCENARIO: Mistake Prevention (100 attempts)")
+        print("  SCENARIO: Mistake Prevention (100 attempts)")
         print(f"{'═' * 60}")
-        print(f"  5 known anti-patterns, agents on new projects")
-        print(f"")
-        print(f"  Competitor (pull-only, 30% check rate):")
+        print("  5 known anti-patterns, agents on new projects")
+        print("")
+        print("  Competitor (pull-only, 30% check rate):")
         print(f"    Avoidances: {competitor_avoidances}/100 ({comp_rate:.0%})")
         print(f"    Missed: {competitor_checks - competitor_avoidances}")
-        print(f"")
-        print(f"  Memee (predictive push):")
+        print("")
+        print("  Memee (predictive push):")
         print(f"    Avoidances: {memee_avoidances}/100 ({memee_rate:.0%})")
         print(f"    Missed: {memee_checks - memee_avoidances}")
-        print(f"")
+        print("")
         improvement = ((memee_rate - comp_rate) / max(comp_rate, 0.01)) * 100
         print(f"  ADVANTAGE: Memee prevents {improvement:+.0f}% more mistakes")
 
@@ -511,10 +507,10 @@ class TestCompetitiveScenarios:
         comp_connections = 0 # No graph
 
         print(f"\n{'═' * 60}")
-        print(f"  SCENARIO: Knowledge Quality After 20 Weeks")
+        print("  SCENARIO: Knowledge Quality After 20 Weeks")
         print(f"{'═' * 60}")
-        print(f"  200 patterns, mixed validation signals")
-        print(f"")
+        print("  200 patterns, mixed validation signals")
+        print("")
         print(f"  {'Metric':<25s} | {'Competitor':>12s} | {'Memee':>12s} | {'Winner':>8s}")
         print(f"  {'─'*25} | {'─'*12} | {'─'*12} | {'─'*8}")
 
@@ -573,11 +569,11 @@ class TestCompetitiveScenarios:
         hybrid_hits = 0
 
         print(f"\n{'═' * 60}")
-        print(f"  SCENARIO: Semantic Search Quality")
+        print("  SCENARIO: Semantic Search Quality")
         print(f"{'═' * 60}")
-        print(f"  10 queries with NO exact keyword match to titles")
+        print("  10 queries with NO exact keyword match to titles")
         print(f"  Vector search: {'ENABLED' if has_vec else 'DISABLED'}")
-        print(f"")
+        print("")
         print(f"  {'Query':<45s} | {'BM25':>4s} | {'Hybrid':>6s} | {'Found':>30s}")
         print(f"  {'─'*45} | {'─'*4} | {'─'*6} | {'─'*30}")
 
@@ -657,21 +653,21 @@ class TestCompetitiveScenarios:
         memee_day1 = stats["memories_inherited"]
 
         print(f"\n{'═' * 60}")
-        print(f"  SCENARIO: New Project Onboarding")
+        print("  SCENARIO: New Project Onboarding")
         print(f"{'═' * 60}")
-        print(f"  New Python/FastAPI project joins org with 80 validated patterns")
-        print(f"")
-        print(f"  Competitor (start from zero):")
+        print("  New Python/FastAPI project joins org with 80 validated patterns")
+        print("")
+        print("  Competitor (start from zero):")
         print(f"    Day 1 patterns: {competitor_day1}")
         print(f"    Weeks to match Memee: ~{memee_day1 // 3}+ weeks")
-        print(f"")
-        print(f"  Memee (inheritance):")
+        print("")
+        print("  Memee (inheritance):")
         print(f"    Day 1 patterns: {memee_day1}")
         print(f"    Similar projects: {len(stats['similar_projects'])}")
         for sp in stats["similar_projects"]:
             print(f"      {sp['name']} (similarity: {sp['similarity']:.2f})")
         print(f"    By type: {stats['by_type']}")
-        print(f"")
+        print("")
         print(f"  ADVANTAGE: Memee gives {memee_day1} patterns on day 1 vs 0")
 
         assert memee_day1 > 0
@@ -731,9 +727,9 @@ class TestCompetitiveSummary:
         ap_coverage = min(ap_scan["total_warnings"] / 30, 1.0)
 
         print(f"\n{'═' * 70}")
-        print(f"  COMPETITIVE BENCHMARK SUMMARY")
+        print("  COMPETITIVE BENCHMARK SUMMARY")
         print(f"{'═' * 70}")
-        print(f"")
+        print("")
         print(f"  {'Feature':<30s} | {'Mem0':>5s} | {'Zep':>5s} | {'Letta':>5s} | "
               f"{'Palace':>6s} | {'MEMEE':>6s}")
         print(f"  {'─'*30} | {'─'*5} | {'─'*5} | {'─'*5} | {'─'*6} | {'─'*6}")

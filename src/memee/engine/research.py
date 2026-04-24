@@ -12,15 +12,10 @@ The engine orchestrates the loop. Claude agents provide the modifications.
 
 from __future__ import annotations
 
-import json
 import subprocess
 import re
-import time
 from collections import defaultdict
-from datetime import datetime, timezone
-from pathlib import Path
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from memee.storage.models import (

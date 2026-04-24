@@ -1,6 +1,5 @@
 """Tests for token savings estimation."""
 
-import pytest
 
 from memee.engine.tokens import (
     estimate_org_savings,

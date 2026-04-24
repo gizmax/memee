@@ -1,10 +1,7 @@
 """FastAPI application — Memee Dashboard & API."""
 
-from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI
 
 from memee.api.routes.dashboard import router as dashboard_router
 from memee.api.routes.api_v1 import router as api_router

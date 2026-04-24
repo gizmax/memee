@@ -20,7 +20,6 @@ Run: pytest tests/test_impact_analysis.py -v -s
 """
 
 import random
-import time
 from collections import defaultdict
 
 import pytest
@@ -28,7 +27,6 @@ from sqlalchemy import func
 
 from memee.engine.confidence import update_confidence
 from memee.engine.lifecycle import run_aging_cycle
-from memee.engine.search import search_anti_patterns, search_memories
 from memee.storage.models import (
     AntiPattern,
     Decision,
@@ -37,10 +35,8 @@ from memee.storage.models import (
     MemoryConnection,
     MemoryType,
     MemoryValidation,
-    Organization,
     Project,
     ProjectMemory,
-    Severity,
 )
 
 random.seed(2026)
@@ -724,7 +720,7 @@ class TestImpactAnalysis:
         total_improvement = ((final_iq - baseline["iq"]) / baseline["iq"] * 100)
 
         print(f"\n{'=' * 80}")
-        print(f"  CUMULATIVE: ALL 10 IMPROVEMENTS")
+        print("  CUMULATIVE: ALL 10 IMPROVEMENTS")
         print(f"  Baseline Org IQ:     {baseline['iq']:6.1f}")
         print(f"  Final Org IQ:        {final_iq:6.1f}")
         print(f"  Total improvement:   {total_improvement:+.1f}%")
@@ -734,7 +730,7 @@ class TestImpactAnalysis:
         print(f"{'=' * 80}")
 
         # Stats for display
-        print(f"\n  Extra stats:")
+        print("\n  Extra stats:")
         print(f"    Auto-propagated:     {propagated} patterns")
         print(f"    Dream connections:   {connections_created}")
         print(f"    Dream validations:   {dream_validations}")

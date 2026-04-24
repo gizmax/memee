@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import random
 import time
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
 
@@ -17,7 +15,6 @@ from memee.engine.confidence import update_confidence
 from memee.engine.dream import run_dream_cycle
 from memee.engine.inheritance import inherit_memories
 from memee.engine.lifecycle import run_aging_cycle
-from memee.engine.predictive import scan_project_for_warnings
 from memee.engine.propagation import run_propagation_cycle
 from memee.storage.database import get_session, init_db
 from memee.storage.models import (
@@ -31,7 +28,6 @@ from memee.storage.models import (
     Organization,
     Project,
     ProjectMemory,
-    Severity,
 )
 
 random.seed(2026)

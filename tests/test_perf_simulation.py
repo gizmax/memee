@@ -13,26 +13,23 @@ Simulates realistic multi-agent, multi-project workflows:
 Run with: pytest tests/test_perf_simulation.py -v -s
 """
 
-import json
 import random
 import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from memee.engine.confidence import evaluate_maturity, update_confidence
+from memee.engine.confidence import update_confidence
 from memee.engine.lifecycle import run_aging_cycle
 from memee.engine.search import search_anti_patterns, search_memories
 from memee.storage.models import (
     AntiPattern,
-    Decision,
     LearningSnapshot,
     MaturityLevel,
     Memory,
     MemoryConnection,
     MemoryType,
     MemoryValidation,
-    Organization,
     Project,
     ProjectMemory,
     ResearchExperiment,
@@ -470,7 +467,7 @@ class TestCrossProjectTransfer:
             session, "HTTP requests API", tags=["python", "api"], limit=5
         )
 
-        print(f"\n  Search 'HTTP requests API' from WebDashboard context:")
+        print("\n  Search 'HTTP requests API' from WebDashboard context:")
         for r in results:
             print(f"    [{r['total_score']:.3f}] {r['memory'].title}")
 
@@ -523,7 +520,7 @@ class TestLearningFromMistakes:
             session, "pypdf complex PDF", tags=["python", "pdf"]
         )
 
-        print(f"\n  Step 2: Agent Beta checks before implementing PDF processing")
+        print("\n  Step 2: Agent Beta checks before implementing PDF processing")
         print(f"    Found {len(check_results)} warning(s)")
 
         assert len(check_results) > 0
@@ -557,7 +554,7 @@ class TestLearningFromMistakes:
         )
         session.commit()
 
-        print(f"\n  Step 3-4: Two more agents validate the anti-pattern")
+        print("\n  Step 3-4: Two more agents validate the anti-pattern")
         print(f"    Confidence: {anti_mem.confidence_score:.2f}")
         print(f"    Maturity: {anti_mem.maturity}")
         print(f"    Projects warned: {anti_mem.project_count}")
@@ -607,7 +604,7 @@ class TestLearningFromMistakes:
 
         session.commit()
 
-        print(f"\n  After 3 failures:")
+        print("\n  After 3 failures:")
         print(f"    Confidence: {memory.confidence_score:.2f}")
         print(f"    Maturity: {memory.maturity}")
 
@@ -749,7 +746,7 @@ class TestConfidenceEvolution:
             delta = memory.confidence_score - old
             deltas.append(delta)
 
-        print(f"\n  Diminishing returns (same project, 10 validations):")
+        print("\n  Diminishing returns (same project, 10 validations):")
         for i, d in enumerate(deltas):
             bar = "█" * int(d * 500)
             print(f"    Validation {i+1:2d}: +{d:.4f} {bar}")
@@ -880,7 +877,7 @@ class TestMaturityProgression:
 
         stats = run_aging_cycle(session)
 
-        print(f"\n  Aging cycle results:")
+        print("\n  Aging cycle results:")
         print(f"    Expired: {stats['expired']}")
         print(f"    Deprecated: {stats['deprecated']}")
         print(f"    Promoted: {stats['promoted']}")
@@ -976,7 +973,7 @@ class TestAutoresearchSimulation:
         print(f"  Crashes: {experiment.crashes}")
 
         # Visualize
-        print(f"\n  Metric trajectory (sampled every 5):")
+        print("\n  Metric trajectory (sampled every 5):")
         for i, val, status in iteration_results[::5]:
             bar = "█" * int((val - 0.4) * 100)
             icon = {"keep": "+", "discard": ".", "crash": "X"}[status]
@@ -1077,7 +1074,7 @@ class TestMultiAgentCollaboration:
 
         session.commit()
 
-        print(f"\n  Multi-Agent Collaboration Summary:")
+        print("\n  Multi-Agent Collaboration Summary:")
         print(f"  {'Agent':>15s} | {'Recorded':>8s} | {'Found':>5s} | {'Avoided':>7s}")
         print(f"  {'─'*15:s} | {'─'*8:s} | {'─'*5:s} | {'─'*7:s}")
         for agent, stats in agent_stats.items():
@@ -1210,7 +1207,7 @@ class TestOrganizationalLearning:
             })
 
         # Print learning progression
-        print(f"\n  Organizational Learning Over 4 Weeks:")
+        print("\n  Organizational Learning Over 4 Weeks:")
         print(f"  {'Week':>4s} | {'Total':>5s} | {'Canon':>5s} | {'Valid':>5s} | "
               f"{'Hypo':>5s} | {'Depr':>5s} | {'AvgConf':>7s} | {'LRate':>5s}")
         print(f"  {'─'*4} | {'─'*5} | {'─'*5} | {'─'*5} | "

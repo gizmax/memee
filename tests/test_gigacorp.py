@@ -29,22 +29,20 @@ from sqlalchemy import func
 
 from memee.engine.confidence import update_confidence
 from memee.engine.dream import run_dream_cycle
-from memee.engine.impact import ImpactType, get_impact_summary, record_impact
 from memee.engine.inheritance import inherit_memories
 from memee.engine.lifecycle import run_aging_cycle
 from memee.engine.predictive import scan_project_for_warnings
 from memee.engine.propagation import run_propagation_cycle
-from memee.engine.quality_gate import run_quality_gate, merge_duplicate
+from memee.engine.quality_gate import run_quality_gate
 from memee.engine.research import (
-    complete_experiment, create_experiment, get_meta_learning, log_iteration,
+    complete_experiment, create_experiment, log_iteration,
 )
 from memee.engine.router import smart_briefing
 from memee.engine.search import search_memories
 from memee.engine.tokens import estimate_org_savings
 from memee.storage.models import (
-    AntiPattern, Decision, LearningSnapshot, MaturityLevel, Memory,
-    MemoryConnection, MemoryType, MemoryValidation, Organization,
-    Project, ProjectMemory, Severity,
+    AntiPattern, MaturityLevel, Memory,
+    MemoryConnection, MemoryType, MemoryValidation, Project, ProjectMemory,
 )
 
 random.seed(2026)
@@ -407,19 +405,19 @@ class TestGigaCorp:
         # ═══════════════════════════════════
 
         print(f"\n{'═' * 85}")
-        print(f"  GIGACORP — 18-MONTH SIMULATION")
+        print("  GIGACORP — 18-MONTH SIMULATION")
         print(f"  {n_projects} projects | {n_agents} agents | 78 weeks | 12 departments | 7 models")
         print(f"{'═' * 85}")
 
         # Scale
-        print(f"\n  SCALE")
+        print("\n  SCALE")
         print(f"    Simulation time:     {elapsed:.1f}s")
         print(f"    Total memories:      {total_mem}")
         print(f"    Memories/second:     {total_mem / elapsed:.0f}")
         print(f"    Graph connections:   {connections}")
 
         # Knowledge maturity
-        print(f"\n  KNOWLEDGE MATURITY")
+        print("\n  KNOWLEDGE MATURITY")
         mat = dict(session.query(Memory.maturity, func.count(Memory.id))
                    .group_by(Memory.maturity).all())
         for level in ["canon", "validated", "tested", "hypothesis", "deprecated"]:
@@ -431,7 +429,7 @@ class TestGigaCorp:
 
         # Incident prevention
         avoidance_rate = M["incidents_avoided"] / max(M["incidents_seen"], 1) * 100
-        print(f"\n  INCIDENT METRICS (split honestly)")
+        print("\n  INCIDENT METRICS (split honestly)")
         print(f"    Incidents seen:     {M['incidents_seen']}")
         print(f"    Incidents avoided:  {M['incidents_avoided']} ({avoidance_rate:.0f}% of seen)")
         print(f"    Warnings delivered: {M['warnings_delivered']} (proactive scans)")
@@ -439,7 +437,7 @@ class TestGigaCorp:
         print(f"    Time wasted:        {M['time_wasted_min']:,} minutes (without Memee)")
 
         # Quality gate
-        print(f"\n  QUALITY GATE")
+        print("\n  QUALITY GATE")
         print(f"    Patterns recorded:  {M['patterns_recorded']}")
         print(f"    Anti-patterns:      {M['ap_recorded']}")
         print(f"    Duplicates merged:  {M['dedup_merged']}")
@@ -449,14 +447,14 @@ class TestGigaCorp:
               f"{M['hall_missed']} killed by peers")
 
         # Smart router
-        print(f"\n  SMART ROUTER")
+        print("\n  SMART ROUTER")
         print(f"    Queries:           {M['router_queries']}")
         print(f"    Avg tokens/query:  {router_avg_tokens:.0f}")
         print(f"    Full dump would be:{full_dump_tokens} tokens")
         print(f"    Token reduction:   {(1-router_avg_tokens/max(full_dump_tokens,1))*100:.0f}%")
 
         # Token savings
-        print(f"\n  TOKEN SAVINGS (annual estimate)")
+        print("\n  TOKEN SAVINGS (annual estimate)")
         print(f"    Tokens saved:      {token_savings.total_tokens_saved/1_000_000:.0f}M tokens/year")
         print(f"    Cost saved:        ${token_savings.total_cost_saved_usd:,.0f}/year")
         print(f"    Token reduction:   {token_savings.reduction_pct:.0f}%")
@@ -468,7 +466,7 @@ class TestGigaCorp:
         total_saved = dev_cost_saved + token_savings.total_cost_saved_usd
         roi = total_saved / memee_cost
 
-        print(f"\n  ROI")
+        print("\n  ROI")
         print(f"    Dev time saved:    {time_saved_hours:.0f} hours → ${dev_cost_saved:,.0f}")
         print(f"    Token savings:     ${token_savings.total_cost_saved_usd:,.0f}")
         print(f"    Total saved:       ${total_saved:,.0f}/year")
@@ -477,18 +475,18 @@ class TestGigaCorp:
 
         # Autoresearch
         keep_rate = M["experiment_keeps"] / max(M["experiment_total_iter"], 1)
-        print(f"\n  AUTORESEARCH")
+        print("\n  AUTORESEARCH")
         print(f"    Experiments:       {M['experiments']}")
         print(f"    Total iterations:  {M['experiment_total_iter']}")
         print(f"    Keep rate:         {keep_rate:.0%}")
 
         # Propagation
-        print(f"\n  KNOWLEDGE TRANSFER")
+        print("\n  KNOWLEDGE TRANSFER")
         print(f"    Propagated links:  {M['propagated_links']}")
         print(f"    Onboard inherited: {M['onboarding_inherited']}")
 
         # Monthly progression
-        print(f"\n  MONTHLY PROGRESSION")
+        print("\n  MONTHLY PROGRESSION")
         print(f"    {'Month':>5s} | {'Total':>5s} | {'Canon':>5s} | {'Valid':>5s} | {'Conf':>5s} | {'Graph':>5s}")
         print(f"    {'─'*5} | {'─'*5} | {'─'*5} | {'─'*5} | {'─'*5} | {'─'*5}")
         for s in M["monthly"]:
@@ -496,7 +494,7 @@ class TestGigaCorp:
                   f"{s['validated']:5d} | {s['avg_conf']:.3f} | {s['connections']:5d}")
 
         # Incident trend
-        print(f"\n  INCIDENT TREND (4-week blocks)")
+        print("\n  INCIDENT TREND (4-week blocks)")
         weekly_incidents = defaultdict(int)
         # Approximate from total
         for w in range(78):

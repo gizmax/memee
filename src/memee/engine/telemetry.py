@@ -130,7 +130,7 @@ def compute_retrieval_metrics(session: Session, window_days: int) -> dict:
     """
     from datetime import datetime, timedelta, timezone
 
-    from sqlalchemy import and_, func
+    from sqlalchemy import and_
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
 

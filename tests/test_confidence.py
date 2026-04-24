@@ -5,7 +5,6 @@ from memee.storage.models import (
     MaturityLevel,
     Memory,
     MemoryType,
-    MemoryValidation,
     Project,
     ProjectMemory,
 )

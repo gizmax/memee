@@ -9,16 +9,12 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from memee.config import settings
-from memee.engine.confidence import update_confidence
 from memee.storage.models import (
     MaturityLevel,
     Memory,
     MemoryType,
-    MemoryValidation,
     Project,
     ProjectMemory,
-    utcnow,
 )
 
 

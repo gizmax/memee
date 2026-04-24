@@ -12,12 +12,9 @@ from memee.storage.database import get_session, init_db
 from memee.storage.models import (
     AntiPattern,
     LearningSnapshot,
-    MaturityLevel,
     Memory,
     MemoryConnection,
-    MemoryType,
     MemoryValidation,
-    Organization,
     Project,
     ProjectMemory,
 )

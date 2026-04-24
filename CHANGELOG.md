@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] — 2026-04-24
+
+Release-hygiene pass triggered by a third-party pre-launch review.
+No behavioural or API changes; everything below is packaging, docs, or
+lint cleanliness.
+
+### Changed
+
+- `ruff check .` is now clean across the whole codebase. Pragmatic
+  ignores for `E402`, `E741`, and `F841` are documented in
+  `pyproject.toml` alongside why each one is safe in Memee's context.
+- `sdist` packaging excludes tightened so a build from the private
+  monorepo cannot accidentally ship the paid `memee-team/` package or
+  any internal-only docs (`trial-and-licensing.md`, `launch-posts.md`,
+  `microsite-brief.md`, `publish-oss.md`, `project_split.md`).
+- `scripts/publish_oss.sh` excludes the same three internal-only docs
+  so a public-mirror sync cannot leak operator-only material either.
+- README benchmark numbers reconciled with `docs/benchmarks.md` ground
+  truth: OrgMemEval 92.4/100 (was 93.8), GigaCorp 100 projects and 3×
+  annual ROI at the flat $49/mo Team tier (was "200 projects / 7×"
+  from the deprecated $199/mo Org tier), A/B ROI 10.7×, competitor
+  baseline expressed as a range (0.9–3.5) instead of a single figure,
+  reproducibility block updated to "~60s" full-suite runtime. The
+  "No account, no network call" line softened to reflect that the
+  optional `sentence-transformers` embedding path fetches a HuggingFace
+  model on first use (skipped with `TRANSFORMERS_OFFLINE=1`).
+- `SECURITY.md`: explicit note that `memee research` runs user-supplied
+  `verify_command` / `guard_command` via `subprocess.run(..., shell=True)`,
+  with guidance for shared/untrusted environments.
+
 ## [1.0.1] — 2026-04-24
 
 Installer UX fixes and cosmetics. No API changes.

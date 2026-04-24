@@ -8,13 +8,11 @@ rather than actually hitting Anthropic.
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 
 import pytest
 
 from memee.adapters.cmam import (
     CMAMConfig,
-    HARD_BYTES_LIMIT,
     MAX_MEMORY_BYTES,
     _chunk_if_needed,
     _FSBackend,
@@ -29,11 +27,9 @@ from memee.adapters.cmam import (
 )
 from memee.storage.models import (
     AntiPattern,
-    Decision,
     MaturityLevel,
     Memory,
     MemoryType,
-    Project,
     Severity,
 )
 

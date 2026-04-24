@@ -295,12 +295,12 @@ def _setup_solo():
     _box([
         f"{C.BGREEN}✓ Memee is ready!{C.RESET}",
         "",
-        f"  Database:  ~/.memee/memee.db",
+        "  Database:  ~/.memee/memee.db",
         f"  Org:       {org_name}",
         f"  Stack:     {stack_name}",
         f"  Models:    {', '.join(models)}",
         f"  Tools:     {tools_str}",
-        f"  Scope:     personal (free tier)",
+        "  Scope:     personal (free tier)",
     ], color=C.GREEN, width=55)
 
     # ── You're done. Say so clearly. ──
@@ -308,7 +308,7 @@ def _setup_solo():
 
     print(f"  {C.BOLD}Memee is now live and fully automatic.{C.RESET}")
     print()
-    print(f"  From this moment, every time your AI assistant works on a task:")
+    print("  From this moment, every time your AI assistant works on a task:")
     print(f"  {C.GREEN}•{C.RESET} it sees only the memories that matter for that task (routed)")
     print(f"  {C.GREEN}•{C.RESET} what it learns is recorded, scored, and shared with other models")
     print(f"    ({C.BCYAN}Claude ↔ GPT ↔ Gemini ↔ Llama{C.RESET}) and other projects on this machine")
@@ -320,8 +320,8 @@ def _setup_solo():
 
     _section("YOU CAN JUST TALK TO YOUR AGENT")
 
-    print(f"  The MCP hooks are wired. You don't need any of the commands below.")
-    print(f"  Just ask your AI assistant, in plain English:")
+    print("  The MCP hooks are wired. You don't need any of the commands below.")
+    print("  Just ask your AI assistant, in plain English:")
     print()
     print(f"  {C.BCYAN}\"Search Memee for patterns about API timeouts\"{C.RESET}")
     print(f"  {C.BCYAN}\"Record that we should always use connection pooling\"{C.RESET}")
@@ -353,8 +353,8 @@ def _setup_solo():
         print(f"  {C.DIM}Nothing to add manually.{C.RESET}")
     else:
         print(f"  {C.BYELLOW}No supported AI tool was detected.{C.RESET} If you use an MCP")
-        print(f"  client (Cursor, Continue, Windsurf, Claude Code), add this to its")
-        print(f"  settings file:")
+        print("  client (Cursor, Continue, Windsurf, Claude Code), add this to its")
+        print("  settings file:")
         print(f'      {C.DIM}{{"mcpServers": {{"memee": {{"command": "memee", "args": ["serve"]}}}}}}{C.RESET}')
     print()
 

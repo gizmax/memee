@@ -41,7 +41,7 @@ from typing import Iterable
 
 from sqlalchemy.orm import Session
 
-from memee.storage.models import AntiPattern, Decision, MaturityLevel, Memory, MemoryType
+from memee.storage.models import AntiPattern, MaturityLevel, Memory, MemoryType
 
 logger = logging.getLogger("memee.cmam")
 
@@ -290,7 +290,7 @@ def render_memory(memory: Memory, redact: bool = True) -> str:
         f"validation_count: {memory.validation_count or 0}",
         f"project_count: {memory.project_count or 0}",
         f"tags: [{tags}]",
-        f"source: memee",
+        "source: memee",
         "---",
         "",
         f"# {memory.title}",

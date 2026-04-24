@@ -14,9 +14,7 @@ from memee.engine.research import (
 from memee.storage.models import (
     Memory,
     MemoryType,
-    Organization,
     Project,
-    ResearchExperiment,
     ResearchStatus,
 )
 

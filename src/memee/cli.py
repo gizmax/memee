@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -100,7 +98,7 @@ def record(type, title, content, tags, project):
     """Record a new memory to organizational knowledge base."""
     from memee.engine.quality_gate import merge_duplicate, run_quality_gate
     from memee.storage.database import get_session, init_db
-    from memee.storage.models import Memory, MemoryType, ProjectMemory
+    from memee.storage.models import Memory
 
     engine = init_db()
     session = get_session(engine)
@@ -370,7 +368,7 @@ def validate(memory_id, evidence, project):
     """Validate a memory — confirm it worked in this context."""
     from memee.engine.confidence import update_confidence
     from memee.storage.database import get_session, init_db
-    from memee.storage.models import Memory, MemoryValidation
+    from memee.storage.models import MemoryValidation
 
     engine = init_db()
     session = get_session(engine)
@@ -627,7 +625,7 @@ def research_status_cmd(experiment_id):
     click.echo(f"  Keep rate:  {status['keep_rate']:.0%}")
 
     if status["trajectory"]:
-        click.echo(f"\n  Trajectory:")
+        click.echo("\n  Trajectory:")
         for t in status["trajectory"]:
             icon = {"keep": "+", "discard": ".", "crash": "X"}.get(t["status"], "?")
             val = f"{t['value']:.4f}" if t["value"] is not None else "N/A"
@@ -658,20 +656,20 @@ def research_meta_cmd():
     click.echo(f"  Keeps/Discards/Crashes: {meta['keeps']}/{meta['discards']}/{meta['crashes']}")
 
     if meta.get("by_metric"):
-        click.echo(f"\n  By Metric:")
+        click.echo("\n  By Metric:")
         for name, stats in meta["by_metric"].items():
             click.echo(f"    {name}: keep={stats['keep_rate']:.0%} "
                        f"avg_improvement={stats['avg_improvement']:+.4f} "
                        f"({stats['experiments']} experiments)")
 
     if meta.get("improvement_by_phase"):
-        click.echo(f"\n  Improvement by Phase:")
+        click.echo("\n  Improvement by Phase:")
         for phase, total in meta["improvement_by_phase"].items():
             bar = "█" * int(total * 10)
             click.echo(f"    {phase:15s}: {total:.4f} {bar}")
 
     if meta.get("insights"):
-        click.echo(f"\n  Insights:")
+        click.echo("\n  Insights:")
         for insight in meta["insights"]:
             click.echo(f"    - {insight}")
 
@@ -702,7 +700,7 @@ def research_complete_cmd(experiment_id, status):
     complete_experiment(session, exp, status)
     click.echo(f"Experiment {exp.id[:8]} marked as {status}.")
     if status == "completed" and exp.keeps > 0:
-        click.echo(f"  Lesson recorded to organizational memory.")
+        click.echo("  Lesson recorded to organizational memory.")
 
 
 # ── Project Commands ──
@@ -814,7 +812,7 @@ def propagate(threshold, max_prop):
     session = get_session(engine)
 
     stats = run_propagation_cycle(session, threshold, max_propagations=max_prop)
-    click.echo(f"Auto-Propagation complete:")
+    click.echo("Auto-Propagation complete:")
     click.echo(f"  Checked:    {stats['memories_checked']} memories")
     click.echo(f"  Propagated: {stats['memories_propagated']} memories")
     click.echo(f"  New links:  {stats['total_new_links']}")
@@ -834,19 +832,19 @@ def dream():
     session = get_session(engine)
 
     stats = run_dream_cycle(session)
-    click.echo(f"Dream Mode complete:")
+    click.echo("Dream Mode complete:")
     click.echo(f"  Connections:     {stats['connections_created']} new")
     click.echo(f"  Contradictions:  {stats['contradictions_found']}")
     click.echo(f"  Confidence boosts: {stats['confidence_boosts']}")
     click.echo(f"  Promotions:      {stats['promotions_applied']}/{stats['promotions_proposed']}")
 
     if stats.get("meta_patterns"):
-        click.echo(f"  Meta-patterns:")
+        click.echo("  Meta-patterns:")
         for mp in stats["meta_patterns"]:
             click.echo(f"    - {mp}")
 
     if stats.get("digest"):
-        click.echo(f"  Digest:")
+        click.echo("  Digest:")
         for d in stats["digest"][:5]:
             click.echo(f"    - {d}")
 

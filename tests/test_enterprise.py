@@ -12,12 +12,11 @@ Run: pytest tests/test_enterprise.py -v -s
 import random
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import func
 
-from memee.benchmarks.orgmemeval import run_orgmemeval, format_report
+from memee.benchmarks.orgmemeval import run_orgmemeval
 from memee.engine.confidence import update_confidence
 from memee.engine.dream import run_dream_cycle
 from memee.engine.inheritance import inherit_memories
@@ -31,20 +30,16 @@ from memee.engine.research import (
     log_iteration,
 )
 from memee.engine.review import review_diff
-from memee.engine.search import search_memories
 from memee.storage.models import (
     AntiPattern,
     Decision,
-    LearningSnapshot,
     MaturityLevel,
     Memory,
     MemoryConnection,
     MemoryType,
     MemoryValidation,
-    Organization,
     Project,
     ProjectMemory,
-    Severity,
 )
 
 random.seed(2026)
@@ -552,7 +547,7 @@ class TestEnterpriseSimulation:
 
         # Quarterly table
         print(f"\n{'═' * 80}")
-        print(f"  QUARTERLY PERFORMANCE")
+        print("  QUARTERLY PERFORMANCE")
         print(f"{'═' * 80}")
         print(f"  {'Q':>3s} | {'Memories':>8s} | {'Canon':>5s} | {'Valid':>5s} | "
               f"{'Conf':>5s} | {'Graph':>5s} | {'Models':>6s} | {'Incidents':>9s} | {'Saves':>5s}")
@@ -575,7 +570,7 @@ class TestEnterpriseSimulation:
                   f"({div:8s}) @ {inc['project']}")
             print(f"       {inc['title']}")
 
-        print(f"\n  By severity: " +
+        print("\n  By severity: " +
               " | ".join(f"{s}: {c}" for s, c in sorted(severity_counts.items())))
 
         # Avoidance over time
@@ -594,7 +589,7 @@ class TestEnterpriseSimulation:
         # Code review
         if review_log:
             print(f"\n{'═' * 80}")
-            print(f"  CODE REVIEW EFFECTIVENESS")
+            print("  CODE REVIEW EFFECTIVENESS")
             print(f"{'═' * 80}")
             correct = sum(1 for r in review_log if r["correct"])
             total_reviews = len(review_log)
@@ -619,13 +614,13 @@ class TestEnterpriseSimulation:
 
             meta = get_meta_learning(session)
             if meta.get("insights"):
-                print(f"\n  Meta-learning insights:")
+                print("\n  Meta-learning insights:")
                 for insight in meta["insights"]:
                     print(f"    - {insight}")
 
         # Agent leaderboard
         print(f"\n{'═' * 80}")
-        print(f"  AGENT LEADERBOARD")
+        print("  AGENT LEADERBOARD")
         print(f"{'═' * 80}")
         sorted_agents = sorted(agents.items(),
                                 key=lambda x: x[1]["saves"] - x[1]["mistakes"], reverse=True)
@@ -640,7 +635,7 @@ class TestEnterpriseSimulation:
 
         # Model diversity
         print(f"\n{'═' * 80}")
-        print(f"  MULTI-MODEL VALIDATION")
+        print("  MULTI-MODEL VALIDATION")
         print(f"{'═' * 80}")
         model_val_counts = defaultdict(int)
         for v in session.query(MemoryValidation).filter(
@@ -661,7 +656,7 @@ class TestEnterpriseSimulation:
         # Final stats
         final = quarterly_metrics[-1] if quarterly_metrics else {}
         print(f"\n{'═' * 80}")
-        print(f"  ANNUAL SUMMARY")
+        print("  ANNUAL SUMMARY")
         print(f"{'═' * 80}")
         print(f"  Total memories:        {final.get('total', 0)}")
         print(f"  Canon (org truth):     {final.get('canon', 0)}")
@@ -677,7 +672,7 @@ class TestEnterpriseSimulation:
 
         # ─── Run OrgMemEval benchmark on this data ───
         print(f"\n{'═' * 80}")
-        print(f"  ORGMEMEVAL BENCHMARK")
+        print("  ORGMEMEVAL BENCHMARK")
         print(f"{'═' * 80}")
         bench_results = run_orgmemeval(seed=2026)
         for s in bench_results["scenarios"]:

@@ -4,8 +4,8 @@ import pytest
 
 from memee.engine.router import smart_briefing, TOKENS_PER_LINE
 from memee.storage.models import (
-    AntiPattern, Decision, MaturityLevel, Memory, MemoryType,
-    Organization, Project, ProjectMemory,
+    AntiPattern, MaturityLevel, Memory, MemoryType,
+    Project,
 )
 
 

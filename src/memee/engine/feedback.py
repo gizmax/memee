@@ -22,7 +22,6 @@ from memee.engine.impact import ImpactType, record_impact
 from memee.engine.review import review_diff
 from memee.storage.models import (
     Memory,
-    MemoryType,
     MemoryValidation,
     Project,
 )
@@ -115,7 +114,7 @@ def post_task_review(
                 v = MemoryValidation(
                     memory_id=mem.id, project_id=project_id,
                     validated=True, validator_model=model,
-                    evidence=f"Warning ignored → task failed. Strong validation.",
+                    evidence="Warning ignored → task failed. Strong validation.",
                 )
                 session.add(v)
                 update_confidence(mem, True, project_id, model)

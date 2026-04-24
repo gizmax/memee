@@ -1,13 +1,12 @@
 """Tests for briefing (PUSH) + feedback (POST-TASK) loop."""
 
 import pytest
-from pathlib import Path
 
 from memee.engine.briefing import briefing, generate_claudemd_section, inject_claudemd
 from memee.engine.feedback import post_task_review
 from memee.storage.models import (
     AntiPattern, Decision, MaturityLevel, Memory, MemoryType,
-    Organization, Project, ProjectMemory,
+    Project, ProjectMemory,
 )
 
 

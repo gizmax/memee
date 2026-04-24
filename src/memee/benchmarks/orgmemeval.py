@@ -18,10 +18,7 @@ from __future__ import annotations
 
 import random
 import time
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from memee.engine.confidence import update_confidence
@@ -36,19 +33,16 @@ from memee.engine.research import (
     get_meta_learning,
     log_iteration,
 )
-from memee.engine.search import search_memories
 from memee.storage.database import get_session, init_db
 from memee.storage.models import (
     AntiPattern,
     MaturityLevel,
     Memory,
-    MemoryConnection,
     MemoryType,
     MemoryValidation,
     Organization,
     Project,
     ProjectMemory,
-    Severity,
 )
 
 PATTERNS = [
@@ -600,7 +594,7 @@ def scenario_research(session: Session, seed: int = 42) -> dict:
             elif random.random() < 0.1:
                 log_iteration(session, exp.id, 0, "crash", f"Crashed at iter {j+1}")
             else:
-                log_iteration(session, exp.id, round(new_val, 4), "discard", f"No improvement")
+                log_iteration(session, exp.id, round(new_val, 4), "discard", "No improvement")
         complete_experiment(session, exp, "completed")
         experiments.append(exp)
 
@@ -655,7 +649,7 @@ def run_orgmemeval(
 
     Returns full results with per-scenario scores and summary.
     """
-    from memee.storage.database import get_engine, get_session, init_db
+    from memee.storage.database import get_engine
 
     if db_path:
         engine = init_db(get_engine(db_path))

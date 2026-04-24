@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memee"
-version = "1.0.1"
+version = "1.0.2"
 description = "Institutional memory for AI agent teams: multi-model, cross-project, token-budgeted."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -60,9 +60,66 @@ memee = "memee.cli:cli"
 [tool.hatch.build.targets.wheel]
 packages = ["src/memee"]
 
+# sdist EXCLUDES — keep the paid package, internal runbooks, memory dumps,
+# local DBs, and caches out of the public tar.gz even if someone accidentally
+# builds from the private monorepo instead of the public mirror.
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/memee",
+    "/tests",
+    "/alembic",
+    "/alembic.ini",
+    "/docs/cmam.md",
+    "/docs/benchmarks.md",
+    "/docs/review-fixes.md",
+    "/docs/post-launch-todo.md",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/CONTRIBUTING.md",
+    "/CODE_OF_CONDUCT.md",
+    "/SECURITY.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+exclude = [
+    "/memee-team",
+    "/memory",
+    "/.claude",
+    "/.venv",
+    "/site",
+    "/scripts",
+    "/docs/trial-and-licensing.md",
+    "/docs/launch-posts.md",
+    "/docs/microsite-brief.md",
+    "/docs/publish-oss.md",
+    "/docs/project_split.md",
+    "**/*.db",
+    "**/*.db-shm",
+    "**/*.db-wal",
+    "**/__pycache__",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
+# Default ruff selection covers most of what we want. The rules we deliberately
+# relax for this codebase, with reasons:
+#   E402  Module import not at top of file — alembic/env.py does
+#         `sys.path.insert` before importing from memee; that's the documented
+#         Alembic-scripts pattern.
+#   E741  Ambiguous variable name — short names like `l`, `I`, `O` occasionally
+#         appear in tight iterators where context makes intent obvious.
+#   F841  Unused local variable — the engine has a few deliberately-named
+#         markers (e.g. `marker_end = "*Last updated:"`) that document intent
+#         even when not yet referenced. Real bugs get caught in review; we
+#         don't want a CI fail blocking releases over doc-intent locals.
+ignore = ["E402", "E741", "F841"]
+
+# Alembic migrations are auto-generated; don't lint them strictly.
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*.py" = ["F401", "E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

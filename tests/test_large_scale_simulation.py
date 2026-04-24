@@ -18,30 +18,21 @@ Run: pytest tests/test_large_scale_simulation.py -v -s
 import random
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import func
 
 from memee.engine.confidence import update_confidence
 from memee.engine.lifecycle import run_aging_cycle
-from memee.engine.search import search_anti_patterns, search_memories
 from memee.storage.models import (
     AntiPattern,
     Decision,
-    LearningSnapshot,
     MaturityLevel,
     Memory,
-    MemoryConnection,
     MemoryType,
     MemoryValidation,
-    Organization,
     Project,
     ProjectMemory,
-    ResearchExperiment,
-    ResearchIteration,
-    ResearchStatus,
-    Severity,
 )
 
 random.seed(2026)
@@ -401,14 +392,14 @@ class TestLargeScaleSimulation:
 
         # ── 1. Scale & Performance ──
         total_final = metrics["weekly_snapshots"][-1]["total"]
-        print(f"\n  1. SCALE & PERFORMANCE")
+        print("\n  1. SCALE & PERFORMANCE")
         print(f"     Total memories:     {total_final}")
         print(f"     Total events:       ~{total_final * 3} (records + validations + checks)")
         print(f"     Simulation time:    {elapsed:.2f}s")
         print(f"     Throughput:         {total_final / elapsed:.0f} memories/s")
 
         # ── 2. Weekly Growth ──
-        print(f"\n  2. WEEKLY GROWTH")
+        print("\n  2. WEEKLY GROWTH")
         print(f"     {'Week':>4} | {'Total':>5} | {'New':>4} | {'Canon':>5} | "
               f"{'Valid':>5} | {'Tested':>6} | {'Hypo':>5} | {'Depr':>4} | "
               f"{'AvgConf':>7} | {'Quality':>7}")
@@ -441,14 +432,14 @@ class TestLargeScaleSimulation:
         total_checks = metrics["anti_pattern_avoidances"] + metrics["anti_pattern_misses"]
         avoidance_rate = (metrics["anti_pattern_avoidances"] / total_checks * 100
                          if total_checks else 0)
-        print(f"\n  4. ANTI-PATTERN AVOIDANCE")
+        print("\n  4. ANTI-PATTERN AVOIDANCE")
         print(f"     Total checks:       {total_checks}")
         print(f"     Avoided (warned):   {metrics['anti_pattern_avoidances']}")
         print(f"     Missed:             {metrics['anti_pattern_misses']}")
         print(f"     Avoidance rate:     {avoidance_rate:.1f}%")
 
         # ── 5. Time-to-Maturity ──
-        print(f"\n  5. TIME-TO-MATURITY (events needed)")
+        print("\n  5. TIME-TO-MATURITY (events needed)")
         for level, data in [
             ("TESTED", metrics["time_to_tested"]),
             ("VALIDATED", metrics["time_to_validated"]),
@@ -463,7 +454,7 @@ class TestLargeScaleSimulation:
                 print(f"     {level:12s} (no samples yet)")
 
         # ── 6. Agent Effectiveness ──
-        print(f"\n  6. AGENT EFFECTIVENESS")
+        print("\n  6. AGENT EFFECTIVENESS")
         print(f"     {'Agent':>10s} | {'Rec':>4s} | {'Val+':>4s} | {'Val-':>4s} | "
               f"{'AP':>3s} | {'Quality':>7s}")
         print(f"     {'─'*10} | {'─'*4} | {'─'*4} | {'─'*4} | "
@@ -482,13 +473,13 @@ class TestLargeScaleSimulation:
         # ── 7. Decision Analytics ──
         reversal_rate = (metrics["decision_reversals"] / metrics["total_decisions"] * 100
                          if metrics["total_decisions"] else 0)
-        print(f"\n  7. DECISION ANALYTICS")
+        print("\n  7. DECISION ANALYTICS")
         print(f"     Total decisions:    {metrics['total_decisions']}")
         print(f"     Reversals:          {metrics['decision_reversals']}")
         print(f"     Reversal rate:      {reversal_rate:.1f}%")
 
         # ── 8. Knowledge Compound Rate ──
-        print(f"\n  8. KNOWLEDGE COMPOUND RATE")
+        print("\n  8. KNOWLEDGE COMPOUND RATE")
         weekly_new = metrics["weekly_new_knowledge"]
         for i, count in enumerate(weekly_new):
             bar = "█" * (count // 2)
@@ -499,7 +490,7 @@ class TestLargeScaleSimulation:
             print(f"     Week {i+1:2d}: {count:4d} new {bar}{growth}")
 
         # ── 9. Cross-Project Resonance (top 10 pairs) ──
-        print(f"\n  9. CROSS-PROJECT RESONANCE (top 10 pairs)")
+        print("\n  9. CROSS-PROJECT RESONANCE (top 10 pairs)")
         sorted_pairs = sorted(
             metrics["cross_project_matrix"].items(),
             key=lambda x: -x[1]
@@ -518,7 +509,7 @@ class TestLargeScaleSimulation:
             bucket = int(c * 10) / 10  # Round to 0.1
             buckets[bucket] += 1
 
-        print(f"\n  10. CONFIDENCE DISTRIBUTION")
+        print("\n  10. CONFIDENCE DISTRIBUTION")
         for bucket in sorted(buckets.keys()):
             count = buckets[bucket]
             bar = "█" * (count // 3)
@@ -548,7 +539,7 @@ class TestLargeScaleSimulation:
         print(f"      Decision stability:    {reversal_penalty:.3f} (× 10 = {reversal_penalty * 10:.1f})")
 
         # ── 12. Learning Velocity (week-over-week) ──
-        print(f"\n  12. LEARNING VELOCITY")
+        print("\n  12. LEARNING VELOCITY")
         for i in range(1, len(metrics["weekly_snapshots"])):
             prev = metrics["weekly_snapshots"][i - 1]
             curr = metrics["weekly_snapshots"][i]
@@ -574,10 +565,10 @@ class TestLargeScaleSimulation:
         for s in pattern_spread:
             spread_dist[s] += 1
 
-        print(f"\n  13. PATTERN PROPAGATION")
+        print("\n  13. PATTERN PROPAGATION")
         print(f"      Avg projects/pattern:  {avg_spread:.2f}")
         print(f"      Max projects/pattern:  {max_spread}")
-        print(f"      Distribution:")
+        print("      Distribution:")
         for n_proj in sorted(spread_dist.keys()):
             count = spread_dist[n_proj]
             bar = "█" * (count // 5)
@@ -589,7 +580,7 @@ class TestLargeScaleSimulation:
             Memory.validation_count == 0,
         ).scalar()
         stale_pct = stale / final["total"] * 100 if final["total"] else 0
-        print(f"\n  14. STALE KNOWLEDGE")
+        print("\n  14. STALE KNOWLEDGE")
         print(f"      Unvalidated hypotheses: {stale} ({stale_pct:.1f}%)")
         print(f"      Deprecated memories:    {final['deprecated']}")
 

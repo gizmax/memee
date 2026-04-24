@@ -1,6 +1,6 @@
 """Memory lifecycle management: aging, expiry, promotion, deprecation."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 
 from sqlalchemy.orm import Session
 

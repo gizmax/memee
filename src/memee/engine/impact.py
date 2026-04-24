@@ -12,13 +12,12 @@ Every impact event is tracked with evidence chain:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Session, relationship
 
-from memee.storage.models import Base, Memory, Project, new_id, utcnow
+from memee.storage.models import Base, Memory, new_id, utcnow
 
 
 class ImpactType(str, Enum):

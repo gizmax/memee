@@ -25,7 +25,6 @@ from memee.storage.models import (
     AntiPattern,
     MaturityLevel,
     Memory,
-    MemoryType,
     Project,
     ProjectMemory,
 )
@@ -84,9 +83,8 @@ def scan_project_for_warnings(
         ``.suppressed_warnings`` (audit trail) and ``.stats`` (counters).
     """
     from memee.engine.propagation import _get_expanded_tags
-    from memee.engine.tag_index import sync_memory_tags, sync_project_tags
+    from memee.engine.tag_index import sync_project_tags
     from memee.storage.models import MemoryTag, ProjectTag
-    from sqlalchemy import func as _func
 
     proj_tags = _get_expanded_tags(project)
     out = _WarningList()

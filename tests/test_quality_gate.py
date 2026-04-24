@@ -3,7 +3,6 @@
 import pytest
 
 from memee.engine.quality_gate import (
-    GateResult,
     _assess_quality,
     _find_duplicate,
     _validate_basic,

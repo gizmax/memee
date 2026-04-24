@@ -17,8 +17,8 @@ from memee.engine.predictive import scan_project_for_warnings
 from memee.engine.propagation import run_propagation_cycle
 from memee.engine.search import search_memories
 from memee.storage.models import (
-    AntiPattern, MaturityLevel, Memory, MemoryType,
-    MemoryValidation, Organization, Project, ProjectMemory,
+    AntiPattern, Memory, MemoryType,
+    Project,
 )
 
 random.seed(42)
@@ -150,7 +150,7 @@ class TestStressPerf:
         print("=" * 70)
         total = session.query(func.count(Memory.id)).scalar()
         print(f"\n  Total memories at end: {total}")
-        print(f"\n  Hotspot timings:")
+        print("\n  Hotspot timings:")
         print(f"    Bulk insert 8000:     {results['bulk_insert_8000']:6.2f}s "
               f"({8000 / results['bulk_insert_8000']:.0f}/s)")
         print(f"    Validations 16000:    {results['validations_16000']:6.2f}s "

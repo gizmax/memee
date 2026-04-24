@@ -729,7 +729,7 @@ async def learning_status() -> str:
     """
     from sqlalchemy import func
 
-    from memee.storage.models import Memory, Organization, Project
+    from memee.storage.models import Memory, Project
 
     session = _get_session()
 

@@ -10,31 +10,21 @@ Run: pytest tests/test_real_impact.py -v -s
 """
 
 import random
-import time
-from collections import defaultdict
 
 import pytest
-from sqlalchemy import func
 
-from memee.engine.confidence import update_confidence
 from memee.engine.impact import (
     ImpactType,
     get_impact_summary,
     record_impact,
 )
-from memee.engine.predictive import scan_project_for_warnings
-from memee.engine.propagation import run_propagation_cycle
-from memee.engine.search import search_memories
 from memee.storage.models import (
     AntiPattern,
     MaturityLevel,
     Memory,
     MemoryType,
-    MemoryValidation,
-    Organization,
     Project,
     ProjectMemory,
-    Severity,
 )
 
 random.seed(2026)
@@ -263,7 +253,7 @@ class TestRealImpact:
                       "patterns_used": 0, "warnings_heeded": 0}
 
         print(f"\n{'═' * 90}")
-        print(f"  A/B TEST: SAME TASKS — WITH vs WITHOUT MEMEE")
+        print("  A/B TEST: SAME TASKS — WITH vs WITHOUT MEMEE")
         print(f"{'═' * 90}")
         print(f"\n  {'Task':<35s} | {'WITHOUT MEMEE':^25s} | {'WITH MEMEE':^25s} | {'Savings':^15s}")
         print(f"  {'─'*35} | {'─'*25} | {'─'*25} | {'─'*15}")
@@ -366,7 +356,7 @@ class TestRealImpact:
               f"-{total_without['iterations']-total_with['iterations']}iter")
 
         print(f"\n{'═' * 90}")
-        print(f"  MEASURABLE IMPACT")
+        print("  MEASURABLE IMPACT")
         print(f"{'═' * 90}")
         print(f"  Time saved:         {total_without['time'] - total_with['time']} minutes "
               f"({time_pct:.0f}% reduction)")
@@ -381,10 +371,10 @@ class TestRealImpact:
 
         # What "learned" ACTUALLY means
         print(f"\n{'═' * 90}")
-        print(f"  WHAT 'THE ORG LEARNED' ACTUALLY MEANS")
+        print("  WHAT 'THE ORG LEARNED' ACTUALLY MEANS")
         print(f"{'═' * 90}")
 
-        print(f"""
+        print("""
   NOT: "confidence number went up"
   BUT: agent wrote different code because org knowledge existed
 
@@ -398,7 +388,7 @@ class TestRealImpact:
             if wo["mistakes"]:
                 print(f"    WITHOUT: {'; '.join(wo['mistakes'])}")
             if wi.get("warnings_heeded"):
-                print(f"    WITH:    Got warning → changed approach → 0 mistakes")
+                print("    WITH:    Got warning → changed approach → 0 mistakes")
                 for w in wi["warnings_heeded"]:
                     print(f"             Warning: \"{w}\" → agent avoided it")
             if wi.get("patterns_used"):
@@ -412,7 +402,7 @@ class TestRealImpact:
         summary = get_impact_summary(session)
 
         print(f"{'═' * 90}")
-        print(f"  IMPACT DATABASE SUMMARY")
+        print("  IMPACT DATABASE SUMMARY")
         print(f"{'═' * 90}")
         print(f"  Total impact events:    {summary['total_events']}")
         print(f"  Time saved:             {summary['total_time_saved_hours']} hours")
@@ -428,13 +418,13 @@ class TestRealImpact:
               f"(strict: requires evidence_type)")
 
         if summary.get("by_type"):
-            print(f"\n  By impact type:")
+            print("\n  By impact type:")
             for t, data in summary["by_type"].items():
                 print(f"    {t:25s}: {data['count']:3d} events, "
                       f"{data['time_saved']:.0f}min saved")
 
         if summary.get("severities_avoided"):
-            print(f"\n  Severities avoided:")
+            print("\n  Severities avoided:")
             for sev, count in summary["severities_avoided"].items():
                 print(f"    {sev}: {count}")
 

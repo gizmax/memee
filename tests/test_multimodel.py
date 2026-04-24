@@ -14,7 +14,6 @@ from memee.storage.models import (
     Memory,
     MemoryType,
     MemoryValidation,
-    Organization,
     Project,
     ProjectMemory,
 )
@@ -224,7 +223,7 @@ class TestCrossModelConfidence:
         update_confidence(m, True, projects[3].id, "gpt-4-turbo")
         trajectory.append(m.confidence_score)
 
-        print(f"\n  Multi-model confidence trajectory:")
+        print("\n  Multi-model confidence trajectory:")
         models = ["(start)", "claude-sonnet", "gpt-4o", "gemini-2.0", "gpt-4-turbo"]
         for i, (model, score) in enumerate(zip(models, trajectory)):
             bar = "█" * int(score * 40)

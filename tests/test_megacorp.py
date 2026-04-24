@@ -18,25 +18,23 @@ Run: pytest tests/test_megacorp.py -v -s
 
 import random
 import time
-from collections import defaultdict
 
 import pytest
 from sqlalchemy import func
 
-from memee.engine.confidence import get_confidence_interval, get_uncertainty, update_confidence
+from memee.engine.confidence import get_uncertainty, update_confidence
 from memee.engine.dream import run_dream_cycle
 from memee.engine.impact import ImpactType, get_impact_summary, record_impact
 from memee.engine.inheritance import inherit_memories
 from memee.engine.lifecycle import run_aging_cycle
 from memee.engine.predictive import scan_project_for_warnings
 from memee.engine.propagation import run_propagation_cycle
-from memee.engine.quality_gate import run_quality_gate, merge_duplicate
-from memee.engine.research import create_experiment, complete_experiment, log_iteration, get_meta_learning
+from memee.engine.quality_gate import run_quality_gate
+from memee.engine.research import create_experiment, complete_experiment, log_iteration
 from memee.engine.review import review_diff
 from memee.engine.search import search_memories
 from memee.storage.models import (
-    AntiPattern, Decision, MaturityLevel, Memory, MemoryConnection,
-    MemoryType, MemoryValidation, Organization, Project, ProjectMemory, Severity,
+    AntiPattern, MaturityLevel, Memory, MemoryType, MemoryValidation, Project, ProjectMemory,
 )
 
 random.seed(2026)
@@ -500,8 +498,8 @@ class TestMegaCorp:
         # ═══════════════════════════════════
 
         print(f"\n{'═' * 85}")
-        print(f"  MEGACORP SIMULATION: WITH MEMEE vs WITHOUT")
-        print(f"  100 projects | 50 agents | 52 weeks | 7 AI models")
+        print("  MEGACORP SIMULATION: WITH MEMEE vs WITHOUT")
+        print("  100 projects | 50 agents | 52 weeks | 7 AI models")
         print(f"{'═' * 85}")
 
         print(f"\n  {'Metric':<40s} | {'WITHOUT':>12s} | {'WITH MEMEE':>12s} | {'Delta':>10s}")
@@ -543,7 +541,7 @@ class TestMegaCorp:
 
         # ─── Hallucination detection ───
         print(f"\n{'═' * 85}")
-        print(f"  HALLUCINATION DEFENSE")
+        print("  HALLUCINATION DEFENSE")
         print(f"{'═' * 85}")
         total_hall = with_memee["hallucinations_caught"] + with_memee["hallucinations_missed"]
         catch_rate = with_memee["hallucinations_caught"] / max(total_hall, 1) * 100
@@ -560,7 +558,7 @@ class TestMegaCorp:
 
         # ─── Quality gate stats ───
         print(f"\n{'═' * 85}")
-        print(f"  QUALITY GATE EFFECTIVENESS")
+        print("  QUALITY GATE EFFECTIVENESS")
         print(f"{'═' * 85}")
         print(f"  Duplicates merged:       {with_memee['duplicates_merged']} "
               f"(WITHOUT: {without_memee['duplicate_knowledge']} duplicates in org)")
@@ -569,7 +567,7 @@ class TestMegaCorp:
 
         # ─── Knowledge maturity ───
         print(f"\n{'═' * 85}")
-        print(f"  KNOWLEDGE MATURITY")
+        print("  KNOWLEDGE MATURITY")
         print(f"{'═' * 85}")
         mat_counts = dict(
             session.query(Memory.maturity, func.count(Memory.id))
@@ -587,7 +585,7 @@ class TestMegaCorp:
 
         # ─── Performance ───
         print(f"\n{'═' * 85}")
-        print(f"  PERFORMANCE")
+        print("  PERFORMANCE")
         print(f"{'═' * 85}")
         print(f"  Simulation time:     {elapsed:.1f}s")
         print(f"  Memories/second:     {with_memee['total_memories']/elapsed:.0f}")
@@ -596,7 +594,7 @@ class TestMegaCorp:
 
         # ─── Incident timeline ───
         print(f"\n{'═' * 85}")
-        print(f"  INCIDENT RATE OVER TIME (WITH MEMEE)")
+        print("  INCIDENT RATE OVER TIME (WITH MEMEE)")
         print(f"{'═' * 85}")
         for i in range(0, 52, 4):
             chunk = with_memee["weekly_log"][i:i+4]
@@ -618,7 +616,7 @@ class TestMegaCorp:
         roi_ratio = monthly_savings / cost_per_month if cost_per_month > 0 else 0
 
         print(f"\n{'═' * 85}")
-        print(f"  ROI CALCULATION")
+        print("  ROI CALCULATION")
         print(f"{'═' * 85}")
         print(f"  WITHOUT Memee: {total_time_without:,d} minutes wasted on repeated mistakes")
         print(f"  WITH Memee:    {total_time_with:,d} minutes saved by catching mistakes early")

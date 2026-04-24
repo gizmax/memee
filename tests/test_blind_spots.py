@@ -32,16 +32,13 @@ import pytest
 from sqlalchemy import func
 
 from memee.engine.confidence import get_confidence_interval, get_uncertainty, update_confidence
-from memee.engine.dream import run_dream_cycle
 from memee.engine.lifecycle import run_aging_cycle
 from memee.engine.predictive import scan_project_for_warnings
 from memee.engine.propagation import run_propagation_cycle
 from memee.engine.quality_gate import run_quality_gate
 from memee.engine.search import search_memories
-from memee.engine.tokens import estimate_org_savings
 from memee.storage.models import (
-    AntiPattern, MaturityLevel, Memory, MemoryConnection,
-    MemoryType, MemoryValidation, Organization, Project, ProjectMemory,
+    AntiPattern, MaturityLevel, Memory, MemoryType, MemoryValidation, Project, ProjectMemory,
 )
 
 random.seed(2026)
@@ -508,7 +505,7 @@ class TestBlindSpots:
         # ═══════════════════════════════════
 
         print(f"\n{'═' * 80}")
-        print(f"  BLIND SPOT ANALYSIS — THE HONEST TRUTH ABOUT MEMEE")
+        print("  BLIND SPOT ANALYSIS — THE HONEST TRUTH ABOUT MEMEE")
         print(f"{'═' * 80}")
 
         findings = [
@@ -605,13 +602,13 @@ class TestBlindSpots:
         print(f"{'═' * 80}")
 
         if high > 3:
-            print(f"\n  VERDICT: Memee has significant blind spots. Address HIGH items before launch.")
+            print("\n  VERDICT: Memee has significant blind spots. Address HIGH items before launch.")
         elif high > 0:
-            print(f"\n  VERDICT: Some blind spots exist but most are manageable. Ship with monitoring.")
+            print("\n  VERDICT: Some blind spots exist but most are manageable. Ship with monitoring.")
         else:
-            print(f"\n  VERDICT: Blind spots are under control. Ready for production.")
+            print("\n  VERDICT: Blind spots are under control. Ready for production.")
 
-        print(f"\n  TOP ACTIONS:")
+        print("\n  TOP ACTIONS:")
         for name, finding, severity, explanation in findings:
             if severity == "HIGH":
                 print(f"    FIX: {name} — {explanation}")

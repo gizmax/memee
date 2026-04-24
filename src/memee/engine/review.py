@@ -14,10 +14,9 @@ import re
 
 from sqlalchemy.orm import Session
 
-from memee.engine.search import search_anti_patterns, search_memories
+from memee.engine.search import search_memories
 from memee.storage.models import (
     AntiPattern,
-    Decision,
     MaturityLevel,
     Memory,
     MemoryType,

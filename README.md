@@ -1,6 +1,6 @@
 # Memee
 
-[![tests](https://img.shields.io/badge/tests-201%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-passing-brightgreen)](#tests)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
 [![pypi](https://img.shields.io/badge/pypi-memee-orange)](https://pypi.org/project/memee/)
@@ -41,7 +41,7 @@ memee search "retry"
 memee doctor
 ```
 
-That's it. Memory lives in `~/.memee/memee.db`. No account, no network call.
+That's it. Memory lives in `~/.memee/memee.db`. No account. Core read/write is fully local; optional vector embeddings use `sentence-transformers`, which fetches a ~80 MB model from HuggingFace on first use (skipped when `TRANSFORMERS_OFFLINE=1` is set).
 
 ## What it actually does
 
@@ -65,15 +65,15 @@ Deeper architecture doc: [CLAUDE.md](CLAUDE.md). CMAM specifics: [docs/cmam.md](
 > All numbers below are **internal simulations and benchmarks**, not independent third-party evaluations. They describe system behaviour under synthetic workloads. Treat them as suggestive, not conclusive.
 
 - **Token savings per task:** 14,550 → 500 (–96%) in the router micro-benchmark.
-- **OrgMemEval v1.0:** 93.8/100, across propagation, avoidance, maturity, onboarding, recovery, calibration, synthesis, and research. Baseline Mem0/Zep/Letta scored 2.3/100 on the same scenarios.
-- **7-task A/B (with vs. without Memee):** time –71%, iterations –65%, quality 56% → 93%, internal ROI ≈ 7–10×. GigaCorp sim (200 projects, 100 agents, 18 months): incidents 12/mo → 3/mo.
+- **OrgMemEval v1.0:** 92.4/100, across propagation, avoidance, maturity, onboarding, recovery, calibration, synthesis, and research. Competitor baselines on the same scenarios range from 0.9/100 (MemPalace) to 3.5/100 (Mem0, the closest); see [docs/benchmarks.md](docs/benchmarks.md).
+- **7-task A/B (with vs. without Memee):** time –71%, iterations –65%, quality 56% → 93%, impact-DB ROI ≈ 10.7× at the current $49/mo Team tier. GigaCorp sim (100 projects, 100 agents, 18 months): incidents 12/mo → 3/mo, annual ROI ≈ 3× at the same flat Team tier.
 - **Retrieval:** hit@1 = 100% on a 12-memory routing benchmark after the recent ranking fix.
 
 Reproduce locally:
 
 ```bash
 memee benchmark          # OrgMemEval v1.0
-pytest tests/ -v         # 201 tests, ~11s
+pytest tests/ -v         # full suite, ~60s
 ```
 
 ## Using it with Claude, GPT, Gemini
