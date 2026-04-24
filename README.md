@@ -15,6 +15,14 @@ pipx install memee            # recommended for a CLI tool
 python3 -m pip install memee  # if you don't have pipx
 ```
 
+> **For teams and companies.** This OSS release is single-user and
+> self-hosted. If you want the same memory shared across your whole
+> team, with cross-developer / cross-agent / cross-project / cross-model
+> canon building into **company-wide institutional knowledge**, there's
+> a paid Team edition at [memee.eu](https://memee.eu). Same engine,
+> plus SSO, audit log, and shared scope. From $49 / month flat (up to
+> 15 seats), $12k / year Enterprise with SOC 2 + air-gap.
+
 ---
 
 ## Why Memee
