@@ -908,7 +908,8 @@ section { padding-block: clamp(72px, 9vw, 140px); }
   gap: 8px;
   margin-bottom: 14px;
 }
-.lane-form input {
+.lane-form input,
+.lane-form textarea {
   font-family: var(--grotesk);
   font-size: 14px;
   padding: 11px 13px;
@@ -918,12 +919,18 @@ section { padding-block: clamp(72px, 9vw, 140px); }
   border-radius: 10px;
   outline: none;
   transition: border-color 120ms linear;
+  resize: vertical;
 }
-.lane.dark .lane-form input { border-color: #EDEFF433; color: var(--bone); }
-.lane.dark .lane-form input::placeholder { color: #EDEFF466; }
-.lane-form input:focus { border-color: var(--orange); }
-.lane-form input::placeholder { color: var(--ink-40); }
-.lane-form input.full { grid-column: 1 / -1; }
+.lane.dark .lane-form input,
+.lane.dark .lane-form textarea { border-color: #EDEFF433; color: var(--bone); }
+.lane.dark .lane-form input::placeholder,
+.lane.dark .lane-form textarea::placeholder { color: #EDEFF466; }
+.lane-form input:focus,
+.lane-form textarea:focus { border-color: var(--orange); }
+.lane-form input::placeholder,
+.lane-form textarea::placeholder { color: var(--ink-40); }
+.lane-form input.full,
+.lane-form textarea.full { grid-column: 1 / -1; }
 .lane .tiny {
   font-family: var(--mono);
   font-size: 11px;
@@ -1535,7 +1542,7 @@ body::before { display: none; }
             <input type="text" name="company" aria-label="Company" placeholder="Company" required />
             <input type="number" name="seats" aria-label="Number of seats" placeholder="Seats" min="1" required />
             <input type="email" name="email" class="full" aria-label="Contact email" placeholder="Contact email" required />
-            <input type="date" name="start" class="full" aria-label="Preferred start date" required />
+            <textarea name="notes" class="full" aria-label="Notes" placeholder="Notes (optional) — who's the team, what are you hoping Memee solves?" rows="3"></textarea>
             <button type="submit" class="btn" style="grid-column:1/-1;margin-top:4px;justify-content:center">Start 14-day trial <span class="arrow">→</span></button>
           </form>
           <span class="tiny">No card until day fifteen. Cancel by reply.</span>
