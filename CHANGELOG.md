@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-04-24
+
+Installer UX fixes and cosmetics. No API changes.
+
+### Changed
+
+- `memee setup` welcome box borders now land correctly when lines contain
+  ANSI colour codes. A new `_visible_len()` helper strips escapes before
+  `ljust` padding — previously the right `│` drifted left by ~8 columns.
+- MEMEE ASCII logo dropped its blue→pink gradient and is now a single
+  cyan-mint tone (#00E5C7 via 24-bit truecolor), matching the brand
+  accent on [memee.eu](https://memee.eu). Added a matching `REMEMBER`
+  farewell logo at the end of the wizard.
+- Post-setup screen rewritten as `YOU'RE DONE` / `YOU CAN JUST TALK TO
+  YOUR AGENT` / `CLI (OPTIONAL)`. Leads with "Memee is now live and
+  fully automatic." and bullets what happens automatically: routed
+  memories per task, cross-model sharing, org-wide mistake memory.
+- Command examples in the post-setup screen no longer show the leading
+  `$ ` prompt marker — users kept copy-pasting it and hitting
+  `command not found: $`.
+- The "Claude Code Integration" hint only prints when no MCP client was
+  actually detected. If `memee doctor` already wired Claude Code /
+  Cursor / Continue / Windsurf during setup, the screen says so
+  instead of nudging the user to edit `~/.claude/settings.json` again.
+- Install instructions in README and on the website switched from
+  `pip install memee` to `pipx install memee` (with `python3 -m pip
+  install memee` as fallback) — `pip` often isn't on PATH for fresh
+  macOS users.
+
+### Fixed
+
+- Docs / site: removed the deprecated `gizmax-cz/memee` URL placeholder;
+  all links now point to the real `gizmax/memee` repository.
+
 ## [1.0.0] — 2026-04-24
 
 First public release.
