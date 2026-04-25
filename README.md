@@ -5,6 +5,8 @@
 [![python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
 [![pypi](https://img.shields.io/badge/pypi-memee-orange)](https://pypi.org/project/memee/)
 
+![Memee — You shouldn't have to teach it twice.](https://memee.eu/og-image.png)
+
 **You shouldn't have to teach it twice.**
 
 Every chat is a new intern. You teach them Monday. By Friday they've quit. Memee writes it on the wall. The next intern reads it. So does your teammate's. So does the next model.
