@@ -51,15 +51,63 @@ def call(hook_name: str, *args, default=None, **kwargs):
 # ── Single-user defaults ──
 
 
-def _default_current_user_id() -> str | None:
-    """OSS: no identity concept. Returns None."""
+def _default_current_user_id(*args, **kwargs) -> str | None:
+    """OSS: no identity concept. Returns None regardless of args so that
+    callers can pass a session, a request, or nothing — whichever is handy.
+    """
     return None
 
 
-def _default_visible_memories(session, base_query=None):
-    """OSS: a user sees every memory they recorded locally."""
+def _default_visible_memories(session, base_query=None, user_id=None):
+    """OSS: a user sees every memory they recorded locally.
+
+    ``base_query`` is optional for backward compatibility. When callers pass
+    a pre-built query (with other filters already applied) we return it as
+    the visibility-applied query so the engine can keep composing without
+    materialising ids up front.
+    """
     from memee.storage.models import Memory
     return base_query if base_query is not None else session.query(Memory)
+
+
+def is_multi_user_active() -> bool:
+    """True iff the `memee-team` package (or another integrator) has
+    registered a non-default ``visible_memories`` hook.
+
+    Used by OSS engine modules to decide whether to apply scoping by default
+    (when the hook is registered we MUST apply it on every Memory query —
+    bypassing it is a tenancy leak). In single-user OSS this returns False
+    and every query stays unfiltered, so there is no behaviour change.
+    """
+    fn = _HOOKS.get("visible_memories")
+    return fn is not None and fn is not _default_visible_memories
+
+
+def apply_visibility(session, base_query, user_id=None):
+    """Apply the registered ``visible_memories`` hook to ``base_query``.
+
+    This is the single entry point every engine path should go through before
+    returning Memory rows. If no multi-user hook is registered, returns the
+    query unchanged — zero cost in OSS.
+    """
+    if not is_multi_user_active():
+        return base_query
+    fn = _HOOKS["visible_memories"]
+    try:
+        return fn(session, base_query=base_query, user_id=user_id)
+    except TypeError:
+        # Back-compat: older hooks only accept (session, base_query)
+        try:
+            return fn(session, base_query=base_query)
+        except TypeError:
+            # Even older: (session) → returns a Memory query we then intersect.
+            # SQLAlchemy 2.x prefers a ``select()`` over a ``Subquery`` inside
+            # ``IN(...)`` to avoid the SAWarning at composition time.
+            visible = fn(session)
+            from memee.storage.models import Memory
+            return base_query.filter(
+                Memory.id.in_(visible.with_entities(Memory.id))
+            )
 
 
 class LicenseRequiredError(Exception):

@@ -59,6 +59,73 @@ def get_engine(db_path: Path | None = None):
     return engine
 
 
+def _bootstrap_memory_organization_id(engine) -> None:
+    """Ensure ``memories.organization_id`` exists and is backfilled.
+
+    Models declare the column, but older DBs created before the multi-tenant
+    work predate it. We ALTER TABLE in place if missing, then backfill every
+    NULL row — but ONLY if there are NULL rows to fill. Brand-new DBs stay
+    untouched so that ``memee init`` can create the org itself with the name
+    the user configured (not a hardcoded "default").
+
+    Idempotent; safe to call on every init_db.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(memories)")).fetchall()
+        has_org_col = any(c[1] == "organization_id" for c in cols)
+
+        if not has_org_col:
+            try:
+                conn.execute(
+                    text("ALTER TABLE memories ADD COLUMN organization_id VARCHAR(36)")
+                )
+                conn.commit()
+            except OperationalError as e:
+                logger.debug("ADD COLUMN organization_id skipped: %s", e)
+
+        # Only backfill if there's actually something to backfill. Keeps
+        # brand-new DBs clean so the CLI init flow stays deterministic.
+        null_rows = conn.execute(
+            text("SELECT COUNT(*) FROM memories WHERE organization_id IS NULL")
+        ).scalar() or 0
+        if null_rows == 0:
+            return
+
+        existing = conn.execute(
+            text("SELECT id FROM organizations ORDER BY created_at ASC LIMIT 1")
+        ).fetchone()
+        if existing is None:
+            import uuid
+            from datetime import datetime, timezone
+
+            default_id = str(uuid.uuid4())
+            conn.execute(
+                text(
+                    "INSERT INTO organizations (id, name, created_at) "
+                    "VALUES (:id, :name, :ts)"
+                ),
+                {
+                    "id": default_id,
+                    "name": "default",
+                    "ts": datetime.now(timezone.utc),
+                },
+            )
+            conn.commit()
+        else:
+            default_id = existing[0]
+
+        conn.execute(
+            text(
+                "UPDATE memories SET organization_id = :oid "
+                "WHERE organization_id IS NULL"
+            ),
+            {"oid": default_id},
+        )
+        conn.commit()
+
+
 def init_db(engine=None):
     """Create all tables + FTS5 virtual table with sync triggers."""
     engine = engine or get_engine()
@@ -116,6 +183,10 @@ def init_db(engine=None):
         """))
 
         conn.commit()
+
+    # Backfill multi-tenant column on legacy DBs (idempotent). Must run after
+    # Base.metadata.create_all so the table exists, but before alembic stamp.
+    _bootstrap_memory_organization_id(engine)
 
     # Stamp alembic head if the version table is empty / missing. This keeps
     # both paths (init_db-only and alembic-only) interoperable — without this

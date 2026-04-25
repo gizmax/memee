@@ -362,14 +362,56 @@ _EXPANSIONS = {
 }
 
 
-def _expand_query(task: str) -> str:
-    """Expand task description with related terms for broader search."""
-    task_lower = task.lower()
-    additions = set()
+import re as _re
 
+
+def _keyword_matches(task_lower: str, keyword: str) -> bool:
+    """True iff ``keyword`` occurs in ``task_lower`` at word/phrase boundaries.
+
+    Old code used ``keyword in task_lower`` which matched substrings inside
+    longer words — ``"ci"`` inside ``"pricing"`` pulled pre-commit, lint, and
+    hooks into an SEO-copy task. We now anchor every expansion key to
+    boundaries so ``pricing`` no longer triggers ``ci``.
+
+    Keys can be single tokens (``"ci"``) or multi-token phrases (``"user
+    research"`` / ``"a/b test"``). Both are treated as whole phrases.
+    """
+    if not keyword:
+        return False
+    # Escape the key and wrap with boundary assertions. ``\b`` anchors on
+    # word-boundary transitions, which is what we want for identifier-like
+    # tokens and for multi-word phrases alike. For keys containing a slash
+    # (e.g. ``a/b test``) ``\b`` still does the right thing on both sides.
+    pattern = r"\b" + _re.escape(keyword) + r"\b"
+    return _re.search(pattern, task_lower) is not None
+
+
+def _expand_query(task: str) -> str:
+    """Expand a task description with related terms for broader search.
+
+    The match rule is token/phrase boundaries, not naive substring. We also
+    cap total added terms so a generic query ("pricing page copy" → pricing +
+    copy + landing) doesn't drown the primary signal.
+    """
+    task_lower = task.lower()
+    additions: list[str] = []
+    seen: set[str] = set()
+
+    # Iterate in insertion order so the most specific (multi-word) keys have
+    # first shot at the budget. Callers control order via dict ordering above.
     for keyword, expansions in _EXPANSIONS.items():
-        if keyword in task_lower:
-            additions.update(expansions[:3])  # Top 3 expansions per keyword
+        if not _keyword_matches(task_lower, keyword):
+            continue
+        for exp in expansions[:3]:  # top 3 expansions per matched keyword
+            key = exp.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            additions.append(exp)
+            if len(additions) >= 9:  # hard cap; 3 keys × 3 terms keeps queries tight
+                break
+        if len(additions) >= 9:
+            break
 
     if additions:
         return task + " " + " ".join(additions)

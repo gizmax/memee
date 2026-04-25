@@ -4,7 +4,11 @@ Design notes
 ------------
 * Called **best-effort** from ``search_memories``. Any exception (missing
   table on an un-migrated DB, locked DB during a write storm, serialization
-  error, etc.) must NOT break the caller's search. We catch everything.
+  error, etc.) must NOT touch the caller's session in any way. The error
+  path used to call ``session.rollback()`` on the caller — that nuked
+  pending writes on the callsite (FastAPI handler, CLI) and silently lost
+  data. Everything here now happens on a fresh session derived from the
+  caller's engine bind, and all exceptions are swallowed locally.
 * Gated by the ``MEMEE_TELEMETRY`` env var (default ON). Set to ``0``,
   ``off``, or ``false`` to disable — useful for perf benchmarks and for
   embedded agents that really cannot afford a write per search.
@@ -33,6 +37,18 @@ def _telemetry_enabled() -> bool:
     return v not in ("0", "off", "false", "no")
 
 
+def _resolve_bind(session: Session):
+    """Best-effort bind resolver. Returns None if the caller's session cannot
+    produce one (mocks, torn-down engines, etc.) — we simply skip the write
+    rather than fall back to anything that could touch the caller session.
+    """
+    try:
+        return session.get_bind()
+    except Exception as e:
+        logger.debug("telemetry: caller has no bind, skipping: %s", e)
+        return None
+
+
 def record_search_event(
     session: Session,
     query_text: str,
@@ -50,10 +66,17 @@ def record_search_event(
         Wall time for the whole search, measured by the caller (search.py).
 
     Returns the new event id, or ``None`` if telemetry was skipped or errored.
-    Callers MUST tolerate a ``None`` return.
+    Callers MUST tolerate a ``None`` return. **This function never touches the
+    caller session** — the telemetry write happens on a fresh session bound
+    to the same engine, and every failure path returns ``None`` silently.
     """
     if not _telemetry_enabled():
         return None
+
+    bind = _resolve_bind(session)
+    if bind is None:
+        return None
+
     try:
         results_list = list(results) if not isinstance(results, list) else results
         top_memory_id = None
@@ -69,30 +92,36 @@ def record_search_event(
             top_memory_id=top_memory_id,
             latency_ms=float(latency_ms) if latency_ms is not None else 0.0,
         )
-        # Use a fresh short-lived session bound to the same engine. This
-        # decouples telemetry durability from the caller's transaction —
-        # when a FastAPI handler (or a CLI Ctrl-C) rolls back, the telemetry
-        # row is already committed on its own connection and will not be
-        # wiped. Without this, failing queries silently drop off the hit@1
-        # denominator, biasing the metric upward.
-        from sqlalchemy.orm import Session as SASession
-
-        bind = session.get_bind()
-        tele_session = SASession(bind=bind, autoflush=False)
-        try:
-            tele_session.add(event)
-            tele_session.commit()
-            event_id = event.id
-        finally:
-            tele_session.close()
-        return event_id
-    except Exception as e:  # pragma: no cover — telemetry must never break search
-        logger.debug("telemetry: record_search_event failed: %s", e)
-        try:
-            session.rollback()
-        except Exception:
-            pass
+    except Exception as e:  # pragma: no cover
+        logger.debug("telemetry: event construction failed: %s", e)
         return None
+
+    # Use a fresh short-lived session bound to the same engine. This
+    # decouples telemetry durability from the caller's transaction: when
+    # a FastAPI handler rolls back (or a CLI Ctrl-C), the telemetry row is
+    # already committed on its own connection and will not be wiped.
+    from sqlalchemy.orm import Session as SASession
+
+    tele_session = None
+    try:
+        tele_session = SASession(bind=bind, autoflush=False)
+        tele_session.add(event)
+        tele_session.commit()
+        return event.id
+    except Exception as e:  # pragma: no cover — never raise into the caller
+        logger.debug("telemetry: record_search_event failed: %s", e)
+        if tele_session is not None:
+            try:
+                tele_session.rollback()
+            except Exception:
+                pass
+        return None
+    finally:
+        if tele_session is not None:
+            try:
+                tele_session.close()
+            except Exception:
+                pass
 
 
 def mark_event_accepted(
@@ -107,25 +136,44 @@ def mark_event_accepted(
     doesn't know (common for MCP tools that lost the ordering), leave it
     None — we can still count the acceptance, just not the hit@3 bucket.
 
+    As with ``record_search_event``, the write is done on a fresh session
+    bound to the same engine so that a telemetry failure cannot roll back
+    the caller's unrelated pending work.
+
     Returns True on success, False if the event is missing or the write
     failed. Callers may ignore the return.
     """
+    bind = _resolve_bind(session)
+    if bind is None:
+        return False
+
+    from sqlalchemy.orm import Session as SASession
+
+    tele_session = None
     try:
-        ev = session.get(SearchEvent, event_id)
+        tele_session = SASession(bind=bind, autoflush=False)
+        ev = tele_session.get(SearchEvent, event_id)
         if ev is None:
             return False
         ev.accepted_memory_id = memory_id
         if position is not None:
             ev.position_of_accepted = int(position)
-        session.commit()
+        tele_session.commit()
         return True
-    except Exception as e:
+    except Exception as e:  # pragma: no cover
         logger.debug("telemetry: mark_event_accepted failed: %s", e)
-        try:
-            session.rollback()
-        except Exception:
-            pass
+        if tele_session is not None:
+            try:
+                tele_session.rollback()
+            except Exception:
+                pass
         return False
+    finally:
+        if tele_session is not None:
+            try:
+                tele_session.close()
+            except Exception:
+                pass
 
 
 def compute_retrieval_metrics(session: Session, window_days: int) -> dict:

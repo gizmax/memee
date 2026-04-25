@@ -58,6 +58,40 @@ def _has_embeddings() -> bool:
         return False
 
 
+# Cache the "are there any embedded memories in the DB?" answer per-process.
+# Without this we pay a SELECT on every search and, worse, pay the 2–3s
+# model cold-start on any search issued against a DB that never embedded
+# anything. The cache is invalidated when ``embed_all_memories`` runs.
+_DB_HAS_EMBEDDINGS: dict[int, bool] = {}
+
+
+def _db_has_any_embeddings(session: Session) -> bool:
+    """Cheap short-circuit: only pay the model cold-start and the vector
+    rerank if at least one memory in this DB actually has an embedding."""
+    bind = None
+    try:
+        bind = session.get_bind()
+    except Exception:
+        return False
+    key = id(bind)
+    cached = _DB_HAS_EMBEDDINGS.get(key)
+    if cached is not None:
+        return cached
+    try:
+        row = session.execute(
+            text("SELECT 1 FROM memories WHERE embedding IS NOT NULL LIMIT 1")
+        ).fetchone()
+        answer = row is not None
+    except Exception:
+        answer = False
+    _DB_HAS_EMBEDDINGS[key] = answer
+    return answer
+
+
+def _invalidate_embedding_cache() -> None:
+    _DB_HAS_EMBEDDINGS.clear()
+
+
 def search_memories(
     session: Session,
     query: str,
@@ -83,14 +117,33 @@ def search_memories(
     list-returning signature for every other caller.
     """
     _t0 = time.perf_counter()
-    # Stage 1: BM25 search
-    bm25_results = _bm25_search(session, query, memory_type, maturity, limit * 3)
+    # Stage 1: BM25 search. When a memory_type/maturity filter is set we push
+    # it into the FTS candidate SQL so the filter doesn't silently starve
+    # results (old code over-fetched limit*3 candidates *without* the filter;
+    # rare types could be outranked and vanish after the post-filter).
+    bm25_results = _bm25_search(
+        session, query, memory_type, maturity, limit * 3, filter_in_sql=True
+    )
 
-    # Stage 2: Vector search (if available)
-    vector_results = {}
-    has_vectors = use_vectors and _has_embeddings()
-    if has_vectors:
-        vector_results = _vector_search(session, query, memory_type, maturity, limit * 3)
+    # Stage 2: Vector rerank (if embeddings available). We rerank ONLY the
+    # BM25 candidate set instead of scoring every embedded memory in the DB.
+    # Old behaviour: O(N) cosine over all embeddings → 283ms at 5K memories
+    # and dominant cold-start cost when the model isn't warm. New: O(K) with
+    # K = len(bm25_results), typically ≤ 60. Cost drops to sub-millisecond
+    # after the model loads.
+    #
+    # Cold-start guard: if NO memory in this DB has an embedding, skip the
+    # model load entirely. The old code paid a 2–3s cold-start on every
+    # search against an un-embedded DB (common: tests, fresh installs, users
+    # who never ran ``memee embed``).
+    vector_results: dict = {}
+    # Order matters: the DB check is a single SELECT; ``_has_embeddings`` pulls
+    # in the ``sentence_transformers`` import (~5s cold) even when we end up
+    # not needing it. Short-circuit on the cheap probe first so that DBs which
+    # never ran ``memee embed`` never pay the import cost at all.
+    has_vectors = (
+        use_vectors and _db_has_any_embeddings(session) and _has_embeddings()
+    )
 
     # Stage 3: Batch rowid → id resolution (ONE query, not N)
     rowids = [r[0] for r in bm25_results]
@@ -109,6 +162,12 @@ def search_memories(
             # match → normalize so the best match maps to 1.0, not 0.0.
             bm25_by_id[mid] = (abs(rank) / max_bm25) if max_bm25 > 0 else 0.5
 
+    # Vector rerank happens after BM25 so we only score the candidate set.
+    if has_vectors and bm25_by_id:
+        vector_results = _vector_rerank(
+            session, query, list(bm25_by_id.keys())
+        )
+
     all_ids = set(bm25_by_id.keys()) | set(vector_results.keys())
     if not all_ids:
         fb = _fallback_search(session, query, tags, memory_type, maturity, limit)
@@ -123,22 +182,27 @@ def search_memories(
         memories_q = memories_q.filter(Memory.type == memory_type)
     if maturity:
         memories_q = memories_q.filter(Memory.maturity == maturity)
-    memories_list = memories_q.all()
 
-    # Scope visibility is a memee-team plugin. If registered, use it.
-    visible_ids = None
-    if scope and user_id:
-        from memee import plugins as _plugins
-        _scoping_hook = _plugins.get("visible_memories")
-        if _scoping_hook is not None and _scoping_hook is not _plugins._default_visible_memories:
-            visible_q = _scoping_hook(session)
-            visible_ids = {m.id for m in visible_q.with_entities(Memory.id).all()}
+    # Scope visibility. When a multi-user hook is registered (memee-team),
+    # we apply it unconditionally — relying on callers to remember to pass
+    # scope/user_id caused tenancy leaks through MCP, CLI, router, review.
+    # In OSS single-user the hook is the default no-op and this is a cheap
+    # identity call; nothing changes for single-user users.
+    from memee import plugins as _plugins
+
+    resolved_user_id = user_id
+    if resolved_user_id is None and _plugins.is_multi_user_active():
+        try:
+            resolved_user_id = _plugins.call("current_user_id", session)
+        except TypeError:
+            resolved_user_id = _plugins.call("current_user_id")
+    memories_q = _plugins.apply_visibility(
+        session, memories_q, user_id=resolved_user_id
+    )
+    memories_list = memories_q.all()
 
     results = []
     for memory in memories_list:
-        # Scope filter
-        if visible_ids is not None and memory.id not in visible_ids:
-            continue
         memory_id = memory.id
 
         bm25_score = bm25_by_id.get(memory_id, 0.0)
@@ -239,6 +303,7 @@ def embed_all_memories(session: Session, batch_size: int = 100) -> int:
             session.flush()
 
     session.commit()
+    _invalidate_embedding_cache()
     return count
 
 
@@ -251,11 +316,17 @@ def _bm25_search(
     memory_type: str | None,
     maturity: str | None,
     limit: int,
+    filter_in_sql: bool = False,
 ) -> list[tuple[int, float]]:
-    """BM25 search via FTS5. Returns [(rowid, rank), ...].
+    """BM25 search via FTS5. Returns [(memory_rowid, fts_rank), ...].
 
     AND-by-default for precision; falls back to OR (one layer) if AND returns
     zero rows so we don't silently miss single-token or partial-hit queries.
+
+    When ``filter_in_sql`` is set AND either ``memory_type`` or ``maturity``
+    is given, the filter is joined into the SQL so the rare-type candidates
+    don't get outranked by 1000 common-type matches and then post-filtered
+    to zero. We keep the rowid signature stable for the caller.
     """
     fts_and = _sanitize_fts_query(query, operator="AND")
     if not fts_and:
@@ -263,18 +334,38 @@ def _bm25_search(
         # through FTS5 (it would hit syntax errors and silently return []).
         return []
 
-    fts_sql = text("""
-        SELECT rowid, rank
-        FROM memories_fts
-        WHERE memories_fts MATCH :query
-        ORDER BY rank
-        LIMIT :limit
-    """)
+    use_filter = filter_in_sql and (memory_type is not None or maturity is not None)
+    if use_filter:
+        conds = []
+        params: dict = {"limit": limit}
+        if memory_type is not None:
+            conds.append("m.type = :mtype")
+            params["mtype"] = memory_type
+        if maturity is not None:
+            conds.append("m.maturity = :maturity")
+            params["maturity"] = maturity
+        where = " AND ".join(conds)
+        fts_sql = text(f"""
+            SELECT f.rowid, f.rank
+            FROM memories_fts f
+            JOIN memories m ON m.rowid = f.rowid
+            WHERE memories_fts MATCH :query
+              AND {where}
+            ORDER BY f.rank
+            LIMIT :limit
+        """)
+    else:
+        params = {"limit": limit}
+        fts_sql = text("""
+            SELECT rowid, rank
+            FROM memories_fts
+            WHERE memories_fts MATCH :query
+            ORDER BY rank
+            LIMIT :limit
+        """)
 
     try:
-        rows = session.execute(
-            fts_sql, {"query": fts_and, "limit": limit}
-        ).fetchall()
+        rows = session.execute(fts_sql, {**params, "query": fts_and}).fetchall()
     except Exception as e:
         logger.debug(f"BM25 AND search failed for query '{query[:50]}': {e}")
         rows = []
@@ -289,14 +380,69 @@ def _bm25_search(
         return []
 
     try:
-        return session.execute(
-            fts_sql, {"query": fts_or, "limit": limit}
-        ).fetchall()
+        return session.execute(fts_sql, {**params, "query": fts_or}).fetchall()
     except Exception as e:
         logger.debug(f"BM25 OR fallback failed for query '{query[:50]}': {e}")
         return []
 
 
+def _vector_rerank(
+    session: Session,
+    query: str,
+    candidate_ids: list[str],
+) -> dict[str, float]:
+    """Score only ``candidate_ids`` by cosine similarity to the query.
+
+    Two-phase retrieval:
+      1. BM25 pre-ranks to get a small candidate set (≤ limit*3, typically 30–60)
+      2. This function re-scores those candidates with the vector model
+
+    The old ``_vector_search`` scanned every embedded row in the DB (O(N),
+    Python cosine), which dominated at 5K+ memories and also paid a cold-start
+    model-load cost on every call. This path is O(K) where K = candidates,
+    and only pays the model load once per process.
+    """
+    if not candidate_ids:
+        return {}
+    try:
+        from memee.engine.embeddings import cosine_similarity, embed_text
+
+        query_embedding = embed_text(query)
+        if not query_embedding:
+            return {}
+
+        # Fetch only the candidate embeddings in one IN clause.
+        rows = (
+            session.query(Memory.id, Memory.embedding)
+            .filter(Memory.id.in_(candidate_ids))
+            .filter(Memory.embedding.isnot(None))
+            .all()
+        )
+
+        scored: dict[str, float] = {}
+        for mid, emb in rows:
+            if not isinstance(emb, list) or not emb:
+                continue
+            sim = cosine_similarity(query_embedding, emb)
+            if sim > 0.3:
+                scored[mid] = sim
+
+        if scored:
+            max_sim = max(scored.values())
+            min_sim = min(scored.values())
+            range_sim = max_sim - min_sim if max_sim != min_sim else 1.0
+            scored = {k: (v - min_sim) / range_sim for k, v in scored.items()}
+        return scored
+
+    except Exception as e:
+        logger.warning(f"Vector rerank failed: {e}")
+        return {}
+
+
+# Back-compat shim: kept so existing imports/tests that reach into
+# ``_vector_search`` don't break. Signature preserved; internally it now
+# runs the same O(N) brute path only when no candidate list is available
+# (used by code paths outside search_memories such as the bench utilities).
 def _vector_search(
     session: Session,
     query: str,
@@ -304,13 +450,16 @@ def _vector_search(
     maturity: str | None,
     limit: int,
 ) -> dict[str, float]:
-    """Vector similarity search. Returns {memory_id: similarity_score}."""
+    """Legacy full-scan vector search. Only kept for direct callers — the
+    main ``search_memories`` path now uses ``_vector_rerank`` over the
+    BM25 candidate set."""
     try:
         from memee.engine.embeddings import cosine_similarity, embed_text
 
         query_embedding = embed_text(query)
+        if not query_embedding:
+            return {}
 
-        # Get all memories with embeddings
         q = session.query(Memory).filter(Memory.embedding.isnot(None))
         if memory_type:
             q = q.filter(Memory.type == memory_type)
@@ -318,23 +467,21 @@ def _vector_search(
             q = q.filter(Memory.maturity == maturity)
 
         memories = q.all()
-
-        scored = {}
+        scored: dict[str, float] = {}
         for m in memories:
-            if m.embedding:
-                emb = m.embedding if isinstance(m.embedding, list) else []
-                sim = cosine_similarity(query_embedding, emb)
-                if sim > 0.3:  # Threshold to reduce noise
-                    scored[m.id] = sim
+            emb = m.embedding if isinstance(m.embedding, list) else []
+            if not emb:
+                continue
+            sim = cosine_similarity(query_embedding, emb)
+            if sim > 0.3:
+                scored[m.id] = sim
 
-        # Normalize to 0-1
         if scored:
             max_sim = max(scored.values())
             min_sim = min(scored.values())
             range_sim = max_sim - min_sim if max_sim != min_sim else 1.0
             scored = {k: (v - min_sim) / range_sim for k, v in scored.items()}
 
-        # Return top N
         sorted_ids = sorted(scored.keys(), key=lambda k: -scored[k])[:limit]
         return {k: scored[k] for k in sorted_ids}
 

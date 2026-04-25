@@ -24,6 +24,7 @@ mcp = FastMCP(
 
 
 _cached_engine = None
+_cached_factory = None
 
 
 def _get_session():
@@ -32,16 +33,70 @@ def _get_session():
     The engine + schema init are a per-process one-time cost. Previously
     every MCP tool call re-ran ``init_db()`` (new engine, CREATE IF NOT
     EXISTS on FTS triggers, alembic-version check) which added 20–50 ms
-    of overhead to every invocation. Engine is cached at the module level;
-    the caller still gets a fresh Session per call.
-    """
-    from memee.storage.database import get_engine, get_session, init_db
+    of overhead to every invocation. Engine + sessionmaker are cached at
+    the module level; the caller still gets a fresh Session per call.
 
-    global _cached_engine
+    Callers SHOULD use ``_with_session`` decorator or wrap manually with
+    ``try/finally session.close()``. Tool bodies that predate this refactor
+    rely on CPython refcount cleanup, which releases the connection when the
+    local goes out of scope.
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    from memee.storage.database import get_engine, init_db
+
+    global _cached_engine, _cached_factory
     if _cached_engine is None:
         _cached_engine = get_engine()
         init_db(_cached_engine)
-    return get_session(_cached_engine)
+        _cached_factory = sessionmaker(bind=_cached_engine, autoflush=False)
+    return _cached_factory()
+
+
+def _with_session(fn):
+    """Decorator that injects ``session`` kwarg and closes it on exit.
+
+    Wrap a tool body with this to get deterministic session close — both on
+    successful return and on exceptions. Use from new tools going forward;
+    the existing bodies continue to work via refcount cleanup.
+
+    Usage:
+        @mcp.tool()
+        @_with_session
+        async def my_tool(arg: str, *, session):
+            ...
+    """
+    import functools
+    import inspect
+
+    is_async = inspect.iscoroutinefunction(fn)
+
+    if is_async:
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            session = _get_session()
+            try:
+                return await fn(*args, session=session, **kwargs)
+            finally:
+                try:
+                    session.close()
+                except Exception:
+                    pass
+
+        return wrapper
+
+    @functools.wraps(fn)
+    def sync_wrapper(*args, **kwargs):
+        session = _get_session()
+        try:
+            return fn(*args, session=session, **kwargs)
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+    return sync_wrapper
 
 
 def _parse_tags(tags: str) -> list[str]:
@@ -200,32 +255,35 @@ async def memory_search(
     from memee.engine.search import search_memories
 
     session = _get_session()
-    tag_list = _parse_tags(tags) or None
-    limit = _clamp_limit(limit, default=10, maxv=200)
+    try:
+        tag_list = _parse_tags(tags) or None
+        limit = _clamp_limit(limit, default=10, maxv=200)
 
-    # Ask search_memories to hand back the exact event id it just wrote.
-    # Pulling "latest SearchEvent" here instead races with concurrent callers
-    # and can hand the wrong id to search_feedback → corrupted hit@k metrics.
-    results, query_event_id = search_memories(
-        session,
-        query,
-        tags=tag_list,
-        memory_type=type or None,
-        limit=limit,
-        return_event_id=True,
-    )
+        # Ask search_memories to hand back the exact event id it just wrote.
+        # Pulling "latest SearchEvent" here instead races with concurrent callers
+        # and can hand the wrong id to search_feedback → corrupted hit@k metrics.
+        results, query_event_id = search_memories(
+            session,
+            query,
+            tags=tag_list,
+            memory_type=type or None,
+            limit=limit,
+            return_event_id=True,
+        )
 
-    return json.dumps({
-        "count": len(results),
-        "query_event_id": query_event_id,
-        "results": [
-            {
-                **_memory_to_dict(r["memory"]),
-                "score": r["total_score"],
-            }
-            for r in results
-        ],
-    })
+        return json.dumps({
+            "count": len(results),
+            "query_event_id": query_event_id,
+            "results": [
+                {
+                    **_memory_to_dict(r["memory"]),
+                    "score": r["total_score"],
+                }
+                for r in results
+            ],
+        })
+    finally:
+        session.close()
 
 
 @mcp.tool()
@@ -247,13 +305,16 @@ async def search_feedback(
     from memee.engine.telemetry import mark_event_accepted
 
     session = _get_session()
-    ok = mark_event_accepted(
-        session,
-        event_id=query_event_id,
-        memory_id=accepted_memory_id,
-        position=None if position is None or position < 0 else int(position),
-    )
-    return json.dumps({"ok": ok, "event_id": query_event_id})
+    try:
+        ok = mark_event_accepted(
+            session,
+            event_id=query_event_id,
+            memory_id=accepted_memory_id,
+            position=None if position is None or position < 0 else int(position),
+        )
+        return json.dumps({"ok": ok, "event_id": query_event_id})
+    finally:
+        session.close()
 
 
 @mcp.tool()
@@ -271,24 +332,27 @@ async def memory_suggest(
     from memee.engine.search import search_memories
 
     session = _get_session()
-    tag_list = _parse_tags(tags) or None
-    limit = _clamp_limit(limit, default=5, maxv=200)
+    try:
+        tag_list = _parse_tags(tags) or None
+        limit = _clamp_limit(limit, default=5, maxv=200)
 
-    results = search_memories(session, context, tags=tag_list, limit=limit)
+        results = search_memories(session, context, tags=tag_list, limit=limit)
 
-    suggestions = []
-    for r in results:
-        m = r["memory"]
-        suggestions.append({
-            **_memory_to_dict(m),
-            "resonance_score": r["total_score"],
+        suggestions = []
+        for r in results:
+            m = r["memory"]
+            suggestions.append({
+                **_memory_to_dict(m),
+                "resonance_score": r["total_score"],
+            })
+
+        return json.dumps({
+            "context": context[:100],
+            "suggestion_count": len(suggestions),
+            "suggestions": suggestions,
         })
-
-    return json.dumps({
-        "context": context[:100],
-        "suggestion_count": len(suggestions),
-        "suggestions": suggestions,
-    })
+    finally:
+        session.close()
 
 
 @mcp.tool()

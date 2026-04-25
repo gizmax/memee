@@ -63,48 +63,113 @@ def briefing(
         for t in (project.tags or []):
             stack_tags.add(t.lower())
 
-    # 1. Canon + Validated patterns
-    pattern_q = session.query(Memory).filter(
-        Memory.type == MemoryType.PATTERN.value,
-        Memory.maturity.in_([MaturityLevel.CANON.value, MaturityLevel.VALIDATED.value]),
-    ).order_by(Memory.confidence_score.desc())
+    # 1. Patterns — route by task_description when provided, else fall back
+    # to project-stack filtering. Old code accepted task_description but
+    # never used it; an agent calling briefing(task="write unit tests")
+    # would get the same generic top-confidence patterns as briefing().
+    patterns: list = []
+    if task_description:
+        from memee.engine.search import search_memories
 
-    patterns = []
-    for m in pattern_q.limit(max_patterns * 3).all():
-        mem_tags = set(m.tags or [])
-        relevant = not stack_tags or bool(mem_tags & stack_tags)
-        if relevant:
+        hits = search_memories(
+            session,
+            task_description,
+            tags=list(stack_tags) if stack_tags else None,
+            memory_type=MemoryType.PATTERN.value,
+            limit=max_patterns * 3,
+            use_vectors=False,  # briefing is a hot path
+        )
+        for r in hits:
+            m = r["memory"]
+            if m.maturity not in (
+                MaturityLevel.CANON.value,
+                MaturityLevel.VALIDATED.value,
+            ):
+                continue
             patterns.append(m)
-        if len(patterns) >= max_patterns:
-            break
+            if len(patterns) >= max_patterns:
+                break
+    else:
+        pattern_q = session.query(Memory).filter(
+            Memory.type == MemoryType.PATTERN.value,
+            Memory.maturity.in_(
+                [MaturityLevel.CANON.value, MaturityLevel.VALIDATED.value]
+            ),
+        ).order_by(Memory.confidence_score.desc())
+        for m in pattern_q.limit(max_patterns * 3).all():
+            mem_tags = set(m.tags or [])
+            relevant = not stack_tags or bool(mem_tags & stack_tags)
+            if relevant:
+                patterns.append(m)
+            if len(patterns) >= max_patterns:
+                break
 
-    # 2. Critical anti-patterns
-    # Lexicographic sort on severity string orders "medium" > "low" > "high" >
-    # "critical" — the opposite of what we want. Explicit rank via CASE keeps
-    # critical rows at the top where they belong.
+    # 2. Critical anti-patterns. Critical severity ALWAYS shows regardless of
+    # task (institutional DNA); the rest is task-filtered when task provided.
     severity_rank = case(
         {"critical": 0, "high": 1, "medium": 2, "low": 3},
         value=AntiPattern.severity,
         else_=4,
     )
-    ap_q = (
+    critical_q = (
         session.query(Memory, AntiPattern)
         .join(AntiPattern, AntiPattern.memory_id == Memory.id)
-        .filter(Memory.maturity != MaturityLevel.DEPRECATED.value)
-        .order_by(
-            severity_rank,
-            Memory.confidence_score.desc(),
+        .filter(
+            AntiPattern.severity == "critical",
+            Memory.maturity != MaturityLevel.DEPRECATED.value,
         )
+        .order_by(Memory.confidence_score.desc())
     )
+    critical_rows = critical_q.limit(max_warnings).all()
 
-    warnings = []
-    for m, ap in ap_q.limit(max_warnings * 3).all():
-        mem_tags = set(m.tags or [])
-        relevant = not stack_tags or bool(mem_tags & stack_tags) or ap.severity == "critical"
-        if relevant:
+    warnings: list = list(critical_rows)
+    seen_ids = {m.id for m, _ in critical_rows}
+
+    if task_description and len(warnings) < max_warnings:
+        from memee.engine.search import search_memories
+
+        hits = search_memories(
+            session,
+            task_description,
+            tags=list(stack_tags) if stack_tags else None,
+            memory_type=MemoryType.ANTI_PATTERN.value,
+            limit=max_warnings * 3,
+            use_vectors=False,
+        )
+        for r in hits:
+            m = r["memory"]
+            if m.id in seen_ids:
+                continue
+            if m.maturity == MaturityLevel.DEPRECATED.value:
+                continue
+            ap = m.anti_pattern
+            if not ap:
+                continue
             warnings.append((m, ap))
-        if len(warnings) >= max_warnings:
-            break
+            seen_ids.add(m.id)
+            if len(warnings) >= max_warnings:
+                break
+    else:
+        ap_q = (
+            session.query(Memory, AntiPattern)
+            .join(AntiPattern, AntiPattern.memory_id == Memory.id)
+            .filter(Memory.maturity != MaturityLevel.DEPRECATED.value)
+            .order_by(severity_rank, Memory.confidence_score.desc())
+        )
+        for m, ap in ap_q.limit(max_warnings * 3).all():
+            if m.id in seen_ids:
+                continue
+            mem_tags = set(m.tags or [])
+            relevant = (
+                not stack_tags
+                or bool(mem_tags & stack_tags)
+                or ap.severity == "critical"
+            )
+            if relevant:
+                warnings.append((m, ap))
+                seen_ids.add(m.id)
+            if len(warnings) >= max_warnings:
+                break
 
     # 3. Relevant decisions
     dec_q = (

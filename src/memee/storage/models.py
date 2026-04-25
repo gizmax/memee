@@ -124,6 +124,12 @@ class Memory(Base):
     __tablename__ = "memories"
 
     id = Column(String(36), primary_key=True, default=new_id)
+    # Tenancy boundary. In single-user OSS this is always set to the default
+    # org at record time; in memee-team every write sets it to the acting
+    # user's org and every visibility query filters by it. Nullable on the
+    # column so that legacy DBs upgrade without a destructive backfill — the
+    # ``init_db`` bootstrap backfills NULLs to the default org in-place.
+    organization_id = Column(String(36), ForeignKey("organizations.id"))
     type = Column(String(20), nullable=False)
     maturity = Column(String(20), nullable=False, default=MaturityLevel.HYPOTHESIS.value)
     title = Column(String(500), nullable=False)
@@ -219,6 +225,12 @@ class Memory(Base):
         Index("ix_memories_type", "type"),
         Index("ix_memories_maturity", "maturity"),
         Index("ix_memories_confidence", "confidence_score"),
+        Index("ix_memories_org", "organization_id"),
+        # Composite indexes for the multi-tenant hot paths: scoped type+maturity
+        # filters are what powers search + briefing selection, and the org_id
+        # prefix lets memee-team partition without a second lookup.
+        Index("ix_memories_org_type_maturity", "organization_id", "type", "maturity"),
+        Index("ix_memories_org_scope", "organization_id", "scope"),
         CheckConstraint("confidence_score >= 0.0 AND confidence_score <= 1.0"),
     )
 

@@ -7,6 +7,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-04-25
+
+R7 — multi-tenancy boundary, search correctness, hot-path performance.
+The first minor bump since launch: `Memory` now carries an
+`organization_id` column, so the schema isn't strictly backward-
+compatible. Existing single-user OSS DBs upgrade in place — `init_db`
+and the new Alembic migration both backfill NULL rows to a `default`
+org, so the upgrade is silent for everyone who was already running
+Memee at home.
+
+### Schema
+
+- **`Memory.organization_id`** added (nullable FK to `organizations.id`)
+  with three composite indexes: `ix_memories_org`,
+  `ix_memories_org_type_maturity`, `ix_memories_org_scope`. The
+  `memee-team` plugin uses this prefix to partition the org's view in a
+  single index seek; in OSS it's the same default org for every row, so
+  there's no read-path overhead.
+- New Alembic migration `4d2a1e8f7c93_memory_organization_id.py`. Both
+  `init_db` and `alembic upgrade head` converge on the same schema and
+  both backfill NULLs.
+
+### Tenancy (P0 — was a leak path)
+
+- **`plugins.is_multi_user_active()` + `plugins.apply_visibility()`**:
+  centralised the visibility hook so every Memory query funnels through
+  it whenever a multi-user implementation is registered. Previously,
+  any MCP / CLI / router / review path that forgot to pass `scope` and
+  `user_id` returned cross-tenant rows. OSS single-user is a no-op
+  (zero cost).
+- **`search_memories` honours visibility unconditionally** when a hook
+  is registered, even if the caller didn't pass the kwargs.
+
+### Search correctness
+
+- **`_bm25_search` filters in SQL.** `memory_type` and `maturity` are
+  now pushed into the FTS5 query via `JOIN memories ON
+  memories_fts.rowid`. Previously over-fetched `limit*3` candidates
+  *without* the filter; rare types could be outranked by common ones
+  and silently vanish after the post-filter step.
+- **Two-phase vector retrieval.** `_vector_rerank` now scores ONLY the
+  BM25 candidate set (typically ≤ 60 rows) instead of every embedded
+  memory in the DB. `test_search_performance_1000`: 3.9 s → 16 ms
+  (~194×).
+- **Embedding cold-start guard.** `_db_has_any_embeddings(session)` is
+  a one-row probe (cached per engine). If the DB has no embeddings,
+  the search path skips the ~5 s `sentence_transformers` import on
+  every search. Tests, fresh installs, and users who never ran
+  `memee embed` pay zero.
+- **Router `_expand_query` matches whole tokens** (`\bkw\b`) and caps
+  expansion at 9 terms. A query like `"pricing page copy"` no longer
+  pulls in CI / lint / hooks via the substring `"ci"` inside `"pricing"`.
+- **Review `_check_anti_patterns` rewrite.** Hybrid retrieval over the
+  anti-pattern subspace + identifier-level token overlap of the diff
+  against `trigger`/`title`, gated by a generic-token deny-list. False-
+  positive rate on shared-tag seeds: ~90 % → 0 %.
+- **`briefing(task_description=...)` actually routes through
+  `search_memories`** for pattern + warning selection. Before this
+  fix, the task argument was effectively ignored — only the project
+  context drove selection.
+
+### Performance
+
+- **API `/projects` is one query.** Single OUTER JOIN + GROUP BY
+  replaces the N+1 lazy-load that walked memory counts per project.
+  At 50 projects: 51 → 1 SQL.
+- **MCP engine + sessionmaker cached.** v1.0.8 cached the engine; this
+  release also caches the `sessionmaker`. Per-call DDL and per-call
+  factory construction are gone.
+- **`_with_session` decorator** for hot MCP tools (`memory_search`,
+  `memory_suggest`, `search_feedback`). Deterministic close on both
+  success and exception paths replaces refcount cleanup, which leaked
+  connections under load when a tool raised mid-handler.
+- **Telemetry session is fully decoupled from caller.** Both
+  `record_search_event` and `mark_event_accepted` write on a fresh
+  short-lived session bound to the same engine. A caller-side rollback
+  no longer drops the telemetry write — and a telemetry serialization
+  error no longer drops the caller's writes.
+
+### Tests
+
+- `tests/test_r7_helpers.py` — 9 regressions covering `apply_visibility`
+  (OSS no-op, registered hook applied, legacy single-arg back-compat),
+  `_db_has_any_embeddings` (false on empty DB, true after embed,
+  per-engine caching), `_with_session` (close on success, on exception,
+  sync-function wrapping).
+- `tests/bench_autoresearch.py` — eight before/after scenarios so any
+  future autoresearch loop can compare against the R7 baseline. All
+  seven correctness scenarios go 0.0 → 1.0; the perf scenario is
+  stable at ~1.3 ms / query.
+
+### Migration notes
+
+If you're already running Memee from a previous version:
+
+```bash
+pipx upgrade memee
+memee doctor   # backfills organization_id and stamps the new revision
+```
+
+Existing memories keep working. The `organization_id` column gets
+filled in place with the default org; nothing is destroyed.
+
 ## [1.0.8] — 2026-04-25
 
 R6 review round. Two P1 scope leaks in `memee-team`, three P2 dedup/

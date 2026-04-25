@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 
 from memee.engine.search import search_memories
 from memee.storage.models import (
-    AntiPattern,
     MaturityLevel,
     Memory,
     MemoryType,
@@ -232,42 +231,112 @@ def _check_anti_patterns(
     session: Session,
     context: str,
     keywords: list[str],
+    limit: int = 10,
 ) -> list[dict]:
-    """Check for anti-pattern matches."""
-    warnings = []
+    """Retrieve anti-patterns that match the diff, scored by evidence.
 
-    # Direct keyword matching against anti-patterns
-    anti_patterns = (
-        session.query(Memory)
-        .join(AntiPattern, AntiPattern.memory_id == Memory.id)
-        .filter(Memory.maturity != MaturityLevel.DEPRECATED.value)
-        .all()
+    Old behavior: for every anti-pattern in the DB, compare its tag set to
+    the extracted keyword set and emit a warning on ANY overlap. One shared
+    tag like ``python`` or ``http`` flagged every unrelated anti-pattern in
+    the store — a ~90% false-positive rate in adversarial seeds.
+
+    New behavior:
+      1. Hybrid search the anti-pattern subspace on (context + keywords)
+         so the ranker scores real content/trigger matches, not just tags.
+      2. Score each candidate with three signals:
+         - BM25/vector total_score from the hybrid engine (content evidence)
+         - keyword intersection with ``trigger`` + ``title`` (precise signal)
+         - tag overlap with the diff's keyword set (weak signal, kept for
+           backward-compat but no longer a primary trigger)
+      3. Require at least one precise signal (trigger/title match OR the
+         hybrid ranker scored the memory above a threshold) to emit a
+         warning. Tag-only overlap is treated as a "suggestion" candidate
+         by the caller, not a warning.
+    """
+    from memee.engine.search import search_memories
+
+    query = (context or "") + " " + " ".join(keywords or [])
+    query = query.strip()
+    if not query:
+        return []
+
+    candidates = search_memories(
+        session,
+        query,
+        tags=keywords or None,
+        memory_type=MemoryType.ANTI_PATTERN.value,
+        limit=limit * 3,
+        use_vectors=False,  # review is a hot path; vectors add cold-start cost
     )
 
-    keyword_set = set(keywords)
-    for memory in anti_patterns:
-        mem_tags = set(memory.tags or [])
-        overlap = mem_tags & keyword_set
+    # Extract concrete identifiers from the diff text itself (not the abstract
+    # review-keyword catalog). These are precise: ``requests.get`` from the
+    # diff matches ``requests.get without timeout`` from a trigger. Shared
+    # *generic* tags like "http" are not enough — they flag every unrelated
+    # antipattern tagged with "http" and drive the FP rate to ~90%.
+    diff_tokens = {
+        t.lower()
+        for t in re.findall(r"[A-Za-z_][A-Za-z_0-9.]{3,}", context or "")
+    }
 
-        if overlap:
-            ap = memory.anti_pattern
-            warnings.append({
-                "type": "anti_pattern",
-                "memory_id": memory.id,
-                "title": memory.title,
-                "severity": ap.severity if ap else "medium",
-                "trigger": ap.trigger if ap else "",
-                "consequence": ap.consequence if ap else "",
-                "alternative": ap.alternative if ap else "",
-                "confidence": memory.confidence_score,
-                "matched_keywords": list(overlap),
-            })
+    warnings: list[dict] = []
+    for hit in candidates:
+        memory = hit["memory"]
+        if memory.maturity == MaturityLevel.DEPRECATED.value:
+            continue
+        ap = memory.anti_pattern
+        trigger = (ap.trigger if ap else "") or ""
+        title = memory.title or ""
 
-    # Sort by severity
+        # Identifiers from trigger + title → compare to identifiers in the
+        # diff. Identifier-level overlap = real evidence; tag overlap alone
+        # = suggestion material, not a warning.
+        ap_tokens = {
+            t.lower()
+            for t in re.findall(
+                r"[A-Za-z_][A-Za-z_0-9.]{3,}", trigger + " " + title
+            )
+        }
+        identifier_hits = sorted(diff_tokens & ap_tokens)
+
+        # Filter out tokens that are so generic they don't constitute evidence.
+        # 'http' in a trigger is just a tag; 'timeout' / 'requests.get' is not.
+        GENERIC = {"http", "https", "import", "from", "return", "def", "class", "self"}
+        precise_hits = [t for t in identifier_hits if t not in GENERIC]
+
+        if not precise_hits:
+            continue
+
+        keyword_set = {k.lower() for k in (keywords or [])}
+        mem_tags = set((memory.tags or []))
+        tag_overlap = mem_tags & keyword_set
+
+        warnings.append({
+            "type": "anti_pattern",
+            "memory_id": memory.id,
+            "title": memory.title,
+            "severity": ap.severity if ap else "medium",
+            "trigger": trigger,
+            "consequence": ap.consequence if ap else "",
+            "alternative": ap.alternative if ap else "",
+            "confidence": memory.confidence_score,
+            "matched_keywords": sorted(tag_overlap),
+            "evidence": {
+                "identifier_hits": precise_hits,
+                "bm25_score": hit.get("bm25_score", 0.0),
+                "tag_score": hit.get("tag_score", 0.0),
+                "total_score": hit.get("total_score", 0.0),
+            },
+        })
+
     severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-    warnings.sort(key=lambda w: severity_order.get(w["severity"], 4))
-
-    return warnings
+    warnings.sort(
+        key=lambda w: (
+            severity_order.get(w["severity"], 4),
+            -w.get("evidence", {}).get("total_score", 0.0),
+        )
+    )
+    return warnings[:limit]
 
 
 def _check_good_patterns(

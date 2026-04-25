@@ -6,9 +6,9 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
-from memee.storage.database import get_session, init_db
+from memee.storage.database import get_engine, init_db
 from memee.storage.models import (
     AntiPattern,
     LearningSnapshot,
@@ -22,6 +22,22 @@ from memee.storage.models import (
 router = APIRouter(tags=["api"])
 
 
+# Engine + sessionmaker are expensive to rebuild (init_db runs DDL + alembic
+# stamp on every call). Cache them lazily at module level so every request
+# reuses one engine and pulls a new Session from a single factory. The old
+# ``get_db()`` ran ``init_db()`` per request — 2.4ms × N requests in hot paths.
+_ENGINE = None
+_SESSION_FACTORY: sessionmaker | None = None
+
+
+def _get_factory() -> sessionmaker:
+    global _ENGINE, _SESSION_FACTORY
+    if _SESSION_FACTORY is None:
+        _ENGINE = init_db(get_engine())
+        _SESSION_FACTORY = sessionmaker(bind=_ENGINE, autoflush=False)
+    return _SESSION_FACTORY
+
+
 def get_db():
     """FastAPI dependency — yields a Session and guarantees close().
 
@@ -29,7 +45,8 @@ def get_db():
     The previous plain-return version leaked a connection per request
     and would eventually exhaust the SQLite pool.
     """
-    session = get_session(init_db())
+    factory = _get_factory()
+    session = factory()
     try:
         yield session
     finally:
@@ -148,22 +165,33 @@ def get_timeline(session: Session = Depends(get_db)):
 
 @router.get("/projects")
 def list_projects(session: Session = Depends(get_db)):
-    """List projects with memory counts."""
-    projects = session.query(Project).all()
-    result = []
-    for p in projects:
-        mem_count = (
-            session.query(func.count(ProjectMemory.memory_id))
-            .filter(ProjectMemory.project_id == p.id)
-            .scalar()
+    """List projects with memory counts.
+
+    One LEFT OUTER JOIN + GROUP BY replaces the 1 + N pattern that scaled
+    linearly with project count (50 projects → 51 queries previously).
+    """
+    rows = (
+        session.query(
+            Project.id,
+            Project.name,
+            Project.stack,
+            Project.tags,
+            func.count(ProjectMemory.memory_id).label("memories"),
         )
-        result.append({
-            "id": p.id[:8],
-            "name": p.name,
-            "stack": p.stack or [],
-            "tags": p.tags or [],
-            "memories": mem_count,
-        })
+        .outerjoin(ProjectMemory, ProjectMemory.project_id == Project.id)
+        .group_by(Project.id)
+        .all()
+    )
+    result = [
+        {
+            "id": r.id[:8],
+            "name": r.name,
+            "stack": r.stack or [],
+            "tags": r.tags or [],
+            "memories": int(r.memories or 0),
+        }
+        for r in rows
+    ]
     return sorted(result, key=lambda x: -x["memories"])
 
 
