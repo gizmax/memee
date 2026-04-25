@@ -19,7 +19,7 @@ The 7× figure came from an earlier variant of the simulation that double-counte
 
 | Metric | Value | Source |
 |---|---|---|
-| OrgMemEval total | **92.4 / 100** | `memee.benchmarks.orgmemeval` |
+| OrgMemEval total | **92.2 / 100** | `memee.benchmarks.orgmemeval` |
 | Competitor baseline on OrgMemEval | 2.3 / 100 (Avoidance scenario only) | same |
 | Retrieval hit@1 (12-memory bench) | **100 %** (gate: ≥50 %) | `tests/test_search_ranking.py` |
 | Retrieval hit@3 | **100 %** (gate: ≥90 %) | same |
@@ -58,15 +58,15 @@ Eight scenarios, 100 total points. Run `memee benchmark` or `python -m memee.ben
 |---|---|---:|---:|---:|---|
 | 1 | Propagation | 15 | **15.0** | 100 % | New validated pattern reaches N of 25 target projects |
 | 2 | Avoidance | 15 | **15.0** | 100 % | Known anti-patterns pushed to all 27 target projects |
-| 3 | Maturity | 12 | 7.1 | 59 % | Canon % + validated % + avg confidence over 30 weeks |
-| 4 | Onboarding | 12 | **12.0** | 146 %* | Inherited memory count vs relevant baseline (ratio capped at 1.0) |
+| 3 | Maturity | 12 | 6.9 | 58 % | Canon % + validated % + avg confidence over 30 weeks |
+| 4 | Onboarding | 12 | **12.0** | 135 %* | Inherited memory count vs relevant baseline (ratio capped at 1.0) |
 | 5 | Recovery | 12 | **12.0** | 100 % | Projects warned within 1 propagation cycle of a new critical AP |
 | 6 | Calibration | 10 | 8.3 | 83 % | Pearson correlation between confidence and ground-truth quality (r=0.83) |
 | 7 | Synthesis | 12 | **12.0** | 100 % | Dream-mode connections + contradictions + boosts |
 | 8 | Research | 12 | 11.0 | 92 % | Autoresearch keep-rate + insight generation across 5 experiments, 150 iters |
-| — | **Total** | **100** | **92.4** | **92 %** | |
+| — | **Total** | **100** | **92.2** | **92 %** | |
 
-*Onboarding raw pct is 146 % because `inherited/relevant` exceeds 1.0 when cross-department patterns transfer; the scenario score is capped at max points.*
+*Onboarding raw pct is 135 % because `inherited/relevant` exceeds 1.0 when cross-department patterns transfer; the scenario score is capped at max points.*
 
 Competitor baseline total on this benchmark: **2.3 / 100** — most scenarios explicitly score 0 because competing architectures (Mem0, Zep, Letta, MemPalace, CLAUDE.md) have no equivalent capability. The only non-zero is Avoidance, where a simulated 15 % manual-check rate yields 2.3 points. Scoring code is open in `src/memee/benchmarks/orgmemeval.py` — disagree with a baseline, send a PR.
 
@@ -282,7 +282,7 @@ pytest tests/test_search_ranking.py   -q -s   # hit@1=100%, hit@3=100%
 pytest tests/test_benchmarks.py       -q -s   # competitive + raw perf
 pytest tests/test_perf_stress.py      -q -s   # 8k mem / 16k validations
 pytest tests/test_gigacorp.py         -q -s   # 18-month 100-project sim
-python -m memee.benchmarks.orgmemeval         # 92.4 / 100
+python -m memee.benchmarks.orgmemeval         # 92.2 / 100
 ```
 
 Each test file prints a human-readable report. Seeds are fixed (`random.seed(2026)` / `42`) so outputs are reproducible across runs on the same machine. Small drift (≈1 % in search latency, ±1 in counts that depend on thread interleaving) is normal between hardware.

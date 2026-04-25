@@ -89,25 +89,41 @@ def apply_visibility(session, base_query, user_id=None):
     This is the single entry point every engine path should go through before
     returning Memory rows. If no multi-user hook is registered, returns the
     query unchanged — zero cost in OSS.
+
+    Contract: a registered hook MUST compose with the supplied ``base_query``
+    (i.e. the result must be a subset of base_query). Hooks that build a
+    fresh, unrelated query throw away every filter the engine already
+    applied — candidate set, memory_type, maturity — and silently leak
+    unrelated rows past the search ranker. We enforce this by intersecting
+    the hook's output with ``base_query`` after the call. The intersection
+    is cheap (an extra ``id IN (subquery)`` clause SQLite optimises into a
+    semi-join) and is the most permissive enforcement strategy: bad hooks
+    don't crash, but they can't widen the candidate set either.
     """
     if not is_multi_user_active():
         return base_query
     fn = _HOOKS["visible_memories"]
     try:
-        return fn(session, base_query=base_query, user_id=user_id)
+        result = fn(session, base_query=base_query, user_id=user_id)
     except TypeError:
         # Back-compat: older hooks only accept (session, base_query)
         try:
-            return fn(session, base_query=base_query)
+            result = fn(session, base_query=base_query)
         except TypeError:
             # Even older: (session) → returns a Memory query we then intersect.
-            # SQLAlchemy 2.x prefers a ``select()`` over a ``Subquery`` inside
-            # ``IN(...)`` to avoid the SAWarning at composition time.
-            visible = fn(session)
-            from memee.storage.models import Memory
-            return base_query.filter(
-                Memory.id.in_(visible.with_entities(Memory.id))
-            )
+            result = fn(session)
+
+    if result is None:
+        # Hook explicitly opted out of any filtering; honour base_query.
+        return base_query
+
+    # Intersect hook output with base_query to enforce composition. If the
+    # hook already nested base_query the intersection is a no-op (SQLite
+    # collapses ``id IN (SELECT id FROM x WHERE id IN (...))`` cleanly).
+    from memee.storage.models import Memory
+    return base_query.filter(
+        Memory.id.in_(result.with_entities(Memory.id))
+    )
 
 
 class LicenseRequiredError(Exception):

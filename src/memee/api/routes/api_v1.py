@@ -197,37 +197,50 @@ def list_projects(session: Session = Depends(get_db)):
 
 @router.get("/agents")
 def list_agents(session: Session = Depends(get_db)):
-    """Agent effectiveness stats."""
-    agents = (
-        session.query(Memory.source_agent, func.count(Memory.id))
+    """Agent effectiveness stats.
+
+    Two grouped queries replace 1 + 2*N: the old code ran an avg + a
+    type-count query per agent (1001 queries at 500 agents). Now:
+      Q1: per-agent (count, avg_confidence)
+      Q2: per-(agent, type) count → pivoted in Python
+    """
+    base_rows = (
+        session.query(
+            Memory.source_agent,
+            func.count(Memory.id).label("memories"),
+            func.avg(Memory.confidence_score).label("avg_conf"),
+        )
         .filter(Memory.source_agent.isnot(None))
         .group_by(Memory.source_agent)
         .all()
     )
 
+    type_rows = (
+        session.query(
+            Memory.source_agent,
+            Memory.type,
+            func.count(Memory.id).label("count"),
+        )
+        .filter(Memory.source_agent.isnot(None))
+        .group_by(Memory.source_agent, Memory.type)
+        .all()
+    )
+
+    types_by_agent: dict[str, dict[str, int]] = defaultdict(dict)
+    for agent_name, mtype, mcount in type_rows:
+        types_by_agent[agent_name][mtype] = int(mcount or 0)
+
     result = []
-    for agent_name, count in agents:
-        # Avg confidence of memories created by this agent
-        avg_conf = (
-            session.query(func.avg(Memory.confidence_score))
-            .filter(Memory.source_agent == agent_name)
-            .scalar() or 0
-        )
-        # Count by type
-        type_counts = dict(
-            session.query(Memory.type, func.count(Memory.id))
-            .filter(Memory.source_agent == agent_name)
-            .group_by(Memory.type)
-            .all()
-        )
+    for agent_name, mem_count, avg_conf in base_rows:
+        tcounts = types_by_agent.get(agent_name, {})
         result.append({
             "name": agent_name,
-            "memories": count,
-            "avg_confidence": round(avg_conf, 3),
-            "patterns": type_counts.get("pattern", 0),
-            "anti_patterns": type_counts.get("anti_pattern", 0),
-            "decisions": type_counts.get("decision", 0),
-            "lessons": type_counts.get("lesson", 0),
+            "memories": int(mem_count or 0),
+            "avg_confidence": round(float(avg_conf or 0.0), 3),
+            "patterns": tcounts.get("pattern", 0),
+            "anti_patterns": tcounts.get("anti_pattern", 0),
+            "decisions": tcounts.get("decision", 0),
+            "lessons": tcounts.get("lesson", 0),
         })
 
     return sorted(result, key=lambda x: -x["avg_confidence"])

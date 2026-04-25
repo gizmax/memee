@@ -262,6 +262,20 @@ class ProjectMemory(Base):
 
 
 class MemoryConnection(Base):
+    """Directed edge between two memories.
+
+    relationship_type values currently emitted by ``dream.py``:
+      * ``contradicts`` (R7) — pattern ↔ anti_pattern with overlapping intent
+      * ``supports`` (R7) — pattern → pattern with shared tags + maturity
+      * ``related_to`` (R7) — generic loose link
+      * ``depends_on`` (R9) — source requires target as a prerequisite
+      * ``supersedes`` (R9) — source replaces target (target should be skipped
+        in briefing once present, optionally pending review for deprecation)
+
+    ``expires_at`` (R9) lets supersession/dependency edges be time-bounded.
+    NULL means the edge has no scheduled expiry. The lifecycle nightly
+    sweeps tombstone-expire any edge whose ``expires_at`` has passed.
+    """
     __tablename__ = "memory_connections"
 
     source_id = Column(
@@ -273,6 +287,24 @@ class MemoryConnection(Base):
     relationship_type = Column(String(50), nullable=False)
     strength = Column(Float, default=0.5)
     created_at = Column(DateTime, default=utcnow)
+    expires_at = Column(DateTime)
+
+    __table_args__ = (
+        # Briefing fans out from a candidate to its predecessors via target_id.
+        # Lifecycle scans CANON dependents via source_id. Both paths benefit
+        # from a leading-column index on the lookup key + the edge type so
+        # the WHERE on relationship_type is a covered seek.
+        Index(
+            "ix_memory_connections_target_type",
+            "target_id",
+            "relationship_type",
+        ),
+        Index(
+            "ix_memory_connections_source_type",
+            "source_id",
+            "relationship_type",
+        ),
+    )
 
 
 class MemoryValidation(Base):
@@ -290,6 +322,13 @@ class MemoryValidation(Base):
     created_at = Column(DateTime, default=utcnow)
 
     memory = relationship("Memory", back_populates="validations")
+
+    __table_args__ = (
+        # R10 db audit: /timeline endpoint orders by created_at over the full
+        # validation history. Without this index SQLite uses a TEMP B-TREE
+        # FOR ORDER BY on every dashboard hit.
+        Index("ix_memory_validations_created_at", "created_at"),
+    )
 
 
 # ── Specialized Memory Types ──
@@ -326,6 +365,13 @@ class AntiPattern(Base):
     occurrences = Column(Integer, default=1)
 
     memory = relationship("Memory", back_populates="anti_pattern")
+
+    __table_args__ = (
+        # R10 db audit: briefing critical-AP scan (router.smart_briefing
+        # filters severity == 'critical') was a full SCAN. Index on severity
+        # so ``WHERE severity = 'critical'`` becomes a SEARCH.
+        Index("ix_anti_patterns_severity", "severity"),
+    )
 
 
 # ── Autoresearch Tracking ──
@@ -384,6 +430,16 @@ class ResearchIteration(Base):
 
     experiment = relationship("ResearchExperiment", back_populates="iterations")
 
+    __table_args__ = (
+        # R10 db audit win #1: ``get_meta_learning`` runs one ordered fetch
+        # of iterations per experiment (often hundreds of experiments per
+        # call). Without a covering composite index SQLite SCANs the table
+        # plus a TEMP B-TREE for ORDER BY iteration_number — measured 200×
+        # full-scan loop. With this index the plan flips to SEARCH USING
+        # INDEX (experiment_id=?), no temp sort.
+        Index("ix_research_iter_exp_num", "experiment_id", "iteration_number"),
+    )
+
 
 # ── Analytics ──
 
@@ -429,6 +485,13 @@ class SearchEvent(Base):
     a non-null ``accepted_memory_id`` but a null ``position_of_accepted``
     are treated as "accepted but position unknown" — they count toward
     ``accepted_memory_rate`` but not toward ``hit@3``.
+
+    R9 LTR fields:
+      * ``ranker_version`` — string identifying the ranker that produced
+        this row's order (e.g. ``rrf_v1``, ``ltr_v1``). Lets analytics
+        slice hit@k by ranker for A/B comparison.
+      * ``ranker_model_id`` — FK-like reference to ``ltr_models.id`` when
+        an LTR model was used. NULL when only the heuristic stack ran.
     """
     __tablename__ = "search_events"
 
@@ -439,12 +502,84 @@ class SearchEvent(Base):
     top_memory_id = Column(String(36))           # id of the #1 hit (nullable if empty results)
     latency_ms = Column(Float, nullable=False, default=0.0)
     accepted_memory_id = Column(String(36))      # filled in by feedback helper
+    ranker_version = Column(String(40), default="rrf_v1")
+    ranker_model_id = Column(String(36))
     created_at = Column(DateTime, default=utcnow, nullable=False)
 
     __table_args__ = (
         Index("ix_search_events_created_at", "created_at"),
         Index("ix_search_events_accepted", "accepted_memory_id"),
+        Index("ix_search_events_ranker", "ranker_version"),
     )
+
+
+class SearchRankingSnapshot(Base):
+    """R9 hard-negative mining (#4): per-(event, candidate) feature row.
+
+    At search time we persist the ranking features for the top-N candidates
+    so the LTR retraining job can later mine pairs of (rejected_top,
+    accepted_lower) without recomputing features from a possibly-mutated
+    Memory state.
+
+    Stored columns are deliberately scalar — JSON would be cheaper to read
+    but a flat row plays well with pandas/lightgbm and makes column-wise
+    drift analysis (e.g. "rrf_score distribution shifted between v1 and
+    v2") a single SELECT.
+    """
+    __tablename__ = "search_ranking_snapshots"
+
+    id = Column(String(36), primary_key=True, default=new_id)
+    event_id = Column(
+        String(36),
+        ForeignKey("search_events.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    memory_id = Column(String(36), nullable=False)
+    rank = Column(Integer, nullable=False)        # 0-based position in returned list
+    bm25_score = Column(Float, default=0.0)
+    bm25_rank = Column(Integer)
+    vector_score = Column(Float, default=0.0)
+    vector_rank = Column(Integer)
+    rrf_score = Column(Float, default=0.0)
+    tag_score = Column(Float, default=0.0)
+    confidence_boost = Column(Float, default=0.0)
+    title_phrase_match = Column(Boolean, default=False)
+    intent_multiplier = Column(Float, default=1.0)
+    # Memory snapshot at search time (used by trainer to detect drift).
+    memory_confidence = Column(Float)
+    memory_maturity = Column(String(20))
+    memory_type = Column(String(20))
+    memory_validation_count = Column(Integer)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_ranking_snapshots_event", "event_id"),
+        Index("ix_ranking_snapshots_memory", "memory_id"),
+    )
+
+
+class LTRModel(Base):
+    """R9 LTR (#3): trained ranker registry.
+
+    Memee can hold multiple ranker versions. ``status`` is the rollout flag:
+      * ``candidate`` — trained, not yet serving traffic
+      * ``canary`` — serving a fraction of traffic via env-var hash
+      * ``production`` — current default ranker
+      * ``deprecated`` — superseded by a newer model
+    """
+    __tablename__ = "ltr_models"
+
+    id = Column(String(36), primary_key=True, default=new_id)
+    version = Column(String(40), nullable=False, unique=True)
+    path = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, default="candidate")
+    eval_ndcg_at_10 = Column(Float)
+    eval_recall_at_5 = Column(Float)
+    eval_mrr = Column(Float)
+    training_event_count = Column(Integer)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+    activated_at = Column(DateTime)
+    notes = Column(Text)
 
 
 class LearningSnapshot(Base):
@@ -461,3 +596,8 @@ class LearningSnapshot(Base):
     anti_patterns_avoided = Column(Integer)
     research_experiments_completed = Column(Integer)
     learning_rate = Column(Float)
+
+    __table_args__ = (
+        # R10 db audit: /snapshots endpoint orders by snapshot_date.
+        Index("ix_learning_snapshots_date", "snapshot_date"),
+    )

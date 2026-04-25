@@ -70,7 +70,7 @@ memee research meta               # Meta-learning insights
 
 # Analytics
 memee status                      # Learning dashboard
-memee benchmark                   # OrgMemEval: 93.8/100
+memee benchmark                   # OrgMemEval: 92.2/100
 memee dashboard                   # Web UI at http://127.0.0.1:7878
 memee demo --weeks 52             # Generate demo data
 
@@ -236,7 +236,7 @@ MCP tool `sync_to_cmam` lets agents trigger the push themselves.
 
 ## Benchmarks
 
-**OrgMemEval v1.0:** 93.8/100 (competitors: 2.3/100)
+**OrgMemEval v1.0:** 92.2/100 (competitors: 2.3/100)
 - Propagation 100% | Avoidance 100% | Maturity 89% | Onboarding 100%
 - Recovery 100% | Calibration 83% | Synthesis 82% | Research 92%
 

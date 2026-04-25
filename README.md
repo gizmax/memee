@@ -5,9 +5,11 @@
 [![python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
 [![pypi](https://img.shields.io/badge/pypi-memee-orange)](https://pypi.org/project/memee/)
 
-**One lesson. Every agent. Every team. Every model.**
+**You shouldn't have to teach it twice.**
 
-Your agents forget. Every session, every project, every vendor swap: gone. Memee writes it down once. Claude proves it. GPT confirms it. Tomorrow Gemini opens a different repo on a different team and starts already knowing.
+Every chat is a new intern. You teach them Monday. By Friday they've quit. Memee writes it on the wall — so the next intern reads it. So does your teammate's. So does the next model.
+
+Memee shares experience across projects, across agents, across models, and across the people on your team.
 
 ```bash
 pipx install memee         # recommended for a CLI tool
@@ -104,10 +106,15 @@ Full methodology + per-repo file sizes: [docs/benchmarks.md](docs/benchmarks.md)
 
 ## Benchmarks
 
-- **OrgMemEval v1.0**: 92.4 / 100 across propagation, avoidance, maturity, onboarding, recovery, calibration, synthesis, research. Competitors on the same scenarios: MemPalace 0.9, Letta 1.3, Zep 2.3, Mem0 3.5 (the closest).
+- **OrgMemEval v1.0**: 92.2 / 100 across propagation, avoidance, maturity, onboarding, recovery, calibration, synthesis, research. Competitors on the same scenarios: MemPalace 0.9, Letta 1.3, Zep 2.3, Mem0 3.5 (the closest).
 - **7-task A/B (with / without Memee):** time −71 %, iterations −65 %, quality 56 % → 93 %, ROI ≈ 10.7× at the $49 / month Team tier.
 - **GigaCorp simulation**, 100 projects, 100 agents, 18 months: incidents 12/mo → 3/mo, annual ROI ≈ 3× at the same flat Team tier.
-- **Retrieval**: hit@1 = 100 % on a 12-memory routing benchmark after the recent ranking fix.
+- **Retrieval**: 207-query × 255-memory eval harness with 7 difficulty
+  clusters. BM25-only baseline `nDCG@10 = 0.7273`. With the optional
+  cross-encoder rerank (`MEMEE_RERANK_MODEL=cross-encoder/ms-marco-
+  MiniLM-L-6-v2`, `pip install memee[rerank]`): `nDCG@10 = 0.7628`
+  (+0.0355, p=0.0002). Run `python -m tests.retrieval_eval` to
+  reproduce.
 
 ---
 

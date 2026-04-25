@@ -188,22 +188,30 @@ class TestRawPerformance:
             elapsed = (time.time() - start) * 1000
             times_bm25.append(elapsed)
 
-        # With vectors (if available)
+        # With vectors (if the model actually loaded — not just importable).
+        # ``_has_embeddings()`` only checks the import; in offline mode + no
+        # cached model the encode() returns []. Without this guard we used
+        # to label every benchmark "Hybrid" and quietly run BM25-only timings,
+        # which made the published 113 ms hybrid figure indefensible.
         times_hybrid = []
-        has_vec = _has_embeddings()
-        if has_vec:
-            # Embed a subset for test
+        vector_path_active = False
+        if _has_embeddings():
             from memee.engine.embeddings import embed_memory_text
-            memories = session.query(Memory).limit(500).all()
-            for m in memories:
-                m.embedding = embed_memory_text(m.title, m.content, m.tags)
-            session.commit()
 
-            for q in queries:
-                start = time.time()
-                results = search_memories(session, q, limit=10, use_vectors=True)
-                elapsed = (time.time() - start) * 1000
-                times_hybrid.append(elapsed)
+            sample_emb = embed_memory_text("perf probe title", "perf probe", ["x"])
+            if sample_emb:
+                vector_path_active = True
+                # Embed a subset for test
+                memories = session.query(Memory).limit(500).all()
+                for m in memories:
+                    m.embedding = embed_memory_text(m.title, m.content, m.tags)
+                session.commit()
+
+                for q in queries:
+                    start = time.time()
+                    results = search_memories(session, q, limit=10, use_vectors=True)
+                    elapsed = (time.time() - start) * 1000
+                    times_hybrid.append(elapsed)
 
         print(f"\n{'═' * 60}")
         print("  SEARCH LATENCY (2000 memories, 5 queries)")
@@ -217,6 +225,13 @@ class TestRawPerformance:
             avg_hybrid = sum(times_hybrid) / len(times_hybrid)
             p95_hybrid = sorted(times_hybrid)[int(len(times_hybrid) * 0.95)]
             print(f"  Hybrid (BM25+Vec): avg={avg_hybrid:.1f}ms  p95={p95_hybrid:.1f}ms")
+        else:
+            reason = (
+                "sentence-transformers unavailable"
+                if not _has_embeddings()
+                else "embed model failed to produce vectors (offline / no cache?)"
+            )
+            print(f"  Hybrid (BM25+Vec): SKIPPED — {reason}")
 
         print("\n  Per-query breakdown:")
         for i, q in enumerate(queries):

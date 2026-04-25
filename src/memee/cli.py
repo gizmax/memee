@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import click
@@ -718,6 +719,157 @@ def research_reset_zombies_cmd(stale_hours):
     click.echo(f"Reset {count} zombie experiment{'s' if count != 1 else ''}.")
 
 
+# ── LTR / hard-negative mining commands ──
+
+
+@cli.group()
+def ranker():
+    """LTR ranker management (R9 #3 + #4)."""
+    pass
+
+
+@ranker.command("status")
+def ranker_status():
+    """Show registered LTR models and their status."""
+    from memee.storage.database import get_session, init_db
+    from memee.storage.models import LTRModel, SearchEvent
+    from sqlalchemy import func
+
+    engine = init_db()
+    session = get_session(engine)
+    rows = session.query(LTRModel).order_by(LTRModel.created_at.desc()).all()
+    if not rows:
+        click.echo("No LTR models registered.")
+    else:
+        for r in rows:
+            click.echo(
+                f"  {r.id[:8]}  {r.version:<20} {r.status:<11} "
+                f"nDCG@10={r.eval_ndcg_at_10}  events={r.training_event_count}"
+            )
+    total_events = session.query(func.count(SearchEvent.id)).scalar() or 0
+    accepted = (
+        session.query(func.count(SearchEvent.id))
+        .filter(SearchEvent.accepted_memory_id.isnot(None))
+        .scalar()
+        or 0
+    )
+    click.echo(f"\nSearchEvent total: {total_events}, accepted: {accepted}")
+    click.echo("  (≥500 accepted recommended before training)")
+
+
+@ranker.command("train")
+@click.option("--version", "-v", required=True, help="Model version label (e.g. ltr_v1)")
+@click.option(
+    "--output-dir",
+    "-o",
+    default=None,
+    help="Directory for model file (default: ~/.memee/models)",
+)
+def ranker_train(version, output_dir):
+    """Train an LTR ranker on the SearchEvent + snapshot history."""
+    from memee.engine import ltr
+    from memee.storage.database import get_session, init_db
+
+    engine = init_db()
+    session = get_session(engine)
+    out = Path(output_dir) if output_dir else Path.home() / ".memee" / "models"
+    model_id = ltr.train_and_register(session, out, version=version)
+    if model_id is None:
+        click.echo(
+            "Training skipped — install `memee[ltr]` and ensure ≥30 "
+            "SearchEvent accepted rows."
+        )
+        return
+    click.echo(f"Trained ranker {version} → id {model_id[:8]} (status: candidate)")
+    click.echo("Promote with: memee ranker promote " + model_id[:8])
+
+
+@ranker.command("promote")
+@click.argument("model_id")
+def ranker_promote(model_id):
+    """Promote a candidate ranker to production."""
+    from memee.engine import ltr
+    from memee.storage.database import get_session, init_db
+    from memee.storage.models import LTRModel
+
+    engine = init_db()
+    session = get_session(engine)
+    target = session.get(LTRModel, model_id)
+    if target is None:
+        # try prefix lookup
+        rows = (
+            session.query(LTRModel)
+            .filter(LTRModel.id.like(f"{model_id}%"))
+            .all()
+        )
+        if len(rows) != 1:
+            click.echo(f"No unique model matching '{model_id}'")
+            return
+        target = rows[0]
+    if ltr.promote(session, target.id):
+        click.echo(f"Promoted {target.version} ({target.id[:8]}) to production.")
+    else:
+        click.echo("Promotion failed.")
+
+
+@ranker.command("mine-negatives")
+@click.option("--since-days", "-d", default=None, type=int, help="Limit window (days)")
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    help="JSONL output path (default: ~/.memee/hard_negatives.jsonl)",
+)
+def ranker_mine_negatives(since_days, output):
+    """Mine (rejected_top, accepted_lower) pairs to JSONL for retraining."""
+    from memee.engine.hard_negatives import export_hard_negatives_jsonl
+    from memee.storage.database import get_session, init_db
+
+    engine = init_db()
+    session = get_session(engine)
+    out = (
+        Path(output)
+        if output
+        else Path.home() / ".memee" / "hard_negatives.jsonl"
+    )
+    n = export_hard_negatives_jsonl(session, out, since_days=since_days)
+    click.echo(f"Exported {n} pairs to {out}")
+
+
+@ranker.command("rerank-status")
+def ranker_rerank_status():
+    """Show cross-encoder rerank state (R14): active model, top-K, cache."""
+    from memee.engine.reranker import (
+        CrossEncoderReranker,
+        DEFAULT_RERANK_MODEL,
+        DEFAULT_RERANK_TOP_K,
+    )
+
+    rr = CrossEncoderReranker()
+    state = rr.cache_state()
+    if not rr.is_enabled():
+        click.echo(
+            "Cross-encoder rerank: OFF\n"
+            "  Set MEMEE_RERANK_MODEL to enable, e.g.:\n"
+            f"    export MEMEE_RERANK_MODEL=ms-marco-MiniLM-L-6-v2\n"
+            f"  Default model: {DEFAULT_RERANK_MODEL}\n"
+            f"  Default top-K: {DEFAULT_RERANK_TOP_K}\n"
+            "  Optional dep: pip install memee[rerank]"
+        )
+        if state["load_failed"]:
+            click.echo("  (last load attempt failed — see logs)")
+        return
+    click.echo("Cross-encoder rerank: ON")
+    click.echo(f"  Model:   {state['model_name']}")
+    click.echo(f"  Top-K:   {state['top_k']}")
+    if state["loaded"]:
+        click.echo(f"  Cache:   loaded ({state['cached_model_name']})")
+    else:
+        click.echo("  Cache:   not yet loaded (first search will warm it)")
+    if state["load_failed"]:
+        click.echo("  Status:  load_failed (rerank disabled this run)")
+
+
 # ── Project Commands ──
 
 
@@ -1141,6 +1293,89 @@ def feedback(event_id, memory_id, position):
         )
     else:
         click.echo(f"Event {event_id[:8]}... not found or write failed", err=True)
+
+
+# ── Calibration (R12 P1) ──
+
+
+@cli.group()
+def calibration():
+    """Confidence calibration tools."""
+    pass
+
+
+@calibration.command("eval")
+def calibration_eval():
+    """Run the synthetic calibration harness and print Brier / ECE / MCE."""
+    import subprocess
+
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.calibration_eval"],
+        cwd=str(Path(__file__).resolve().parents[2]),
+    )
+    sys.exit(result.returncode)
+
+
+@calibration.command("status")
+def calibration_status():
+    """Show whether calibration is enabled and which curves are loaded."""
+    from memee.engine.calibration import is_enabled, load_curves
+    from memee.storage.database import get_session, init_db
+
+    engine = init_db()
+    session = get_session(engine)
+    enabled = is_enabled()
+    registry = load_curves(session)
+    click.echo(f"MEMEE_CALIBRATED_CONFIDENCE: {'on' if enabled else 'off'}")
+    if registry is None:
+        click.echo("No calibration curves loaded.")
+        click.echo("Run `memee calibration fit` to fit + persist.")
+        return
+    click.echo(f"Global curve: {registry.global_curve.n_train} training points")
+    click.echo(f"Per-slice curves: {len(registry.by_slice)}")
+    for key, curve in sorted(registry.by_slice.items()):
+        click.echo(f"  {key}: {curve.n_train} points, {len(curve.xs)} breakpoints")
+
+
+@calibration.command("fit")
+def calibration_fit():
+    """Fit isotonic curves from MemoryValidation history and persist."""
+    from memee.engine.calibration import fit_curves, save_curves
+    from memee.storage.database import get_session, init_db
+    from memee.storage.models import Memory, MemoryValidation
+
+    engine = init_db()
+    session = get_session(engine)
+
+    # Build training records: every MemoryValidation row becomes a sample
+    # whose ``prediction`` is the memory's confidence at the time of the
+    # validation (we approximate with current confidence — full fidelity
+    # would require historical snapshots which we don't yet log).
+    rows = (
+        session.query(MemoryValidation, Memory)
+        .join(Memory, Memory.id == MemoryValidation.memory_id)
+        .all()
+    )
+    if not rows:
+        click.echo("No MemoryValidation rows yet — record some validations first.")
+        return
+    records = []
+    for v, m in rows:
+        records.append(
+            {
+                "prediction": float(m.confidence_score or 0.0),
+                "outcome": 1 if v.validated else 0,
+                "memory_type": m.type,
+                "scope": m.scope,
+                "source_type": m.source_type,
+            }
+        )
+    registry = fit_curves(records)
+    save_curves(session, registry)
+    click.echo(
+        f"Fit + saved: global={registry.global_curve.n_train} points, "
+        f"slices={len(registry.by_slice)}"
+    )
 
 
 # ── Dashboard ──

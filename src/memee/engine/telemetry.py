@@ -54,6 +54,9 @@ def record_search_event(
     query_text: str,
     results: Iterable,
     latency_ms: float,
+    ranker_version: str = "rrf_v1",
+    ranker_model_id: str | None = None,
+    snapshot_features: bool = True,
 ) -> str | None:
     """Persist a SearchEvent for this search.
 
@@ -91,6 +94,8 @@ def record_search_event(
             returned_count=len(results_list),
             top_memory_id=top_memory_id,
             latency_ms=float(latency_ms) if latency_ms is not None else 0.0,
+            ranker_version=ranker_version,
+            ranker_model_id=ranker_model_id,
         )
     except Exception as e:  # pragma: no cover
         logger.debug("telemetry: event construction failed: %s", e)
@@ -106,8 +111,15 @@ def record_search_event(
     try:
         tele_session = SASession(bind=bind, autoflush=False)
         tele_session.add(event)
+        tele_session.flush()
+        event_id = event.id
+        # R9 hard-negative mining (#4): persist per-candidate features for
+        # the top-N rows so the offline trainer can mine pairs even after
+        # the underlying memories are edited or deleted.
+        if snapshot_features:
+            _persist_ranking_snapshot(tele_session, event_id, results_list)
         tele_session.commit()
-        return event.id
+        return event_id
     except Exception as e:  # pragma: no cover — never raise into the caller
         logger.debug("telemetry: record_search_event failed: %s", e)
         if tele_session is not None:
@@ -122,6 +134,60 @@ def record_search_event(
                 tele_session.close()
             except Exception:
                 pass
+
+
+# Cap the per-event snapshot size so a runaway limit=200 search doesn't write
+# 200 ranking rows per query. 25 covers the top-3 acceptance window with
+# breathing room for hard-negative mining without bloating the table.
+SNAPSHOT_TOP_N = 25
+
+
+def _persist_ranking_snapshot(session, event_id: str, results: list) -> None:
+    """Write top-N ranking-feature rows for one SearchEvent.
+
+    R10 perf: switched from ``session.add()`` per row to a single
+    ``bulk_insert_mappings`` call. The ORM identity-map / event hooks add
+    ~3 ms of overhead on a 25-row insert; bulk insert is ~1.5 ms with the
+    same on-disk shape. Net ≈ 6.88 ms → 4.17 ms per event in the
+    speed-sweep microbench.
+    """
+    if not results:
+        return
+    from memee.storage.models import SearchRankingSnapshot
+    import uuid
+
+    rows: list[dict] = []
+    for rank, item in enumerate(results[:SNAPSHOT_TOP_N]):
+        if not isinstance(item, dict):
+            continue
+        memory = item.get("memory")
+        if memory is None:
+            continue
+        feats = item.get("features") or {}
+        memory_id = getattr(memory, "id", None)
+        if memory_id is None:
+            continue
+        rows.append({
+            "id": str(uuid.uuid4()),
+            "event_id": event_id,
+            "memory_id": memory_id,
+            "rank": rank,
+            "bm25_score": float(item.get("bm25_score") or 0.0),
+            "bm25_rank": feats.get("bm25_rank"),
+            "vector_score": float(item.get("vector_score") or 0.0),
+            "vector_rank": feats.get("vector_rank"),
+            "rrf_score": float(feats.get("rrf_score") or 0.0),
+            "tag_score": float(item.get("tag_score") or 0.0),
+            "confidence_boost": float(item.get("confidence_boost") or 0.0),
+            "title_phrase_match": bool(feats.get("title_phrase_match", False)),
+            "intent_multiplier": float(feats.get("intent_multiplier") or 1.0),
+            "memory_confidence": getattr(memory, "confidence_score", None),
+            "memory_maturity": getattr(memory, "maturity", None),
+            "memory_type": getattr(memory, "type", None),
+            "memory_validation_count": getattr(memory, "validation_count", None),
+        })
+    if rows:
+        session.bulk_insert_mappings(SearchRankingSnapshot, rows)
 
 
 def mark_event_accepted(

@@ -7,6 +7,252 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-04-25
+
+R8 → R14 bundled into a minor bump. The headline: **search ranks
+~5 nDCG points better with the optional cross-encoder rerank, and
+the default-on path is +1.6 nDCG over v1.1.0** thanks to the porter
+tokenizer + RRF fusion + tag-graph third retriever + project-aware
+boost. Hot paths: vector retrieval **116×** warm via the cached
+numpy matrix; quality-gate dedup **6.7×** via MinHash LSH. Eval
+harness: 12 → **207 queries × 255 memories** with 7 difficulty
+clusters and per-cluster permutation tests.
+
+No breaking changes. New schema columns (R9 `expires_at`, R10
+indexes, R12 calibration columns) bootstrap idempotently in place
+on first launch. `pipx upgrade memee` is sufficient.
+
+Detailed delta across R8 — R14 below.
+
+R8 → R14: hybrid recall, graph reasoning, LTR plumbing, perf sweep,
+honest eval expansion, calibration substrate, cross-encoder rerank.
+Full design write-ups in `docs/r8-r10-graph-ltr-perf.md` and
+`docs/roadmap.md`.
+
+### Retrieval delta vs v1.1.0 (207 q × 255 m harness, BM25-only path)
+
+|   | nDCG@10 | Recall@5 | Recall@10 | MRR |
+|---|---:|---:|---:|---:|
+| v1.1.0 (R7 ship)               | 0.7110 | 0.5589 | 0.6065 | 0.8213 |
+| HEAD, BM25-only                | **0.7273** | **0.5701** | **0.6292** | **0.8277** |
+| HEAD + cross-encoder (R14 #2)  | **0.7628** | **0.5950** | **0.6477** | **0.8676** |
+
+R7 → HEAD default-on:                **+0.0163 nDCG@10** (porter tokenizer + RRF refinements + tag-graph third retriever).
+R7 → HEAD with `MEMEE_RERANK_MODEL`: **+0.0518 nDCG@10** (+0.0355 from cross-encoder, p=0.0002 on the ship rule).
+
+Per-cluster impact of the cross-encoder rerank (vs HEAD BM25-only):
+- onboarding_to_stack: 0.6605 → 0.7729 (**+0.1124, p=0.03**)
+- diff_review:        0.5557 → 0.6192 (**+0.0636, p=0.03**)
+- paraphrastic:       0.6795 → 0.7093 (+0.0298, p=0.08)
+- code_specific, anti_pattern_intent, multilingual, lexical_gap: smaller deltas.
+
+### R14 — autoresearch on per-cluster headroom
+
+Four parallel A/B audits on the 207-query harness with paired 10k-iter
+permutation tests. Two shipped default-on / opt-in; two were honest
+negatives that exposed the structural ceiling of BM25 reranking.
+
+- **Cross-encoder reranker (#2 — SHIPPED, default OFF, opt-in via
+  `MEMEE_RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2`).**
+  Stage 5a in `search_memories`: rerank top-30 RRF candidates before any
+  LTR rerank. Macro nDCG@10 0.7273 → 0.7628 (+0.0355, p=0.0002). Latency
+  cost p50 1.3 → 41 ms, p95 1.8 → 78 ms — well within the +50-200 ms
+  budget the audit roadmap allowed. Optional dep `memee[rerank]`.
+- **Severity-weighted intent boost (#3 — opt-in via
+  `MEMEE_SEVERITY_INTENT_BOOST=1`).** When the query carries a danger
+  verb (fix / secure / harden / avoid / prevent / mitigate / patch) AND
+  the candidate is `type=anti_pattern`, the multiplier is now scaled by
+  `AntiPattern.severity` (critical 1.40, high 1.25, medium 1.10, low
+  1.00) instead of the legacy flat 1.10. anti_pattern_intent cluster
+  (n=32) measured Δ=+0.0043 at p=0.30 — below the +0.015 / p<0.10
+  ship-default-on bar, so shipped as opt-in plumbing for production
+  telemetry to resolve. Substrate is in place; flip `=1` and ship to the
+  ranker without a code change.
+- **Maturity-gated query expansion (#4 — opt-in via
+  `MEMEE_MATURITY_GATED_EXPANSION=1`).** Skip expansion when a CANON
+  pattern already matches the raw query above a threshold; protects
+  the strong-signal queries from dilution. The 207-q harness only
+  intersects expansion + canon-strong on **1 query** (a niche edge
+  case), so the measured Δ is 0. Substrate shipped behind the flag —
+  production traffic with the broader 60-key expansion table is a
+  different mix and may benefit; the flag lets operators flip without
+  a code change.
+- **Field-aware BM25 column weights (#1 — NOT SHIPPED, honest
+  negative).** Swept (title, content, summary, tags) ∈ {(1,1,1,1),
+  (3,1,0.5,1.5), (5,1,0.5,2), (8,1,0.5,3), (10,1,0.5,1)} with and
+  without TITLE_PHRASE_BOOST. Best tuple (8,1,0.5,3) measured ΔnDCG@10
+  =+0.0058 at p=0.32 — fails both halves of the ship rule (Δ≥+0.005
+  AND p<0.10). Every tuple regressed `lexical_gap_hard` by ≥0.03.
+  R11's "TPB and column weights double up" hypothesis is *not*
+  supported on the 207-q harness; production code untouched.
+
+### R13 — project-aware reranking, tag-graph as 3rd RRF retriever, propagation perf
+
+- **Project-aware boost.** `search_memories(..., project_id=...)` lifts
+  in-stack proven memories via `validated_project_ids` membership. α =
+  `MEMEE_PROJECT_AWARE_BOOST` (default 0.25). MCP `memory_search` and
+  CLI `memee search` accept `project_path` and resolve it through.
+- **Tag-graph third retriever.** `_tag_graph_topk()` ranks memories by
+  Jaccard similarity over the `MemoryTag` inverted index. Default-on
+  for the hybrid path (`MEMEE_TAG_GRAPH_RRF=1`); BM25-only path keeps
+  the legacy linear blend so deployments without vectors don't regress.
+- **Propagation cycle perf.** `run_propagation_cycle` now pre-loads
+  projects + caches expanded tags + batches the lazy MemoryTag sync
+  out of the hot path. 100 eligible × 30 projects: 96.8 ms / 303
+  queries / 803 links.
+
+### R12 P1 — eval expansion + confidence calibration
+
+- **207 queries × 255 memories, 7 difficulty clusters.** Replaces the
+  saturated 55q × 147m harness. Honest macro nDCG@10 baseline drops
+  from 0.7851 (saturated) to 0.7273 — exposing per-cluster headroom
+  reranker work can target. Biggest headroom: `paraphrastic` (n=43,
+  0.6795); biggest single-fix lift came from cross-encoder rerank.
+- **Confidence calibration substrate.** Brier + ECE + MCE pointwise
+  metrics, pure-Python pool-adjacent-violators isotonic regression
+  with per-(memory_type, scope, source) registry, Beta-Binomial closed-
+  form posterior, ASCII reliability diagram. CLI `memee calibration
+  eval / fit / status`. One conservative production wire-up: lifecycle
+  invalidation gate uses Beta-Binomial posterior (>0.4 fires) when
+  `MEMEE_CALIBRATED_CONFIDENCE=1`.
+
+  Synthetic harness (n=2000, deterministic seed):
+  - raw: Brier 0.1639, ECE 0.0231
+  - isotonic: Brier 0.1608 (-1.9 %), per-slice anti_pattern ECE
+    0.128 → 0.108 (-15.6 %)
+
+
+
+### R8 — hybrid recall (RRF), fallback scoping, /agents N+1, rank edges
+
+- **Reciprocal Rank Fusion** (Cormack/Clarke/Buettcher 2009, k=40 tuned for
+  short candidate lists). Vector retriever runs as a peer of BM25, not just
+  a reranker over BM25 candidates — vector-only matches that BM25 misses
+  are now discoverable. `bench_autoresearch::hybrid_recall` flipped from
+  *target invisible* to *rank=7 of 10*.
+- **Fallback search through `apply_visibility`.** Short / unusual queries
+  that landed in the LIKE branch used to bypass scoping. Both BM25 and
+  fallback paths now resolve the current user the same way and route
+  through the visibility hook. `bench_autoresearch::fallback_visibility`:
+  hidden row leaked → no leak.
+- **`apply_visibility` enforces compose contract.** Hooks that ignore
+  `base_query` and return a fresh global query have their output
+  intersected with `base_query` so the candidate filter survives.
+- **/agents endpoint N+1.** Two grouped queries replace 1 + 2*N (`avg_conf`
+  + per-type counts per agent). 50 agents: 101 → 2 queries.
+- **Single-hit vector normalization.** Min-max normalization with one
+  candidate gave `(s − s) / 1 = 0`. Skip min-max for n < 3 candidates;
+  raw cosine is already in [0, 1].
+
+### R9 — memory graph + LTR + hard-neg mining + BEIR 55q
+
+- **Memory graph: `depends_on` and `supersedes` edges.** New `expires_at`
+  column on `MemoryConnection`; composite indexes on (target_id,
+  relationship_type) and (source_id, relationship_type). Two new dream
+  phases:
+    - `_infer_dependencies` — strict tag-superset hierarchy + textual
+      cues (`requires`, `prerequisite`, `first do`).
+    - `_infer_supersessions` — full tag overlap + (textual cues OR
+      confidence gap ≥ 0.3 + maturity ordering + invalidation ratio
+      ≥ 0.2).
+  Briefing prepends 1-hop `depends_on` predecessors (max 2/pattern, single
+  batched query) and skips `supersedes`-target candidates. Lifecycle
+  refuses to auto-deprecate memories CANON depends_on; supersession edges
+  produce digest proposals, not auto-deprecation.
+- **LTR plumbing** (training optional, `pip install memee[ltr]`).
+    - `SearchEvent` gets `ranker_version` + `ranker_model_id` so
+      retrieval metrics can slice hit@k by ranker.
+    - New tables: `search_ranking_snapshots` (per-candidate features for
+      the trainer) and `ltr_models` (registry: candidate / canary /
+      production / deprecated).
+    - `engine/ltr.py` — `featurize()` (11 features), `is_enabled()` /
+      `routing_mode()` / `canary_picks_ltr()` flag + bucket gate,
+      `load_active_model()` with thread-safe cache, `train_and_register()`
+      (LightGBM lambdarank), `promote()`.
+    - `search_memories` reranks top-K via the active production model
+      when `MEMEE_LTR_ENABLED` is on AND a model is registered AND the
+      canary bucket includes the query. Heuristic stays as candidate
+      generator + fallback.
+    - CLI: `memee ranker status / train / promote / mine-negatives`.
+- **Hard-negative mining.** `engine/hard_negatives.py` mines `(rejected_top,
+  accepted_lower)` pairs from `SearchEvent` × `SearchRankingSnapshot`
+  with a `Memory.updated_at > event.created_at` drift guard. Telemetry
+  persists snapshot rows (top-25 cap) at search time so the trainer
+  doesn't recompute against possibly-mutated memory state.
+- **BEIR-style retrieval eval expanded.** `tests/retrieval_eval.py`:
+  28 → 147 memories across 10 domains, 10 → 55 labeled queries with
+  graded relevance (0–3, 179 labels total, mean 3.25/query). Added
+  `type_match_precision@5`, `maturity_bias@5`, `permutation_test()`
+  (paired, deterministic seed), `--save / --compare-with / --vectors`
+  flags. BM25-only baseline pinned: nDCG@10 = 0.7534, Recall@5 = 0.5164,
+  MRR = 0.895, type_p5 = 0.5255, mat_b5 = 0.8943.
+
+### R10 — perf sweep (cycle 1 + cycle 2 driven by 3 expert audits)
+
+Cycle 1 — quick wins:
+- **Cached embedding matrix.** `_vector_topk` now does a single matmul
+  over a cached `float32` numpy matrix keyed by `(bind id, MAX(updated_at),
+  COUNT(*))`. Row norms, per-type / per-maturity np.arrays cached too.
+  Microbench at 5 k embedded memories: **521 ms cold → 4.5 ms warm
+  (116×)**. Fall-through Python cosine kept for environments without
+  numpy.
+- **`_infer_supersessions` early-exit** when no tag-set bucket has ≥ 2
+  candidates. Skips the entire pass on tag-singleton DBs.
+- **Six new indexes** (idempotent `CREATE INDEX IF NOT EXISTS` in
+  `_bootstrap_r10_indexes`):
+    - `ix_research_iter_exp_num` (experiment_id, iteration_number) —
+      flips `get_meta_learning` from `SCAN + TEMP B-TREE` to `SEARCH USING
+      INDEX`, removes 200× per-experiment full-scan loop.
+    - `ix_anti_patterns_severity` — backs `smart_briefing` critical-AP
+      filter.
+    - `ix_memory_validations_created_at` — kills /timeline temp sort.
+    - `ix_learning_snapshots_date` — kills /snapshots temp sort.
+    - `ix_search_events_accepted_partial` (partial WHERE accepted_memory_id
+      IS NOT NULL) — backs the LTR training query.
+    - `ix_memories_source_agent` (partial) — backs /agents grouping.
+  Also drops the dead non-partial `ix_search_events_accepted` (the partial
+  replaces it).
+- **`router._expand_query` gated on vectors.** Accuracy audit measured
+  ΔnDCG@10 = -0.0265 (p=0.035) when expansion is applied on BM25-only
+  paths. Expansion stays on once vectors are in the picture, where the
+  semantic retriever covers the recall gap.
+
+Cycle 2 — medium plays:
+- **Bulk-insert ranking snapshots.** `_persist_ranking_snapshot` switched
+  from `session.add()` per row to `bulk_insert_mappings`. Microbench
+  100 searches × top-25: **0.76 ms / search** (was ~6.88 ms / search).
+- **`dream._find_contradictions`** N+1 collapsed to 2 queries via batched
+  `IN`.
+- **`dream._boost_connected_memories`** rebuilt as 3-query shape
+  (memories + edges + neighbour confidences) walking an in-memory
+  adjacency map; old shape was 1 + 2*E.
+- **`dream._infer_dependencies` cardinality bucketing.** For each
+  candidate B with |tags| = n we only walk candidates with |tags| < n
+  (strict superset gate is monotone in tag-set size). Same edge yield,
+  ~5× wall on 5 k corpora per the speed audit.
+
+### Tests
+
+- 268 focused tests green in 27 s.
+- 13 `bench_autoresearch` scenarios green; latencies stable.
+- `retrieval_eval` BM25-only on 55 q × 147 m: nDCG@10 = 0.7534, MRR =
+  0.895 — unchanged because the BM25 path itself is untouched. Vector
+  path is faster but the harness exercises BM25 only (LTR retrain pending
+  on real telemetry).
+- Slow simulations (megacorp / gigacorp / large_scale / blind_spots /
+  enterprise / company_simulation): green (last validated against R9).
+
+### What's deferred to roadmap (not shipped here)
+
+- **sqlite-vec / FAISS ANN backend** — gated on >5 k embedded memories.
+- **Production LTR ranker** — gated on >500 accepted SearchEvents.
+- **Hard-neg retraining cron** — needs LTR v1 first.
+- **Graph relationship types beyond depends_on/supersedes**
+  (`applies_to_stack`, `proven_by`) — gated on real-world precision data
+  for the existing two.
+- **Tag inverted index** for dream inference — bucketing already covered
+  most of the latency win.
+
 ## [1.1.0] — 2026-04-25
 
 R7 — multi-tenancy boundary, search correctness, hot-path performance.

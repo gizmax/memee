@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memee"
-version = "1.1.0"
-description = "Institutional memory for AI agent teams: multi-model, cross-project, token-budgeted."
+version = "1.2.0"
+description = "Cross-model shared memory for AI agents. One canon — every model, every project, every teammate."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -43,15 +43,39 @@ Changelog = "https://github.com/gizmax/memee/blob/main/CHANGELOG.md"
 vectors = [
     "sentence-transformers>=3.0",
 ]
+fast-dedup = [
+    # R11 cross-field: MinHash LSH narrows the quality-gate dedup probe
+    # from a 500-row SequenceMatcher loop to a constant-time bucket query.
+    # ~6.7× wall on the record() hot path at 1k memories. Falls through to
+    # the brute path when this isn't installed.
+    "datasketch>=1.6",
+]
+ltr = [
+    # R9 LTR plumbing: optional Learning-to-Rank reranker over BM25 ∪
+    # vector candidates. Without it, ``MEMEE_LTR_ENABLED=1`` is a no-op
+    # and the heuristic stack runs unchanged. ``memee ranker train``
+    # exits with a hint when the dep is missing.
+    "lightgbm>=4.0",
+    "numpy>=1.24",
+]
+rerank = [
+    # R14 cross-encoder reranker (stage 5 of search.py). Reuses the same
+    # ``sentence-transformers`` package that backs the bi-encoder vector
+    # path; called out as a separate extra so installs that opt in to
+    # rerank but not bi-encoder vectors get a clean install. Default OFF;
+    # turned on per-process via ``MEMEE_RERANK_MODEL=ms-marco-MiniLM-L-6-v2``.
+    "sentence-transformers>=3.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "httpx>=0.27",
     "ruff>=0.3",
     "sentence-transformers>=3.0",
+    "datasketch>=1.6",
 ]
 all = [
-    "memee[vectors]",
+    "memee[vectors,fast-dedup,ltr,rerank]",
 ]
 
 [project.scripts]

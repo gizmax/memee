@@ -525,6 +525,326 @@ def bench_bm25_latency_1000():
     }
 
 
+# ── R8: Hybrid recall — vector-only matches must be findable ──
+def bench_hybrid_recall():
+    """A memory that matches by vector but NOT lexically must still be found.
+
+    Seed: 1 target with rare title, 199 distractors with common token. Query
+    is the COMMON token (BM25 will rank distractors high, target last/missing
+    from BM25 candidates) — but the target's embedding is set to be cosine=1
+    with the query embedding. With BM25-only candidate gen the target is
+    invisible; with hybrid candidate union it should be found.
+    """
+    from memee.engine import embeddings as emb_mod
+    from memee.engine import search as search_mod
+    from memee.engine.search import search_memories
+    from memee.storage.models import Memory, MemoryType, MaturityLevel
+
+    engine, session, org = _fresh_db()
+
+    # Construct deterministic 384-dim vectors so we don't need the real model.
+    target_vec = [1.0] + [0.0] * 383
+    distractor_vec = [0.0, 1.0] + [0.0] * 382
+
+    target = Memory(
+        type=MemoryType.PATTERN.value,
+        maturity=MaturityLevel.VALIDATED.value,
+        title="rarewordzzz unique target",
+        content="this is the right answer about timeoutzzz",
+        tags=["target"],
+        confidence_score=0.9,
+        embedding=target_vec,
+    )
+    session.add(target)
+    for i in range(199):
+        session.add(
+            Memory(
+                type=MemoryType.PATTERN.value,
+                maturity=MaturityLevel.VALIDATED.value,
+                title=f"commontoken distractor {i}",
+                content=f"commontoken commontoken {i}",
+                tags=["distractor"],
+                confidence_score=0.5,
+                embedding=distractor_vec,
+            )
+        )
+        if i % 50 == 0:
+            session.flush()
+    session.commit()
+    search_mod._invalidate_embedding_cache()
+
+    # Query has no overlap with target's title/content (BM25 = 0)
+    # but its "embedding" is the same as target's (cosine = 1).
+    orig_embed_text = emb_mod.embed_text
+    orig_get_model = emb_mod.get_model
+
+    def fake_embed(_text):
+        return target_vec
+
+    def fake_get_model():
+        # signal "model present" so _has_embeddings short-circuit doesn't matter
+        return object()
+
+    emb_mod.embed_text = fake_embed
+    emb_mod.get_model = fake_get_model
+    # Bypass the sentence_transformers import probe for the test
+    orig_has = search_mod._has_embeddings
+    search_mod._has_embeddings = lambda: True
+    try:
+        results = search_memories(session, "commontoken", limit=10)
+    finally:
+        emb_mod.embed_text = orig_embed_text
+        emb_mod.get_model = orig_get_model
+        search_mod._has_embeddings = orig_has
+
+    target_in_results = any(r["memory"].id == target.id for r in results)
+    target_rank = next(
+        (i for i, r in enumerate(results) if r["memory"].id == target.id),
+        -1,
+    )
+    session.close()
+    return {
+        "target_found": target_in_results,
+        "target_rank": target_rank,
+        "n_results": len(results),
+        "correct": 1.0 if target_in_results else 0.0,
+        "direction": "higher",
+    }
+
+
+# ── R8: Fallback search must respect visibility hook ──
+def bench_fallback_visibility():
+    """When BM25/vector both miss, _fallback_search runs LIKE. Must respect
+    visible_memories hook. Old code did a direct query → leaked hidden rows."""
+    from memee import plugins
+    from memee.engine.search import search_memories
+    from memee.storage.models import Memory, MemoryType, MaturityLevel
+
+    engine, session, org = _fresh_db()
+
+    # Two memories with the same SUBSTRING in their title — one visible, one
+    # hidden by the registered visibility hook. BM25 won't index a single
+    # rare token across both (no real tokens shared), so search lands in the
+    # LIKE fallback path.
+    # Both titles contain 'notrealtoken' as a single FTS-indexed word. The
+    # query 'trealt' is a SUBSTRING — FTS5 won't find it (token boundaries),
+    # but the LIKE fallback will match both. That forces _fallback_search.
+    visible = Memory(
+        type=MemoryType.PATTERN.value,
+        maturity=MaturityLevel.VALIDATED.value,
+        title="visible row notrealtoken alpha",
+        content="visible content",
+        tags=["x"],
+        confidence_score=0.6,
+    )
+    hidden = Memory(
+        type=MemoryType.PATTERN.value,
+        maturity=MaturityLevel.VALIDATED.value,
+        title="hidden row notrealtoken beta",
+        content="hidden content",
+        tags=["x"],
+        confidence_score=0.6,
+    )
+    session.add_all([visible, hidden])
+    session.commit()
+
+    visible_ids = {visible.id}
+    orig_visible = plugins.get("visible_memories")
+    orig_user = plugins.get("current_user_id")
+
+    def fake_visible(sess, base_query=None, user_id=None):
+        from memee.storage.models import Memory as M
+        q = base_query if base_query is not None else sess.query(M)
+        return q.filter(M.id.in_(visible_ids))
+
+    def fake_user(*args, **kwargs):
+        return "bench-user"
+
+    plugins.register("visible_memories", fake_visible)
+    plugins.register("current_user_id", fake_user)
+    leaked = False
+    found_count = 0
+    try:
+        # 'zzqq' is rare but appears as part of token "zzqq" in both titles —
+        # FTS5 may or may not match depending on tokenization; rely on LIKE
+        # path triggering for both rows. Using 'zzqq exact fallback' phrase
+        # without sanitisation to ensure FTS sees no proper tokens.
+        results = search_memories(
+            session, "trealt", limit=10, use_vectors=False
+        )
+        # Capture ids BEFORE we tear down the session in finally; otherwise
+        # accessing memory.id after close triggers a SQLAlchemy refresh and
+        # raises DetachedInstanceError.
+        found_ids = {r["memory"].id for r in results}
+        found_count = len(found_ids)
+        leaked = hidden.id in found_ids
+    finally:
+        plugins.register("visible_memories", orig_visible)
+        plugins.register("current_user_id", orig_user)
+        session.close()
+
+    return {
+        "found_count": found_count,
+        "leaked_hidden": leaked,
+        "correct": 0.0 if leaked else 1.0,
+        "direction": "higher",
+    }
+
+
+# ── R8: /agents N+1 query count ──
+def bench_agents_n1():
+    """500 agents, current /agents endpoint runs ~1001 queries (1 + 2*N).
+    Target: ≤ 3 queries with grouped aggregation."""
+    from sqlalchemy import event
+
+    from memee.storage.models import Memory, MemoryType, MaturityLevel
+
+    engine, session, org = _fresh_db()
+    AGENTS = [f"agent-{i}" for i in range(50)]
+    for i in range(500):
+        session.add(
+            Memory(
+                type=MemoryType.PATTERN.value,
+                maturity=MaturityLevel.VALIDATED.value,
+                title=f"m {i}",
+                content=f"c {i}",
+                tags=["x"],
+                confidence_score=0.5 + (i % 5) * 0.05,
+                source_agent=AGENTS[i % len(AGENTS)],
+            )
+        )
+        if i % 100 == 0:
+            session.flush()
+    session.commit()
+
+    queries: list[str] = []
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def _count(conn, cursor, statement, params, ctx, executemany):
+        if statement.strip().upper().startswith(("SELECT", "WITH")):
+            queries.append(statement[:80])
+
+    from memee.api.routes.api_v1 import list_agents
+
+    t0 = time.perf_counter()
+    result = list_agents(session)  # type: ignore[arg-type]
+    elapsed = (time.perf_counter() - t0) * 1000
+    event.remove(engine, "before_cursor_execute", _count)
+    session.close()
+
+    return {
+        "agents": len(result),
+        "queries": len(queries),
+        "elapsed_ms": round(elapsed, 2),
+        "direction": "lower",
+        "correct": 1.0 if len(queries) <= 3 else 0.0,
+    }
+
+
+# ── R8: Single-hit vector normalization ──
+def bench_single_hit_norm():
+    """When vector retrieves ONE candidate that matches, normalization should
+    NOT collapse it to score=0. Old code: max==min → 0/range → 0.0. Fix:
+    use raw cosine for n<3."""
+    from memee.engine.search import _vector_rerank
+    from memee.engine import embeddings as emb_mod
+    from memee.storage.models import Memory, MemoryType, MaturityLevel
+
+    engine, session, org = _fresh_db()
+    vec = [1.0] + [0.0] * 383
+    m = Memory(
+        type=MemoryType.PATTERN.value,
+        maturity=MaturityLevel.VALIDATED.value,
+        title="single hit",
+        content="single",
+        tags=["x"],
+        confidence_score=0.5,
+        embedding=vec,
+    )
+    session.add(m)
+    session.commit()
+
+    orig_embed = emb_mod.embed_text
+    emb_mod.embed_text = lambda _t: vec
+    try:
+        result = _vector_rerank(session, "anything", [m.id])
+    finally:
+        emb_mod.embed_text = orig_embed
+    score = result.get(m.id, 0.0)
+    session.close()
+    return {
+        "score": round(score, 4),
+        "correct": 1.0 if score >= 0.9 else 0.0,
+        "direction": "higher",
+    }
+
+
+# ── R8: Hook contract — base_query must compose ──
+def bench_hook_compose_contract():
+    """A team-style hook that ignores base_query throws the candidate filter
+    away. apply_visibility should fail closed (raise) instead of leaking
+    unrelated rows past the candidate filter."""
+    from memee import plugins
+    from memee.engine.search import search_memories
+    from memee.storage.models import Memory, MemoryType, MaturityLevel
+
+    engine, session, org = _fresh_db()
+    on_topic = Memory(
+        type=MemoryType.PATTERN.value,
+        maturity=MaturityLevel.VALIDATED.value,
+        title="timeout pattern target",
+        content="timeout matters",
+        tags=["t"],
+        confidence_score=0.7,
+    )
+    off_topic = Memory(
+        type=MemoryType.PATTERN.value,
+        maturity=MaturityLevel.VALIDATED.value,
+        title="payroll calculation rules",
+        content="payroll computes hours worked and tax withholdings",
+        tags=["payroll"],
+        confidence_score=0.7,
+    )
+    session.add_all([on_topic, off_topic])
+    session.commit()
+
+    orig_visible = plugins.get("visible_memories")
+    orig_user = plugins.get("current_user_id")
+
+    def bad_hook(sess, base_query=None, user_id=None):
+        # Simulates a hook that ignores base_query and returns a fresh global
+        # query. Without the compose-contract intersect, this leaks unrelated
+        # rows past the candidate filter built by search_memories.
+        from memee.storage.models import Memory as M
+        return sess.query(M)
+
+    plugins.register("visible_memories", bad_hook)
+    plugins.register("current_user_id", lambda *a, **kw: "bench-user")
+
+    raised = False
+    leaked = False
+    try:
+        results = search_memories(session, "timeout", limit=10, use_vectors=False)
+        ids = {r["memory"].id for r in results}
+        leaked = off_topic.id in ids
+    except plugins.LicenseRequiredError:
+        raised = True
+    finally:
+        plugins.register("visible_memories", orig_visible)
+        plugins.register("current_user_id", orig_user)
+        session.close()
+
+    # Either fail-closed (raise) OR keep the candidate filter (no leak) is
+    # acceptable. Both prove the contract is enforced. Old behaviour:
+    # off-topic rows leaked silently.
+    return {
+        "raised": raised,
+        "leaked": leaked,
+        "correct": 1.0 if (raised or not leaked) else 0.0,
+        "direction": "higher",
+    }
+
+
 SCENARIOS = {
     "telemetry_caller_safety": bench_telemetry_caller_safety,
     "filtered_search_type": bench_filtered_search,
@@ -534,6 +854,12 @@ SCENARIOS = {
     "projects_n1_query_count": bench_projects_n1,
     "scope_default_applied": bench_scope_default_applied,
     "bm25_latency_1000": bench_bm25_latency_1000,
+    # R8
+    "hybrid_recall": bench_hybrid_recall,
+    "fallback_visibility": bench_fallback_visibility,
+    "agents_n1_query_count": bench_agents_n1,
+    "single_hit_vector_norm": bench_single_hit_norm,
+    "hook_compose_contract": bench_hook_compose_contract,
 }
 
 

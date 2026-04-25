@@ -19,9 +19,10 @@ Architecture:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from memee.storage.models import (
@@ -31,6 +32,51 @@ from memee.storage.models import (
     MemoryType,
     Project,
 )
+
+
+# R14: Maturity-gated expansion. The R10 expansion gate skipped expansion
+# when the DB had no embeddings (BM25-only DBs paid -0.0265 nDCG@10 on
+# the 55-q harness because the extra terms diluted lexical precision).
+# Audit roadmap Item ``Maturity-gated query expansion`` adds a second
+# gate: if the raw query *already* matches a CANON/VALIDATED pattern
+# strongly, expansion will only dilute the win — skip it.
+#
+# Probe: one ``MATCH`` against ``memories_fts`` joined to ``memories``
+# (filter on type=pattern AND maturity ∈ {canon, validated}) returning
+# the top 3 ranks. Cost: ~1-2 ms warm; cheaper than running the
+# expansion path it bypasses.
+#
+# Tunables (env):
+#   MEMEE_MATURITY_GATED_EXPANSION ∈ {1,0}         default 0 (opt-in)
+#   MEMEE_MATURITY_GATE_THRESHOLD  ∈ [0.0, 1.0]    default 0.7
+#
+# Default-OFF policy: the R14 A/B harness on the 207-query bench
+# (``tests/r14_maturity_gated_expansion_eval.py``) measured ΔnDCG@10 =
+# 0.0000 at p=1.0000 for both 0.7 and 0.85 thresholds — the gate fires
+# correctly but rarely intersects with the small subset of queries
+# where ``_expand_query`` would have changed the result, so the
+# measured impact on this bench is null. Ship rule said: "if neither
+# macro nor cluster gain crosses p<0.10, ship behind opt-in." So the
+# code is committed, the env knob is exposed, and operators in
+# vector-aware deployments who see different traffic mixes can flip
+# it on with a one-liner. Re-enabling will be a one-line PR if a
+# future bench shows the gain.
+try:
+    MATURITY_GATE_THRESHOLD = float(
+        os.environ.get("MEMEE_MATURITY_GATE_THRESHOLD", "0.7")
+    )
+except ValueError:
+    MATURITY_GATE_THRESHOLD = 0.7
+
+
+def _maturity_gate_enabled() -> bool:
+    """Default-OFF opt-in flag — see module-level note for the rationale.
+
+    Accepts ``1``/``true``/``on``/``yes`` to enable; everything else (or
+    unset) leaves the gate disabled.
+    """
+    raw = os.environ.get("MEMEE_MATURITY_GATED_EXPANSION", "0").strip().lower()
+    return raw in ("1", "true", "on", "yes")
 
 # Approximate tokens per memory line (legacy sentinel — kept for backward-compat
 # in tests that imported the symbol; real accounting uses _count_tokens below).
@@ -127,12 +173,25 @@ def smart_briefing(
             lines.append("")
 
     # ── Layer 1: Search-routed briefing ──
-    # Build search query from task + stack context
-    search_query = _build_search_query(task, stack_tags)
+    # R10 accuracy fix: ``_build_search_query`` expands the task with related
+    # tokens to broaden recall — sized for vector retrieval. On BM25-only DBs
+    # the expansion *dilutes* the signal (measured ΔnDCG@10 = -0.0265 on the
+    # 55-query harness, p=0.035). When no embedded memories exist, skip the
+    # expansion and search the raw task instead. Vector-aware DBs keep the
+    # expansion, where the semantic retriever covers the recall gap.
+    from memee.engine.search import _db_has_any_embeddings, search_memories
+
+    has_vectors = _db_has_any_embeddings(session)
+    # On vector-aware DBs we may still call expansion, but only after the
+    # R14 maturity gate has had a chance to short-circuit. Passing the
+    # session lets ``_build_search_query`` run the cheap canon probe.
+    search_query = (
+        _build_search_query(task, stack_tags, session=session)
+        if has_vectors
+        else (task or (" ".join(list(stack_tags)[:4]) if stack_tags else ""))
+    )
 
     if search_query:
-        from memee.engine.search import search_memories
-
         # Use our existing hybrid search (BM25 + vector + tags)
         # Search with task as primary query, stack tags as boost
         results = search_memories(
@@ -248,13 +307,119 @@ def _get_exclude_tags(stack_tags: set[str]) -> set[str]:
     return exclude
 
 
-def _build_search_query(task: str, stack_tags: set[str]) -> str:
+def _strong_canon_match(
+    session: Session,
+    raw_query: str,
+    threshold: float | None = None,
+) -> bool:
+    """R14 maturity gate: True iff the raw query already lights up a strong
+    CANON/VALIDATED ``pattern`` via BM25.
+
+    Probe: a single FTS5 ``MATCH`` joined to ``memories`` with the type +
+    maturity filter pushed into SQL, returning the top 3 ranks. We then
+    normalise the top hit's BM25 rank (FTS5 returns negative scores; the
+    most negative = best) against the running probe's max-magnitude and
+    test against ``threshold``.
+
+    Why one query, not the full hybrid path:
+
+      * The expansion gate fires *before* search runs; we don't want to
+        pay the vector model load (slow cold-start) just to decide
+        whether to expand.
+      * The probe is a single SELECT with a tight LIMIT 3. Warm cost is
+        sub-millisecond on the 255-row eval corpus and ≤2 ms on the
+        500-memory production tier.
+      * False-negatives (gate says "no canon, expand") cost only the
+        existing baseline; false-positives (gate says "skip expansion"
+        when the answer needed expansion) cost recall. The high default
+        threshold (0.7) biases toward the safer false-negative.
+
+    Returns False on any error so the caller falls through to the
+    existing expansion path — never block the agent on a probe failure.
+    """
+    if not raw_query or not raw_query.strip():
+        return False
+    if threshold is None:
+        threshold = MATURITY_GATE_THRESHOLD
+
+    # Defer the import to avoid a cycle at module load (search.py imports
+    # router-adjacent names elsewhere). Cheap on the warm path.
+    from memee.engine.search import _sanitize_fts_query
+
+    fts_and = _sanitize_fts_query(raw_query, operator="AND")
+    if not fts_and:
+        return False
+
+    sql = text(
+        """
+        SELECT f.rank
+        FROM memories_fts f
+        JOIN memories m ON m.rowid = f.rowid
+        WHERE memories_fts MATCH :query
+          AND m.type = 'pattern'
+          AND m.maturity IN ('canon', 'validated')
+        ORDER BY f.rank
+        LIMIT 3
+        """
+    )
+    try:
+        rows = session.execute(sql, {"query": fts_and}).fetchall()
+    except Exception:
+        # FTS5 syntax / OperationalError / DB-level failure. Falling
+        # through preserves the existing behaviour exactly — the gate
+        # is purely additive when it works and a no-op when it doesn't.
+        return False
+    if not rows:
+        return False
+
+    # FTS5 ``rank`` is an unbounded negative score (more negative = better).
+    # An absolute magnitude threshold won't generalise across corpora; what
+    # we want is "the top hit dominates". Normalise the dominance ratio
+    #
+    #     dominance = |top| / (|top| + |second|)
+    #
+    # which is bounded in (0, 1]: at 1.0 the second hit is a non-match and
+    # the top is unambiguous; at 0.5 top and second are tied and the
+    # canon answer isn't clearly the right one. Threshold 0.7 means the
+    # top is at least ~2.3× the second hit — a strong-canon signal.
+    #
+    # If only one row came back, treat as full dominance (top with no rival
+    # is the strongest possible signal). Empty result handled above.
+    ranks = [abs(r[0]) for r in rows if r[0] is not None]
+    if not ranks:
+        return False
+    top = ranks[0]
+    if len(ranks) == 1:
+        return True  # single canon match, no rival
+    second = ranks[1]
+    denom = top + second
+    if denom <= 0.0:
+        return False
+    dominance = top / denom
+    return dominance >= threshold
+
+
+def _build_search_query(
+    task: str,
+    stack_tags: set[str],
+    session: Session | None = None,
+) -> str:
     """Build search query from task description with expansion.
 
     Expands task with related terms to catch more relevant memories.
     "CI/CD pipeline" → "CI/CD pipeline pre-commit hooks Docker deploy"
+
+    R14: optional maturity gate. When the gate is enabled and a session
+    is available, run the cheap canon probe first; if the raw query
+    already matches a CANON/VALIDATED pattern strongly, return the raw
+    task and skip expansion. The expansion broadens recall at the cost
+    of precision; when the canon answer is already the top BM25 hit,
+    broadening only dilutes it.
     """
     if task:
+        if session is not None and _maturity_gate_enabled():
+            if _strong_canon_match(session, task):
+                return task
         expanded = _expand_query(task)
         return expanded
     if stack_tags:

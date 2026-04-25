@@ -243,21 +243,34 @@ async def memory_search(
     type: str = "",
     tags: str = "",
     limit: int = 10,
+    project_path: str = "",
 ) -> str:
     """Search organizational memory using natural language.
 
     Returns memories ranked by relevance (BM25 + tag overlap + confidence).
     Use this to find existing knowledge before solving a problem.
 
+    R13 ``project_path``: when set, memories validated in the named
+    project receive a small rerank boost so in-stack proven patterns
+    surface ahead of equivalents from elsewhere.
+
     The response includes a ``query_event_id`` — pass it to
     ``search_feedback`` once you pick a result so Memee can track hit@k.
     """
     from memee.engine.search import search_memories
+    from memee.storage.models import Project
 
     session = _get_session()
     try:
         tag_list = _parse_tags(tags) or None
         limit = _clamp_limit(limit, default=10, maxv=200)
+
+        project_id = None
+        if project_path:
+            abs_path = str(Path(project_path).resolve())
+            proj = session.query(Project).filter_by(path=abs_path).first()
+            if proj:
+                project_id = proj.id
 
         # Ask search_memories to hand back the exact event id it just wrote.
         # Pulling "latest SearchEvent" here instead races with concurrent callers
@@ -269,6 +282,7 @@ async def memory_search(
             memory_type=type or None,
             limit=limit,
             return_event_id=True,
+            project_id=project_id,
         )
 
         return json.dumps({

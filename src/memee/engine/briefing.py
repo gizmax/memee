@@ -30,10 +30,113 @@ from memee.storage.models import (
     Decision,
     MaturityLevel,
     Memory,
+    MemoryConnection,
     MemoryType,
     Project,
     ProjectMemory,
 )
+
+
+def _expand_with_dependencies(
+    session: Session,
+    patterns: list[Memory],
+    max_total: int,
+    max_deps_per_pattern: int = 2,
+) -> list[Memory]:
+    """For each pattern p, prepend up to ``max_deps_per_pattern`` memories
+    that p ``depends_on`` (R9). Predecessors are inserted just before p in
+    the briefing order so the agent reads prerequisites first.
+
+    Single batched query to avoid N+1: fetch all (p.id → predecessor.id)
+    edges in one shot, then look up the predecessor memory rows in another
+    single query.
+    """
+    if not patterns:
+        return patterns
+    pattern_ids = [p.id for p in patterns]
+    # Fetch dependency edges for all selected patterns at once.
+    edge_rows = (
+        session.query(
+            MemoryConnection.source_id,
+            MemoryConnection.target_id,
+            MemoryConnection.strength,
+        )
+        .filter(
+            MemoryConnection.source_id.in_(pattern_ids),
+            MemoryConnection.relationship_type == "depends_on",
+        )
+        .all()
+    )
+    if not edge_rows:
+        return patterns
+
+    # Group predecessors by source pattern, sorted by strength desc, capped.
+    by_source: dict[str, list[str]] = {}
+    for src, tgt, strength in edge_rows:
+        by_source.setdefault(src, []).append((tgt, strength))
+    for src in by_source:
+        by_source[src].sort(key=lambda pair: -(pair[1] or 0.0))
+        by_source[src] = [t for t, _ in by_source[src][:max_deps_per_pattern]]
+
+    pred_ids = {pid for plist in by_source.values() for pid in plist}
+    pred_ids -= set(pattern_ids)  # already in briefing
+    if not pred_ids:
+        return patterns
+
+    # One query for predecessor memory rows. Filter to non-deprecated
+    # canon/validated so the briefing doesn't surface stale prerequisites.
+    pred_rows = (
+        session.query(Memory)
+        .filter(Memory.id.in_(pred_ids))
+        .filter(
+            Memory.maturity.in_(
+                [MaturityLevel.CANON.value, MaturityLevel.VALIDATED.value]
+            )
+        )
+        .all()
+    )
+    pred_by_id = {m.id: m for m in pred_rows}
+
+    enriched: list[Memory] = []
+    seen_in_output: set[str] = set()
+    for p in patterns:
+        for pid in by_source.get(p.id, []):
+            pred = pred_by_id.get(pid)
+            if pred is None or pred.id in seen_in_output:
+                continue
+            enriched.append(pred)
+            seen_in_output.add(pred.id)
+            if len(enriched) >= max_total:
+                break
+        if p.id not in seen_in_output:
+            enriched.append(p)
+            seen_in_output.add(p.id)
+        if len(enriched) >= max_total:
+            break
+    return enriched[:max_total]
+
+
+def _strip_superseded(session: Session, patterns: list[Memory]) -> list[Memory]:
+    """Drop any pattern that is superseded by a memory already in
+    ``patterns``. R9: when A supersedes B and both are top candidates,
+    showing B wastes tokens and risks the agent picking the deprecated path.
+    """
+    if len(patterns) < 2:
+        return patterns
+    pattern_ids = {p.id for p in patterns}
+    edges = (
+        session.query(MemoryConnection.source_id, MemoryConnection.target_id)
+        .filter(
+            MemoryConnection.relationship_type == "supersedes",
+            MemoryConnection.source_id.in_(pattern_ids),
+            MemoryConnection.target_id.in_(pattern_ids),
+        )
+        .all()
+    )
+    superseded_ids = {tgt for _src, tgt in edges}
+    if not superseded_ids:
+        return patterns
+    return [p for p in patterns if p.id not in superseded_ids]
 
 
 def briefing(
@@ -103,6 +206,12 @@ def briefing(
                 patterns.append(m)
             if len(patterns) >= max_patterns:
                 break
+
+    # R9 graph wiring: drop patterns that are superseded by another pattern
+    # already in the list (saves tokens, avoids contradictions), then expand
+    # to surface prerequisites the agent would otherwise hit as a blocker.
+    patterns = _strip_superseded(session, patterns)
+    patterns = _expand_with_dependencies(session, patterns, max_total=max_patterns)
 
     # 2. Critical anti-patterns. Critical severity ALWAYS shows regardless of
     # task (institutional DNA); the rest is task-filtered when task provided.
