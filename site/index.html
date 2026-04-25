@@ -1833,6 +1833,67 @@ body::before { display: none; }
   }
 })();
 
+// ────────────────────────────────────────────────────────────────────
+// X (Twitter) conversion event tracking
+// Pixel base config 'rc3ll' is fired in <head>. Event IDs below are
+// placeholders — replace with actual tw-XXXXX-YYYYY IDs from
+// X Ads Manager → Tools → Events Manager → Create event.
+// While IDs are placeholders, twq() calls still build retargeting
+// audiences but do NOT optimize conversion bidding.
+// ────────────────────────────────────────────────────────────────────
+(function () {
+  if (typeof window.twq !== 'function') return;
+
+  // Safe wrapper so a tracking failure never blocks the UX.
+  function track(eventId, payload) {
+    try {
+      window.twq('event', eventId, payload || {});
+    } catch (e) { /* never throw from analytics */ }
+  }
+
+  // 1. Install intent — click on the hero CLI command pre block.
+  // Replace 'tw-INSTALL_INTENT_PLACEHOLDER' with the X event tag id.
+  const cli = document.getElementById('cli-install');
+  if (cli) {
+    cli.addEventListener('click', function () {
+      track('tw-INSTALL_INTENT_PLACEHOLDER', {
+        conversion_id: 'install-cli-' + Date.now(),
+      });
+    });
+  }
+
+  // 2. GitHub link clicks — repo, releases, changelog, docs.
+  // Replace 'tw-GITHUB_CLICK_PLACEHOLDER' with the X event tag id.
+  document.querySelectorAll('a[href*="github.com/gizmax/memee"]').forEach(function (a) {
+    a.addEventListener('click', function () {
+      track('tw-GITHUB_CLICK_PLACEHOLDER', {
+        conversion_id: 'github-click-' + Date.now(),
+      });
+    });
+  });
+
+  // 3. Hero CTA — "Install free" button click.
+  // Replace 'tw-HERO_CTA_PLACEHOLDER' with the X event tag id.
+  const heroCta = document.querySelector('.hero-ctas a.btn:not(.btn--ghost)');
+  if (heroCta) {
+    heroCta.addEventListener('click', function () {
+      track('tw-HERO_CTA_PLACEHOLDER', {
+        conversion_id: 'hero-cta-' + Date.now(),
+      });
+    });
+  }
+
+  // 4. Pricing-tier signup — Team trial form submit + Enterprise mailto.
+  // Replace 'tw-PRICING_INTENT_PLACEHOLDER' with the X event tag id.
+  document.querySelectorAll('form, a[href^="mailto:info@memee.eu"]').forEach(function (el) {
+    el.addEventListener(el.tagName === 'FORM' ? 'submit' : 'click', function () {
+      track('tw-PRICING_INTENT_PLACEHOLDER', {
+        conversion_id: 'pricing-' + Date.now(),
+      });
+    });
+  });
+})();
+
 </script>
 </body>
 </html>
