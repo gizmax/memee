@@ -7,7 +7,7 @@
 
 **You shouldn't have to teach it twice.**
 
-Every chat is a new intern. You teach them Monday. By Friday they've quit. Memee writes it on the wall — so the next intern reads it. So does your teammate's. So does the next model.
+Every chat is a new intern. You teach them Monday. By Friday they've quit. Memee writes it on the wall. The next intern reads it. So does your teammate's. So does the next model.
 
 Memee shares experience across projects, across agents, across models, and across the people on your team.
 

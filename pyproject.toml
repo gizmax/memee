@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "memee"
 version = "1.2.0"
-description = "Cross-model shared memory for AI agents. One canon — every model, every project, every teammate."
+description = "Cross-model shared memory for AI agents. One canon. Every model, every project, every teammate."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
