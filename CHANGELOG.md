@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-04-27
+
+The "no-such-command-pack" patch. Three layers of defence against the
+PATH-shadowing bug that bit users upgrading via pipx while an older
+`pip install memee` against Homebrew Python sat on `/opt/homebrew/bin`.
+
+### Added
+
+- **`memee doctor` Installations section.** Walks `$PATH` for every
+  `memee` binary the shell can resolve, dedups on `realpath` (so a
+  Homebrew → pipx symlink doesn't trigger a warning), reports the
+  install kind (pipx / Homebrew Python / user pip / system Python),
+  and prints a tailored cleanup command for the active shadow. Single-
+  install installs render a one-line green check.
+- **`memee --version` enhanced output.** Now prints the install path,
+  the active binary on PATH, and any alternate `memee` binaries that
+  the shell would shadow this one with — with a `memee doctor` hint
+  when more than one is found.
+- **`memee setup` pre-flight.** Refuses to wire hooks into
+  `~/.claude/settings.json` when multiple `memee` binaries are on
+  PATH — those hooks would fire whichever the shell resolves first,
+  most likely the wrong one. Override with `--ignore-multi-install`.
+- **`memee doctor --ignore-multi-install`.** Suppresses the multi-
+  install warning for users who genuinely want two `memee` binaries
+  side by side.
+- **`detect_memee_installs()` API.** New helper in `doctor.py` for
+  callers (CLI version handler, setup pre-flight) to share a single
+  PATH walk. Cached within a Python invocation; <200 ms on a normal
+  machine. Tolerates broken symlinks, permission errors, missing
+  PATH dirs, files without a shebang, and version queries that fail
+  or time out.
+
+### Tests
+
+- `tests/test_multi_install_detection.py` — fakes a multi-install
+  PATH and verifies detection, dedup, install-kind classification,
+  the doctor report layout, and the setup refusal.
+
 ## [2.0.0] — 2026-04-27
 
 The loop-disappears + simplicity-reclamation release. Hooks land,

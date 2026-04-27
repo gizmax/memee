@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -91,6 +92,296 @@ CLI_TOOLS = [
         "note": "Use via CLI: memee search 'query' — pipe to ollama",
     },
 ]
+
+
+# ── Multi-install detection ──
+#
+# v2.0.1: many users hit "No such command 'pack'" errors after upgrading
+# memee via pipx — because their shell still resolves an older
+# ``/opt/homebrew/bin/memee`` (installed earlier with ``pip install`` against
+# Homebrew Python) before the pipx shim. Detecting this and pointing at the
+# specific Python whose pip needs to drop the shadow is more useful than
+# any other doctor output we ship.
+
+# Cache the scan within a single Python invocation. The detector runs in
+# both ``--version`` and ``setup`` pre-flight; doing the PATH walk once is
+# enough.
+_MEMEE_INSTALL_CACHE: list[dict] | None = None
+
+
+def _classify_install(path: str, shebang_python: str | None) -> str:
+    """Heuristic — ``pipx`` / ``homebrew-python`` / ``user-pip`` / ``system-python`` / ``unknown``.
+
+    We classify on the path of the *Python* the binary is bound to (read
+    from the shebang), falling back to the binary path itself when the
+    shebang is unreadable.
+    """
+    home = str(Path.home())
+    candidates = [shebang_python, path]
+    for cand in candidates:
+        if not cand:
+            continue
+        # pipx venvs live under ~/.local/pipx (Linux/macOS) or
+        # ~/Library/Application Support/pipx (rare). Either way the path
+        # contains the literal "pipx".
+        if "pipx" in cand:
+            return "pipx"
+        # Homebrew Python on macOS lives under /opt/homebrew (Apple Silicon)
+        # or /usr/local/Cellar (Intel). Linuxbrew uses /home/linuxbrew.
+        if (
+            cand.startswith("/opt/homebrew/")
+            or cand.startswith("/usr/local/Cellar/")
+            or cand.startswith("/home/linuxbrew/")
+        ):
+            return "homebrew-python"
+        # ``pip install --user`` lands binaries in ~/.local/bin and Python
+        # imports in ~/.local/lib/pythonX.Y/site-packages. We can't rely on
+        # ~/.local/bin alone because pipx also drops shims there — but the
+        # *shebang* will point at the user's site-python, not a pipx venv.
+        if cand.startswith(home + "/.local/lib") or cand.startswith(
+            home + "/Library/Python/"
+        ):
+            return "user-pip"
+        # Distro Python.
+        if cand in ("/usr/bin/python", "/usr/bin/python3") or cand.startswith(
+            "/usr/bin/"
+        ):
+            return "system-python"
+    return "unknown"
+
+
+def _read_shebang(path: str) -> str | None:
+    """Read the first ~200 bytes of ``path``, return the interpreter path
+    from a ``#!`` shebang, or None if the file can't be read or doesn't
+    start with one. Handles broken symlinks, binaries, and permission errors.
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(200)
+    except (OSError, PermissionError):
+        return None
+    if not head.startswith(b"#!"):
+        return None
+    # First line, after the "#!"
+    first_line = head.split(b"\n", 1)[0][2:].strip()
+    if not first_line:
+        return None
+    try:
+        decoded = first_line.decode("utf-8", errors="replace")
+    except Exception:
+        return None
+    # ``#!/usr/bin/env python3`` → interpreter is the second token
+    parts = decoded.split()
+    if not parts:
+        return None
+    if parts[0].endswith("/env") and len(parts) >= 2:
+        # ``env python3`` — return ``python3``; classification will fall
+        # back to the binary path since this gives us no install hint.
+        return parts[1]
+    return parts[0]
+
+
+_VERSION_RE = None
+
+
+def _query_version(path: str) -> str | None:
+    """Run ``<path> --version`` and return a clean version string, or None.
+
+    Older memee versions (pre-2.0.1) didn't have a top-level ``--version``
+    option and Click responds with a multi-line "No such option" error. We
+    tolerate that — if the output doesn't look like a single version line,
+    we return None so the report shows ``v?`` rather than splatting the
+    whole error into the table.
+    """
+    global _VERSION_RE
+    if _VERSION_RE is None:
+        import re as _re
+
+        # Match a version-like first line: optional "memee" / "memee," prefix,
+        # then a token containing at least one digit and dots/letters.
+        _VERSION_RE = _re.compile(
+            r"^(?:memee[, ]+(?:version\s+)?)?(\d[\w.\-+]*)\s*$",
+            _re.IGNORECASE,
+        )
+
+    try:
+        result = subprocess.run(
+            [path, "--version"],
+            capture_output=True,
+            timeout=5,
+            text=True,
+        )
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
+        return None
+
+    # If --version isn't recognised, exit code is nonzero and stderr holds
+    # a Click error. Don't try to parse — older memee never emitted a
+    # version, so just return None.
+    if result.returncode != 0:
+        return None
+
+    output = (result.stdout or "").strip()
+    if not output:
+        return None
+
+    # Strip ANSI just in case some future memee colours the version line.
+    import re as _re_local
+
+    output = _re_local.sub(r"\x1b\[[0-9;]*m", "", output).strip()
+
+    # Check the first non-empty line. v2.0.1 ``--version`` prints multiple
+    # lines ("memee 2.0.1\n  installed: …") — only the first matters.
+    first = output.split("\n", 1)[0].strip()
+    m = _VERSION_RE.match(first)
+    if m:
+        return m.group(1)
+
+    # Fallback: if the line looks like ``<prog> <version>`` with a digit,
+    # return the last token. Anything multi-line or weird → None.
+    if "\n" in output:
+        return None
+    tokens = first.split()
+    if tokens:
+        last = tokens[-1]
+        if any(ch.isdigit() for ch in last):
+            return last
+    return None
+
+
+def detect_memee_installs(*, use_cache: bool = True) -> list[dict]:
+    """Scan PATH for every memee binary the shell can find.
+
+    Returns list of ``{path, real_path, mtime, version, install_kind,
+    shebang_python}`` sorted by PATH order. Distinct entries are deduplicated
+    on ``realpath`` so a Homebrew → pipx symlink doesn't trigger a warning.
+
+    Edge cases handled:
+    - Missing PATH directories
+    - Broken symlinks (file not readable but listed)
+    - Files without read permission
+    - Files that aren't actually Python scripts (no shebang)
+    - PATH entries that aren't directories
+    """
+    global _MEMEE_INSTALL_CACHE
+    if use_cache and _MEMEE_INSTALL_CACHE is not None:
+        return _MEMEE_INSTALL_CACHE
+
+    binary_name = "memee.exe" if os.name == "nt" else "memee"
+    seen_paths: set[str] = set()
+    seen_realpaths: set[str] = set()
+    results: list[dict] = []
+
+    path_env = os.environ.get("PATH", "")
+    for entry in path_env.split(os.pathsep):
+        if not entry:
+            continue
+        candidate = os.path.join(entry, binary_name)
+        try:
+            if not os.path.isfile(candidate):
+                continue
+        except OSError:
+            # Broken/unreadable PATH entry — skip silently.
+            continue
+        if candidate in seen_paths:
+            continue
+        seen_paths.add(candidate)
+
+        # Dedup on realpath so a symlink chain → one install isn't warned on.
+        try:
+            real = os.path.realpath(candidate)
+        except OSError:
+            real = candidate
+        if real in seen_realpaths:
+            continue
+        seen_realpaths.add(real)
+
+        # mtime is best-effort; broken file → 0.
+        try:
+            mtime = os.path.getmtime(candidate)
+        except OSError:
+            mtime = 0.0
+
+        shebang_python = _read_shebang(real) or _read_shebang(candidate)
+        version = _query_version(candidate)
+        install_kind = _classify_install(real, shebang_python)
+
+        results.append(
+            {
+                "path": candidate,
+                "real_path": real,
+                "mtime": mtime,
+                "version": version,
+                "install_kind": install_kind,
+                "shebang_python": shebang_python,
+            }
+        )
+
+    _MEMEE_INSTALL_CACHE = results
+    return results
+
+
+def _install_kind_label(kind: str) -> str:
+    """Human-friendly label for an install_kind."""
+    return {
+        "pipx": "pipx",
+        "homebrew-python": "Homebrew Python",
+        "user-pip": "user pip",
+        "system-python": "system Python",
+        "unknown": "unknown",
+    }.get(kind, kind)
+
+
+def _fix_hint(active: dict, shadowed: dict) -> list[str]:
+    """Return shell commands the user can run to drop the shadowing install.
+
+    ``active`` is what the shell currently resolves; ``shadowed`` is the
+    upgraded one being hidden. The fix targets ``active``: that's the one
+    we want gone (or moved off PATH).
+    """
+    kind = active["install_kind"]
+    shebang = active.get("shebang_python")
+    if kind == "homebrew-python":
+        py = shebang or "/opt/homebrew/bin/python3"
+        return [
+            f"{py} -m pip uninstall memee",
+            "rehash   # or: open a new shell",
+        ]
+    if kind == "user-pip":
+        py = shebang or "python3"
+        return [
+            f"{py} -m pip uninstall memee",
+            "rehash   # or: open a new shell",
+        ]
+    if kind == "system-python":
+        py = shebang or "/usr/bin/python3"
+        return [
+            f"sudo {py} -m pip uninstall memee   # if pip-managed",
+            "# or remove the binary directly:",
+            f"sudo rm {active['path']}",
+        ]
+    if kind == "pipx":
+        # Two pipx installs in different homes. No safe scripted fix.
+        return [
+            "# Two pipx installs detected — uncommon. Pick one:",
+            f"pipx uninstall memee   # run with the right HOME for {active['path']}",
+        ]
+    # Unknown — be conservative.
+    return [
+        f"# Unknown install kind for {active['path']}.",
+        f"# Inspect the shebang ({shebang or 'none'}) and uninstall via that pip,",
+        f"# or as a last resort: rm {active['path']}",
+        "# (Removing the file may break that Python's `import memee`.)",
+    ]
+
+
+def get_install_health() -> dict:
+    """Snapshot the multi-install state for the report layer."""
+    installs = detect_memee_installs()
+    return {
+        "installs": installs,
+        "count": len(installs),
+        "multi": len(installs) > 1,
+    }
 
 
 def detect_ai_tools() -> list[dict]:
@@ -425,11 +716,26 @@ def run_doctor(
         "database": get_db_health(),
         "knowledge": get_knowledge_health(),
         "rerank": get_rerank_health(),
+        "installs": get_install_health(),
         "issues": [],
         "fixed": [],
         "hooks": [],
         "dry_run": dry_run,
     }
+
+    # Multi-install warning is its own issue type so the caller can render
+    # the cleanup hint specifically. We don't auto-fix this one — yanking
+    # someone's binary would be out of line.
+    if results["installs"]["multi"]:
+        results["issues"].append(
+            {
+                "type": "multi_install",
+                "message": (
+                    f"{results['installs']['count']} memee binaries on PATH "
+                    f"(mismatch will cause command-not-found errors)"
+                ),
+            }
+        )
 
     # Check for issues
     for tool in results["tools"]:
@@ -493,6 +799,67 @@ def run_doctor(
     return results
 
 
+def print_installations_section(install_health: dict) -> None:
+    """Print the ``Installations:`` block.
+
+    Single-install (or all-symlinks-to-one) → green check, one line.
+    Multi-install → yellow warning + table + fix block tailored to the
+    *active* (PATH-first) install's kind.
+    """
+    installs = install_health.get("installs") or []
+    if not installs:
+        # No memee on PATH at all — extreme edge case (running from source
+        # via ``python -m memee.cli`` only). Stay quiet rather than alarm.
+        return
+
+    print(f"\n  {C.BOLD}Installations:{C.RESET}")
+
+    if len(installs) == 1:
+        sole = installs[0]
+        version = sole.get("version") or "?"
+        kind = _install_kind_label(sole["install_kind"])
+        print(
+            f"    {C.GREEN}✓{C.RESET} memee {version} ({kind})  "
+            f"{C.DIM}{sole['path']}{C.RESET}"
+        )
+        return
+
+    # Multi-install — first PATH entry wins, the rest are shadowed.
+    active = installs[0]
+    shadowed = installs[1:]
+    print(
+        f"    {C.YELLOW}!{C.RESET} {len(installs)} memee binaries on PATH "
+        f"{C.DIM}(mismatch will cause command-not-found errors){C.RESET}"
+    )
+
+    # Compute column widths so the table lines up — but keep it simple,
+    # we only have at most a few binaries.
+    rows = []
+    for i, inst in enumerate(installs):
+        version = inst.get("version") or "?"
+        kind = _install_kind_label(inst["install_kind"])
+        tag = "[active]" if i == 0 else "[shadowed]"
+        rows.append((inst["path"], f"v{version}" if not version.startswith("v") else version, kind, tag))
+
+    pad_path = max(len(r[0]) for r in rows)
+    pad_ver = max(len(r[1]) for r in rows)
+    pad_kind = max(len(r[2]) for r in rows)
+    for path, ver, kind, tag in rows:
+        tag_color = C.GREEN if tag == "[active]" else C.DIM
+        print(
+            f"      {path:<{pad_path}}  {ver:<{pad_ver}}  "
+            f"{kind:<{pad_kind}}  {tag_color}{tag}{C.RESET}"
+        )
+
+    # Fix block — specific to the active install's kind.
+    print()
+    print(f"    {C.BOLD}Fix:{C.RESET}")
+    for line in _fix_hint(active, shadowed[0]):
+        print(f"      {line}")
+    print()
+    print(f"    {C.DIM}Then run `memee doctor` again to verify.{C.RESET}")
+
+
 def print_doctor_report(results: dict):
     """Print formatted doctor report."""
     print(f"\n  {C.BCYAN}━━━ MEMEE HEALTH CHECK ━━━{C.RESET}\n")
@@ -510,6 +877,9 @@ def print_doctor_report(results: dict):
             print(f"    {emb_icon}{C.RESET} Embeddings: {db['embedded']}/{db['memories']} ({emb_pct:.0f}%)")
     else:
         print(f"    {C.RED}✗{C.RESET} Not found. Run: memee init")
+
+    # Installations (multi-install detection — v2.0.1)
+    print_installations_section(results.get("installs") or {})
 
     # AI Tools
     print(f"\n  {C.BOLD}AI Tools:{C.RESET}")

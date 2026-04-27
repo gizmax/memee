@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -10,8 +11,71 @@ import click
 from memee.config import settings
 
 
+def _print_version_and_exit(ctx, param, value):
+    """Click ``--version`` callback that prints version + install location +
+    multi-install warning when applicable.
+
+    Replaces ``click.version_option`` so we can also surface the path of the
+    binary the shell resolves and any *other* memee installs that are
+    shadowing or being shadowed by this one — the v2.0.1 patch fix for the
+    pipx-vs-Homebrew shadowing bug.
+    """
+    if not value or ctx.resilient_parsing:
+        return
+
+    from memee import __version__
+    from memee.doctor import (
+        _install_kind_label,
+        detect_memee_installs,
+    )
+
+    # Resolve where THIS python imported memee from + which binary on PATH
+    # is the active one.
+    try:
+        import memee as _memee_pkg
+        installed = os.path.dirname(os.path.abspath(_memee_pkg.__file__))
+    except Exception:
+        installed = "<unknown>"
+
+    # The binary on PATH may not be the one running RIGHT NOW (e.g. when
+    # invoked via ``python -m memee.cli``), so we report it separately and
+    # mark which one matches sys.executable.
+    installs = detect_memee_installs()
+
+    click.echo(f"memee {__version__}")
+    click.echo(f"  installed: {installed}")
+
+    if not installs:
+        # Running from source / no shim on PATH. Honest about it.
+        click.echo("  binary:    <not on PATH>")
+    else:
+        active = installs[0]
+        kind = _install_kind_label(active["install_kind"])
+        click.echo(
+            f"  binary:    {active['path']}  ({kind} — active)"
+        )
+        for alt in installs[1:]:
+            alt_ver = alt.get("version") or "?"
+            alt_kind = _install_kind_label(alt["install_kind"])
+            click.echo(
+                f"  alt:       {alt['path']}  v{alt_ver}  "
+                f"({alt_kind} — shadowed by the one above)"
+            )
+
+        if len(installs) > 1:
+            click.echo("")
+            click.echo("  Run: memee doctor   for cleanup guidance")
+
+    ctx.exit()
+
+
 @click.group()
 @click.option("--org", default=None, help="Organization name override")
+@click.option(
+    "--version", is_flag=True, expose_value=False, is_eager=True,
+    callback=_print_version_and_exit,
+    help="Show version, install location, and any shadowed installs on PATH.",
+)
 @click.pass_context
 def cli(ctx, org):
     """Memee — Your agents forget. Memee doesn't."""
@@ -34,8 +98,47 @@ def cli(ctx, org):
     "--dry-run", is_flag=True,
     help="Show what setup would change without writing any files.",
 )
-def setup(mode, no_hooks, dry_run):
+@click.option(
+    "--ignore-multi-install", is_flag=True,
+    help="Run setup even when multiple memee binaries are on PATH. "
+         "Use only if you know which one is active and accept the risk "
+         "that hooks will fire whichever the shell resolves first.",
+)
+def setup(mode, no_hooks, dry_run, ignore_multi_install):
     """Interactive setup wizard with beautiful terminal UI."""
+    # Pre-flight: setup writes hooks into ~/.claude/settings.json that
+    # invoke ``memee`` on every session. If two binaries are on PATH we
+    # have no idea which one will fire — and the most likely one is the
+    # *older* shadowing install, which won't have the hook code at all.
+    # Refuse cleanly rather than ship a broken wire-up.
+    if not ignore_multi_install:
+        from memee.doctor import (
+            _install_kind_label,
+            detect_memee_installs,
+        )
+        installs = detect_memee_installs()
+        if len(installs) > 1:
+            click.echo(
+                "\033[31m✗\033[0m Setup refused. Multiple `memee` "
+                "installations on PATH:"
+            )
+            for i, inst in enumerate(installs):
+                tag = "[active]" if i == 0 else "[shadowed]"
+                ver = inst.get("version") or "?"
+                kind = _install_kind_label(inst["install_kind"])
+                click.echo(f"    {inst['path']}  v{ver}  {kind}  {tag}")
+            click.echo("")
+            click.echo(
+                "  Resolve this first (run \033[36mmemee doctor\033[0m for "
+                "specific cleanup commands), then re-run \033[36mmemee "
+                "setup\033[0m."
+            )
+            click.echo(
+                "  Or pass \033[2m--ignore-multi-install\033[0m if you "
+                "know what you're doing."
+            )
+            sys.exit(1)
+
     # The installer reads these via module-level globals so the wizard's
     # rich UI can decide whether to advertise the automatic experience or
     # the MCP-only one.
@@ -81,7 +184,13 @@ def setup(mode, no_hooks, dry_run):
     "--dry-run", is_flag=True,
     help="Show what doctor would change without writing any files.",
 )
-def doctor(no_fix, no_hooks, uninstall_hooks, dry_run):
+@click.option(
+    "--ignore-multi-install", is_flag=True,
+    help="Suppress the multi-install warning. Doctor still scans, but no "
+         "warning is added to the issues list — for users who genuinely "
+         "want two memee binaries side by side.",
+)
+def doctor(no_fix, no_hooks, uninstall_hooks, dry_run, ignore_multi_install):
     """Health check: scan system, detect AI tools, fix configuration."""
     from memee.doctor import print_doctor_report, run_doctor
 
@@ -91,6 +200,11 @@ def doctor(no_fix, no_hooks, uninstall_hooks, dry_run):
         uninstall_hooks=uninstall_hooks,
         dry_run=dry_run,
     )
+    if ignore_multi_install:
+        results["issues"] = [
+            i for i in results.get("issues", [])
+            if i.get("type") != "multi_install"
+        ]
     print_doctor_report(results)
 
 
