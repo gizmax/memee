@@ -495,6 +495,13 @@ def _uninstall_active(active: dict, *, dry_run: bool) -> dict:
     """
     python_path = active.get("shebang_python") or ""
     cmd = [python_path, "-m", "pip", "uninstall", "-y", "memee"]
+    # PEP 668: Homebrew Python (and an increasing number of distro-shipped
+    # Pythons) blocks pip outside venvs unless ``--break-system-packages``
+    # is passed. We add it for the kinds we already gate to "pip-managed,
+    # safe to uninstall" — without the flag the auto-fix dies on
+    # ``error: externally-managed-environment``.
+    if active.get("install_kind") == "homebrew-python":
+        cmd.append("--break-system-packages")
     if dry_run:
         return {
             "ok": True,
@@ -534,6 +541,29 @@ def get_install_health() -> dict:
         "installs": installs,
         "count": len(installs),
         "multi": len(installs) > 1,
+    }
+
+
+def _update_status_for_report() -> dict:
+    """Return a small dict the doctor report layer can render without
+    importing ``update_check``. Stays compatible with the existing report
+    code that does ``results.get("update") or {}``.
+    """
+    try:
+        from memee.update_check import check
+        s = check()
+    except Exception:
+        # Update check has its own swallowing, but a dependency import
+        # error during ``import memee.update_check`` would still propagate
+        # — guard against that too. Better to skip the section than to
+        # break ``memee doctor``.
+        return {}
+    return {
+        "available": s.available,
+        "current": s.current,
+        "latest": s.latest,
+        "checked_at": s.checked_at,
+        "source": s.source,
     }
 
 
@@ -876,6 +906,7 @@ def run_doctor(
         "knowledge": get_knowledge_health(),
         "rerank": get_rerank_health(),
         "installs": get_install_health(),
+        "update": _update_status_for_report(),
         "issues": [],
         "fixed": [],
         "hooks": [],
@@ -1217,6 +1248,31 @@ def print_doctor_report(results: dict):
             print(f"    {C.YELLOW}!{C.RESET} rerank: disabled ({rr['error']})")
         else:
             print(f"    {C.YELLOW}!{C.RESET} rerank: disabled (no model cached; pip install memee[rerank] then memee embed --download-rerank)")
+
+    # Update check — passive PyPI poll, 24h cache. Honest about what we
+    # know: ✓ when up to date, ! when an upgrade is available with the
+    # one-liner the user needs, dim "—" when offline / disabled / can't
+    # determine.
+    upd = results.get("update") or {}
+    print(f"\n  {C.BOLD}Update:{C.RESET}")
+    if upd.get("source") == "disabled":
+        print(f"    {C.DIM}-{C.RESET} disabled (MEMEE_NO_UPDATE_CHECK)")
+    elif upd.get("available") and upd.get("latest"):
+        print(
+            f"    {C.YELLOW}!{C.RESET} memee {upd.get('current')} → "
+            f"{upd['latest']} available"
+        )
+        print(f"      {C.BOLD}Run:{C.RESET} pipx upgrade memee")
+    elif upd.get("latest"):
+        print(
+            f"    {C.GREEN}✓{C.RESET} up to date "
+            f"({upd.get('current')} = latest on PyPI)"
+        )
+    else:
+        print(
+            f"    {C.DIM}-{C.RESET} couldn't reach PyPI "
+            f"(offline?) — running {upd.get('current') or '?'}"
+        )
 
     # Knowledge Health
     kh = results["knowledge"]

@@ -66,6 +66,19 @@ def _print_version_and_exit(ctx, param, value):
             click.echo("")
             click.echo("  Run: memee doctor   for cleanup guidance")
 
+    # Update notice — same passive channel as the hook briefing. Cached for
+    # 24h, silent on failure, killable via MEMEE_NO_UPDATE_CHECK=1. Lives
+    # below the install info so the version line itself is parseable.
+    try:
+        from memee.update_check import check, format_notice
+
+        notice = format_notice(check())
+        if notice:
+            click.echo("")
+            click.echo(f"  {notice}")
+    except Exception:
+        pass
+
     ctx.exit()
 
 
@@ -1066,6 +1079,19 @@ def brief(project, task, budget, full, fmt):
         click.echo(f"memee brief: {e}", err=True)
         return
 
+    # Passive update notice: when PyPI says a newer memee is out, prepend
+    # one line so the agent sees it and can pass it on. Cached for 24h,
+    # silent on network errors, killable via MEMEE_NO_UPDATE_CHECK=1.
+    # We never block the briefing on this — any failure is swallowed.
+    try:
+        from memee.update_check import check, format_notice
+
+        notice = format_notice(check(), prefix="> ")
+        if notice:
+            result = f"{notice}\n\n{result}" if result else notice
+    except Exception:
+        pass
+
     click.echo(result)
 
 
@@ -1309,6 +1335,18 @@ def serve():
     """Start Memee as MCP stdio server for Claude Code."""
     from memee.mcp_server import mcp
 
+    # MCP stdio means stdout is the wire protocol — never log there. Stderr
+    # is harness-visible in most clients (Claude Code surfaces it in
+    # `/mcp servers`). Best-effort, swallow all errors.
+    try:
+        from memee.update_check import check, format_notice
+
+        notice = format_notice(check())
+        if notice:
+            sys.stderr.write(f"[memee] {notice}\n")
+    except Exception:
+        pass
+
     mcp.run(transport="stdio")
 
 
@@ -1526,8 +1564,13 @@ def pack_export(
 @click.option("--upgrade", is_flag=True,
               help="If a different version of this pack is installed, install alongside")
 def pack_install(source, from_url, unsigned, upgrade):
-    """Install a ``.memee`` pack into the local DB."""
-    from memee.engine.packs import install_pack
+    """Install a ``.memee`` pack into the local DB.
+
+    ``SOURCE`` accepts either a local file path or a bundled seed-pack name
+    (``agent-discipline``, ``python-web``, …). Names are resolved against
+    the seed packs shipped inside the wheel.
+    """
+    from memee.engine.packs import install_pack, list_seed_packs, resolve_seed_pack
     from memee.storage.database import get_session, init_db
 
     if not source and not from_url:
@@ -1537,6 +1580,31 @@ def pack_install(source, from_url, unsigned, upgrade):
 
     target = from_url or source
     pack_filename = Path(source).name if source else None
+
+    # Bare-name resolution: when SOURCE is neither an existing file path
+    # nor a URL, treat it as a seed-pack name and look it up in the bundle.
+    # Falls back to the original error path when the name is unknown so the
+    # user still sees a helpful message instead of "file not found".
+    if source and not from_url:
+        looks_like_path = "/" in source or source.endswith(".memee")
+        is_existing_file = Path(source).is_file()
+        if not looks_like_path and not is_existing_file:
+            seed_path = resolve_seed_pack(source)
+            if seed_path is not None:
+                target = str(seed_path)
+                pack_filename = seed_path.name
+            else:
+                names = list_seed_packs()
+                hint = (
+                    f"available seed packs: {', '.join(names)}"
+                    if names else
+                    "no seed packs are bundled in this install"
+                )
+                raise click.ClickException(
+                    f"unknown seed pack '{source}'. {hint}. "
+                    f"To install from a file, pass a path; to install from a URL, "
+                    f"use --from-url."
+                )
 
     engine = init_db()
     session = get_session(engine)

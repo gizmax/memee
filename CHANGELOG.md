@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.3] — 2026-04-27
+
+The "people install once and forget" patch. Three things that should
+have shipped with v2.0.0: `pack install <name>` resolves seed packs
+without a network round-trip, `doctor` actually finishes the
+auto-uninstall it advertised in v2.0.2, and Memee tells you when a
+new version is out instead of waiting for you to notice.
+
+### Added
+
+- **Bundled seed packs.** ``memee pack install agent-discipline``
+  works out of the box — the ``.memee`` files under ``packs/seed/``
+  ship inside the wheel at ``memee/seed_packs/`` (force-include via
+  hatch). Five packs land: ``agent-discipline``, ``http-api-canon``,
+  ``mcp-server-canon``, ``python-web``, ``react-vite``. Source
+  checkouts fall back to ``packs/seed/`` next to the package, so
+  ``pip install -e .`` keeps working.
+- **Bare-name resolution in ``pack install``.** When the argument
+  isn't a path or URL, Memee looks it up in the bundled seed packs.
+  Unknown names produce a friendly error listing what's available
+  rather than ``pack file not found``.
+- **Passive update check.** Memee polls ``pypi.org/pypi/memee/json``
+  once every 24 hours (``~/.memee/update_check.json`` cache, 3-second
+  HTTP timeout, no new dependencies — stdlib ``urllib``). When a
+  newer version exists the notice surfaces in three places: prepended
+  to the SessionStart hook briefing (so the agent passes it on),
+  written to stderr at ``memee serve`` startup (visible in MCP
+  client logs), and on its own line in ``memee --version`` /
+  a dedicated ``Update:`` block in ``memee doctor``. Killable via
+  ``MEMEE_NO_UPDATE_CHECK=1``. Network failures stay silent.
+
+### Fixed
+
+- **Doctor auto-fix on Homebrew Python (PEP 668).** v2.0.2 detected
+  the multi-install case and tried to ``pip uninstall``, but PEP 668
+  marks Homebrew's site-packages externally-managed and pip refuses
+  the call. v2.0.3 appends ``--break-system-packages`` for the
+  ``homebrew-python`` install kind so the auto-fix actually runs.
+  ``user-pip`` doesn't need it (the user site is unmarked).
+
 ## [2.0.2] — 2026-04-27
 
 The "doctor heals itself" patch. v2.0.1 added detection for the

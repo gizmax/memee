@@ -95,6 +95,76 @@ def find_installed(name: str, version: str | None = None,
     return matches[0]
 
 
+# ── Bundled seed packs ──────────────────────────────────────────────────────
+
+
+def _seed_packs_root() -> Path | None:
+    """Find the directory holding bundled ``.memee`` seed packs.
+
+    For wheel installs the resources live at ``memee/seed_packs/``. For
+    source checkouts the directory isn't there (the build copies them in),
+    so we also check the repo's ``packs/seed/`` next to the package — this
+    is what makes ``memee pack install <name>`` work during local dev.
+    """
+    try:
+        from importlib.resources import files
+        bundled = files("memee") / "seed_packs"
+        if bundled.is_dir():
+            return Path(str(bundled))
+    except (ModuleNotFoundError, FileNotFoundError, AttributeError):
+        pass
+
+    # Source-checkout fallback: walk up from this file until we find a
+    # ``packs/seed`` dir. Capped at 5 parents so we don't wander into the
+    # filesystem root if the layout is unexpected.
+    here = Path(__file__).resolve().parent
+    for parent in [here, *here.parents][:6]:
+        candidate = parent / "packs" / "seed"
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def list_seed_packs() -> list[str]:
+    """Return the names of seed packs available to ``pack install``.
+
+    Names are returned without the ``.memee`` suffix, sorted alphabetically.
+    Empty list when no source of seed packs is reachable (very stripped
+    install, no source checkout).
+    """
+    root = _seed_packs_root()
+    if root is None:
+        return []
+    try:
+        return sorted(
+            f.stem for f in root.iterdir()
+            if f.is_file() and f.suffix == ".memee"
+        )
+    except OSError:
+        return []
+
+
+def resolve_seed_pack(name: str) -> Path | None:
+    """Resolve a bare pack name to a bundled ``.memee`` file path.
+
+    Used by ``memee pack install <name>`` so users don't have to know where
+    the wheel keeps its seed packs. Returns None when the name doesn't
+    match any bundled pack, leaving the caller to report a "not found"
+    error with the list of available names.
+
+    The lookup is case-sensitive and accepts the name with or without the
+    ``.memee`` suffix.
+    """
+    if not name:
+        return None
+    target = name if name.endswith(".memee") else f"{name}.memee"
+    root = _seed_packs_root()
+    if root is None:
+        return None
+    candidate = root / target
+    return candidate if candidate.is_file() else None
+
+
 # ── Export ──────────────────────────────────────────────────────────────────
 
 

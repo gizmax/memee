@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memee"
-version = "2.0.2"
+version = "2.0.3"
 description = "Cross-model shared memory for AI agents. One canon. Every model, every project, every teammate."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -100,6 +100,19 @@ memee = "memee.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/memee"]
 
+# Seed packs ship inside the wheel so ``memee pack install <name>`` resolves
+# to a bundled file without a network round-trip. The ``packs/seed/`` tree
+# at repo root holds the .toml manifest, the .jsonl source rows, and the
+# bundled ``.memee`` (which is the only thing runtime needs). We force-
+# include just the .memee files — listed explicitly because hatch's
+# force-include doesn't support globs.
+[tool.hatch.build.targets.wheel.force-include]
+"packs/seed/agent-discipline.memee" = "memee/seed_packs/agent-discipline.memee"
+"packs/seed/http-api-canon.memee" = "memee/seed_packs/http-api-canon.memee"
+"packs/seed/mcp-server-canon.memee" = "memee/seed_packs/mcp-server-canon.memee"
+"packs/seed/python-web.memee" = "memee/seed_packs/python-web.memee"
+"packs/seed/react-vite.memee" = "memee/seed_packs/react-vite.memee"
+
 # sdist EXCLUDES — keep the paid package, internal runbooks, memory dumps,
 # local DBs, and caches out of the public tar.gz even if someone accidentally
 # builds from the private monorepo instead of the public mirror.
@@ -109,6 +122,7 @@ include = [
     "/tests",
     "/alembic",
     "/alembic.ini",
+    "/packs/seed/*.memee",
     "/docs/cmam.md",
     "/docs/benchmarks.md",
     "/docs/review-fixes.md",

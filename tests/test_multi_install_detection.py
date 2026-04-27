@@ -449,6 +449,64 @@ def test_can_safely_remove_refuses_when_pip_show_fails(monkeypatch, tmp_path):
     assert "pip show" in reason
 
 
+def test_uninstall_active_appends_break_system_packages_for_homebrew(monkeypatch, tmp_path):
+    """PEP 668 (v2.0.3 fix) — Homebrew Python's pip refuses to touch
+    site-packages without ``--break-system-packages``. The auto-fix must
+    add the flag, otherwise it's a no-op masquerading as success."""
+    py = tmp_path / "py"
+    py.write_text("")
+    py.chmod(0o755)
+
+    captured: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        import subprocess as _sp
+        captured.append(cmd)
+        return _sp.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run)
+
+    out = doctor._uninstall_active(
+        {
+            "shebang_python": str(py),
+            "install_kind": "homebrew-python",
+            "path": "/opt/homebrew/bin/memee",
+        },
+        dry_run=False,
+    )
+    assert out["ok"]
+    assert captured, "expected pip uninstall to be invoked"
+    assert "--break-system-packages" in captured[0]
+
+
+def test_uninstall_active_omits_flag_for_user_pip(monkeypatch, tmp_path):
+    """user-pip lands in ~/.local/lib, which is *not* externally-managed.
+    Adding the flag would still work but is unnecessary noise."""
+    py = tmp_path / "py"
+    py.write_text("")
+    py.chmod(0o755)
+
+    captured: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        import subprocess as _sp
+        captured.append(cmd)
+        return _sp.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run)
+
+    doctor._uninstall_active(
+        {
+            "shebang_python": str(py),
+            "install_kind": "user-pip",
+            "path": "/Users/x/.local/bin/memee",
+        },
+        dry_run=False,
+    )
+    assert captured
+    assert "--break-system-packages" not in captured[0]
+
+
 def test_uninstall_active_dry_run_does_not_call_subprocess(monkeypatch, tmp_path):
     """dry_run=True returns success without invoking pip."""
     called = {"n": 0}
