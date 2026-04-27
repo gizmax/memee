@@ -1432,6 +1432,8 @@ body::before { display: none; }
           <span class="mark">·</span>
           <a href="https://github.com/gizmax/memee/releases/latest" rel="external">v2.0.0 on GitHub</a>
           <span class="mark">·</span>
+          <a href="/packs/">5 packs · 306 entries</a>
+          <span class="mark">·</span>
           <a href="https://pypi.org/project/memee/" rel="external">PyPI</a>
         </span>
       </div>
@@ -1828,6 +1830,51 @@ body::before { display: none; }
       <p class="cfoot reveal">Sources, verified April 2026: <a href="https://www.anthropic.com/news/skills" rel="external">anthropic.com/news/skills</a>, <a href="https://mem0.ai/pricing" rel="external">mem0.ai/pricing</a>, <a href="https://letta.com/pricing" rel="external">letta.com/pricing</a>, <a href="https://www.getzep.com/" rel="external">getzep.com</a>, <a href="https://openai.com/index/memory-and-new-controls-for-chatgpt/" rel="external">openai.com/memory</a>, <a href="https://hermes-agent.nousresearch.com/" rel="external">hermes-agent.nousresearch.com</a>.</p>
     </section>
 
+    <!-- S6c PACKS — install canon for the stacks your agents already know -->
+    <section class="flatplan shell" id="packs-cta">
+      <div class="flatplan-head">
+        <h2 class="display reveal">Memory you <em>install</em>.</h2>
+        <p class="lede reveal">Five hand-curated <code>.memee</code> packs ship today. <strong>306 sourced rules</strong>, signed, idempotent. One command to import. Day-one users get canon before the first agent session.</p>
+      </div>
+
+      <div class="flatplan-grid">
+        <article class="flatplan-card reveal">
+          <div class="n">python-web · 61</div>
+          <h3>FastAPI, SQLAlchemy, Pydantic, pytest.</h3>
+          <p>Async correctness, observability, deployment, security canon every Python service needs from day one. <em>memee pack install python-web</em>.</p>
+        </article>
+        <article class="flatplan-card reveal">
+          <div class="n">react-vite · 52</div>
+          <h3>Hooks, forms, a11y, mobile gotchas.</h3>
+          <p>TypeScript strict, Tailwind, TanStack Query, React Router v6 loaders. Animation perf, prefers-reduced-motion, iOS 100vh fix. <em>memee pack install react-vite</em>.</p>
+        </article>
+        <article class="flatplan-card reveal">
+          <div class="n">mcp-server-canon · 59</div>
+          <h3>MCP servers that don&rsquo;t get pwned.</h3>
+          <p>Lethal-trifecta read+write split, supply-chain pinning, prompt injection in tool descriptions, stdio framing, the 15-tool ceiling. <em>memee pack install mcp-server-canon</em>.</p>
+        </article>
+        <article class="flatplan-card reveal">
+          <div class="n">http-api-canon · 91</div>
+          <h3>The IETF index nobody had written.</h3>
+          <p>RFC 9110 + 7807/9457 + 8725 + 9700 + OAuth 2.1 distilled. JWT BCP, OAuth pitfalls, problem+json errors, ETag concurrency. <em>memee pack install http-api-canon</em>.</p>
+        </article>
+        <article class="flatplan-card reveal">
+          <div class="n">agent-discipline · 43</div>
+          <h3>Failure modes every model shares.</h3>
+          <p>Fabricated paths, premature done, scope explosion on small fixes, sycophancy under pushback, the lethal trifecta. Every entry cites primary literature. <em>memee pack install agent-discipline</em>.</p>
+        </article>
+        <article class="flatplan-card reveal" style="opacity:0.5">
+          <div class="n">coming · contributors</div>
+          <h3>swiftui · postgresql-canon</h3>
+          <p>Two more in the pipeline. SwiftUI state ownership, gesture/offset structural bugs. Postgres index strategy, EXPLAIN reading, lock contention. <em><a href="https://github.com/gizmax/memee" rel="external" style="color:var(--orange)">Open a PR</a></em>.</p>
+        </article>
+      </div>
+
+      <p class="math-pull reveal" style="margin-top:48px">
+        <a href="/packs/" style="color:var(--ink);text-decoration:underline;text-decoration-color:var(--orange);text-underline-offset:4px">See every pack &rarr;</a>
+      </p>
+    </section>
+
     <!-- S6b FAQ — three questions from the launch thread -->
     <section class="faq shell" id="faq">
       <div class="faq-head">
@@ -1961,8 +2008,9 @@ body::before { display: none; }
           <span class="lane-num">01 · Free</span>
           <h3>One command.</h3>
           <pre class="cli" id="cli-install"><span class="cli-cmd">pipx install memee &amp;&amp; memee setup</span>
+<span class="cli-cmd">memee pack install python-web</span>
 <span class="cli-note"># already installed? pipx upgrade memee</span></pre>
-          <p>The engine, on your machine, by tea-time. Bring your own keys.</p>
+          <p>The engine, on your machine, by tea-time. Bring your own keys. Pick a pack — <a href="/packs/" style="color:var(--ink);text-decoration:underline;text-decoration-color:var(--orange);text-underline-offset:2px">five ship today</a> — and your first session starts already knowing.</p>
           <span class="tiny">No pipx? <code>brew install pipx</code>, or fall back to <code>python3 -m pip install memee</code>.</span>
           <span class="tiny" id="cli-copied">Click the command to copy.</span>
         </div>
