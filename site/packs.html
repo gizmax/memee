@@ -1,357 +1,588 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Memee Packs — portable institutional memory</title>
-<meta name="description" content="Memory you can install. Curated `.memee` packs for Python web, React, SwiftUI, k8s, security canon. Import in one command. Sourced and signed." />
-<meta property="og:title" content="Memee Packs" />
-<meta property="og:description" content="Memory you can install. Curated `.memee` packs for the stacks your agents already know." />
-<meta property="og:image" content="https://memee.eu/og-image.png" />
-<link rel="canonical" href="https://memee.eu/packs" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Memee Packs · Memory you can install.</title>
+  <meta name="description" content="Curated `.memee` packs for the stacks your agents already know. Patterns, anti-patterns, decisions. Signed, sourced, idempotent. Import in one command." />
 
-<!-- Same fonts and pixel as memee.eu/ — keep visual identity consistent -->
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <!-- Open Graph / X social previews -->
+  <meta property="og:title" content="Memee Packs — Memory you can install." />
+  <meta property="og:description" content="Curated .memee packs for the stacks your agents already know. Import in one command." />
+  <meta property="og:image" content="https://memee.eu/og-image.png" />
+  <meta property="og:url" content="https://memee.eu/packs/" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Memee Packs — Memory you can install." />
+  <meta name="twitter:description" content="Curated .memee packs for the stacks your agents already know." />
+  <meta name="twitter:image" content="https://memee.eu/og-image.png" />
+  <link rel="canonical" href="https://memee.eu/packs/" />
 
-<!-- Google Analytics — gizmax.cz convention -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-ZN1K4G2TCZ');
-</script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-ZN1K4G2TCZ');
+  </script>
 
-<!-- X (Twitter) base pixel — same id as memee.eu -->
-<script>
-  !function(e,t,n,s,u,a){e.twq||(s=e.twq=function(){s.exe?s.exe.apply(s,arguments):s.queue.push(arguments)},s.version='1.1',s.queue=[],u=t.createElement(n),u.async=!0,u.src='https://static.ads-twitter.com/uwt.js',a=t.getElementsByTagName(n)[0],a.parentNode.insertBefore(u,a))}(window,document,'script');
+  <!-- X conversion tracking base code -->
+  <script>
+  !function(e,t,n,s,u,a){e.twq||(s=e.twq=function(){s.exe?s.exe.apply(s,arguments):s.queue.push(arguments);
+  },s.version='1.1',s.queue=[],u=t.createElement(n),u.async=!0,u.src='https://static.ads-twitter.com/uwt.js',
+  a=t.getElementsByTagName(n)[0],a.parentNode.insertBefore(u,a))}(window,document,'script');
   twq('config','rc3ll');
-</script>
+  </script>
+  <!-- End X conversion tracking base code -->
 
-<style>
-  :root {
-    --ink: #EDEFF4;
-    --ink-80: #EDEFF4d9;
-    --ink-60: #EDEFF499;
-    --ink-20: #EDEFF422;
-    --ink-10: #EDEFF411;
-    --bone: #0E1116;
-    --bone-dim: #161A22;
-    --orange: #00E5C7;
-    --orange-soft: #00E5C71a;
-    --grotesk: "Inter Tight", "Söhne", "Neue Haas Grotesk", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    --serif: "Source Serif 4", "Tiempos", Georgia, serif;
-    --mono: "JetBrains Mono", "Berkeley Mono", ui-monospace, SFMono-Regular, monospace;
-    --pad-x: clamp(20px, 4vw, 80px);
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
-  body {
-    background: var(--bone);
-    color: var(--ink);
-    font-family: var(--grotesk);
-    font-size: 16px;
-    line-height: 1.5;
-    -webkit-font-smoothing: antialiased;
-  }
-  a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--orange); }
-  a:hover { color: var(--orange); }
-  code, pre { font-family: var(--mono); }
-  pre {
-    background: var(--bone-dim);
-    padding: 18px 22px;
-    border-radius: 12px;
-    border: 1px solid var(--ink-10);
-    overflow-x: auto;
-    font-size: 14px;
-  }
-  .shell {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding-inline: var(--pad-x);
-  }
-  header.top {
-    border-bottom: 1px solid var(--ink-10);
-    padding-block: 22px;
-  }
-  header.top .row {
-    display: flex; justify-content: space-between; align-items: center; gap: 24px;
-  }
-  /* Wordmark — identical to memee.eu/. Cyan-mint dot + Inter Tight 700. */
-  .wordmark {
-    font-family: var(--grotesk);
-    font-weight: 700;
-    font-size: 17px;
-    letter-spacing: -0.02em;
-    color: var(--ink);
-    text-decoration: none;
-    display: inline-flex; align-items: center; gap: 10px;
-  }
-  .wordmark .dot {
-    width: 8px; height: 8px;
-    background: var(--orange);
-    border-radius: 999px;
-    display: inline-block;
-  }
-  nav.top-nav { display: flex; gap: 24px; font-family: var(--mono); font-size: 13px; }
-  nav.top-nav a { text-decoration: none; color: var(--ink-80); }
-  nav.top-nav a:hover { color: var(--orange); }
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
-  .hero { padding-block: clamp(60px, 8vw, 120px); border-bottom: 1px solid var(--ink-10); }
-  .hero h1 {
-    font-family: var(--grotesk);
-    font-weight: 600;
-    font-size: clamp(48px, 7vw, 96px);
-    line-height: 0.95;
-    letter-spacing: -0.035em;
-    margin: 0 0 24px;
-    max-width: 18ch;
-    text-wrap: balance;
-  }
-  .hero h1 .accent { color: var(--orange); font-family: var(--serif); font-style: italic; font-weight: 400; }
-  .hero p.lede {
-    font-size: 20px;
-    line-height: 1.5;
-    color: var(--ink-80);
-    max-width: 60ch;
-    margin: 0 0 32px;
-  }
-  .hero .install {
-    display: inline-block;
-    background: var(--bone-dim);
-    border: 1px solid var(--ink-10);
-    padding: 16px 22px;
-    border-radius: 12px;
-    font-family: var(--mono);
-    font-size: 15px;
-  }
-  .hero .install .prompt { color: var(--orange); margin-right: 10px; }
+  <style>
+/* ============================================================
+   MEMEE v2 — same tokens + masthead + shell as memee.eu/
+   This file is the packs landing; everything that wraps the
+   content (head, masthead, shell, footer) is copied verbatim
+   from index.html so the visual identity is identical.
+   ============================================================ */
 
-  .packs { padding-block: clamp(60px, 8vw, 120px); }
-  .packs h2 {
-    font-family: var(--grotesk);
-    font-weight: 600;
-    font-size: clamp(36px, 5vw, 56px);
-    line-height: 1;
-    letter-spacing: -0.035em;
-    margin: 0 0 12px;
-    text-wrap: balance;
-  }
-  .packs p.lede {
-    color: var(--ink-80);
-    max-width: 50ch;
-    margin: 0 0 48px;
-    font-size: 17px;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-    gap: 24px;
-  }
-  .pack {
-    border: 1px solid var(--ink-10);
-    border-radius: 16px;
-    padding: 32px;
-    background: var(--bone-dim);
-    display: flex; flex-direction: column; gap: 14px;
-    transition: border-color 200ms ease, transform 200ms ease;
-  }
-  .pack:hover { border-color: var(--ink-20); transform: translateY(-2px); }
-  .pack .meta {
-    font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 0.18em;
-    color: var(--orange);
-    text-transform: uppercase;
-  }
-  .pack h3 {
-    font-family: var(--grotesk);
-    font-weight: 600;
-    font-size: 26px;
-    line-height: 1.15;
-    margin: 0;
-    letter-spacing: -0.025em;
-  }
-  .pack p { margin: 0; color: var(--ink-80); font-size: 15px; line-height: 1.55; }
-  .pack .stats {
-    display: flex; gap: 18px; flex-wrap: wrap;
-    font-family: var(--mono); font-size: 12px;
-    color: var(--ink-60);
-    padding-top: 12px; border-top: 1px solid var(--ink-10);
-  }
-  .pack .stats span strong { color: var(--ink); font-weight: 500; }
-  .pack .install-cmd {
-    margin-top: auto;
-    padding-top: 14px;
-    border-top: 1px solid var(--ink-10);
-    font-family: var(--mono); font-size: 13px;
-    color: var(--ink-80);
-  }
+:root {
+  --ink: #EDEFF4;
+  --ink-80: #EDEFF4d9;
+  --ink-60: #EDEFF499;
+  --ink-40: #EDEFF466;
+  --ink-20: #EDEFF422;
+  --ink-10: #EDEFF411;
+  --bone: #0E1116;
+  --bone-dim: #161A22;
+  --orange: #00E5C7;
+  --orange-soft: #00E5C71a;
+  --slate: #1E2330;
 
-  .how { padding-block: clamp(60px, 8vw, 120px); border-top: 1px solid var(--ink-10); }
-  .how h2 {
-    font-family: var(--grotesk);
-    font-weight: 600;
-    font-size: clamp(36px, 5vw, 56px);
-    line-height: 1;
-    letter-spacing: -0.035em;
-    margin: 0 0 32px;
-    text-wrap: balance;
-  }
-  .how-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 48px;
-    align-items: start;
-  }
-  @media (max-width: 800px) { .how-grid { grid-template-columns: 1fr; } }
-  .how-grid h3 {
-    font-family: var(--grotesk);
-    font-weight: 600;
-    font-size: 22px;
-    letter-spacing: -0.02em;
-    margin: 0 0 12px;
-    color: var(--ink);
-  }
-  .how-grid p { color: var(--ink-80); margin: 0 0 16px; }
+  --grotesk: "Inter Tight", "Söhne", "Neue Haas Grotesk", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --serif: "Source Serif 4", "Tiempos", Georgia, serif;
+  --mono: "JetBrains Mono", "Berkeley Mono", ui-monospace, SFMono-Regular, monospace;
 
-  footer.foot {
-    padding-block: 56px;
-    border-top: 1px solid var(--ink-10);
-    color: var(--ink-60);
-    font-size: 14px;
-  }
-  footer.foot a { color: var(--ink-80); }
-</style>
+  --rule: 1px solid var(--ink);
+  --hairline: 1px solid var(--ink-20);
+
+  --pad-x: clamp(20px, 4vw, 72px);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+html {
+  background: var(--bone);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--grotesk);
+  font-size: 17px;
+  line-height: 1.45;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  background: var(--bone);
+}
+
+a { color: inherit; text-decoration: none; }
+
+main, header, footer, section { position: relative; z-index: 1; }
+
+.shell {
+  padding-inline: var(--pad-x);
+  max-width: 1480px;
+  margin-inline: auto;
+}
+
+.display {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+  text-wrap: balance;
+}
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-60);
+}
+.eyebrow .mark { color: var(--orange); margin-right: 8px; }
+
+section { padding-block: clamp(72px, 9vw, 140px); }
+.rule-top { border-top: var(--rule); }
+
+/* ============================================================
+   MASTHEAD — minimal, sticky (verbatim from index.html)
+   ============================================================ */
+.masthead {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(233, 226, 211, 0.85);
+  backdrop-filter: saturate(140%) blur(8px);
+  -webkit-backdrop-filter: saturate(140%) blur(8px);
+  border-bottom: var(--hairline);
+}
+.masthead-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-block: 14px;
+  gap: 24px;
+}
+.wordmark {
+  font-family: var(--grotesk);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+  display: inline-flex; align-items: center; gap: 10px;
+}
+.wordmark .dot {
+  width: 8px; height: 8px;
+  background: var(--orange);
+  border-radius: 999px;
+  display: inline-block;
+}
+.nav {
+  display: flex; gap: 26px;
+  align-items: center;
+  font-family: var(--grotesk);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--ink-80);
+}
+.nav a:hover { color: var(--orange); }
+.nav .pill {
+  padding: 7px 12px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 120ms linear, color 120ms linear;
+}
+.nav .pill:hover { background: var(--ink); color: var(--bone); }
+
+/* ============================================================
+   BUTTONS (verbatim, trimmed to what packs needs)
+   ============================================================ */
+.btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 14px 20px;
+  font-family: var(--grotesk);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  background: var(--ink);
+  color: var(--bone);
+  border-radius: 999px;
+  border: 1px solid var(--ink);
+  transition: background 120ms linear, border-color 120ms linear;
+}
+.btn:hover { background: var(--orange); border-color: var(--orange); }
+
+/* ============================================================
+   HERO (packs-specific, but proportionally matched to S1 hero)
+   ============================================================ */
+.hero {
+  padding-block: clamp(72px, 9vw, 140px);
+  border-bottom: var(--hairline);
+}
+.hero-eyebrow {
+  display: flex; gap: 18px; flex-wrap: wrap;
+  margin-bottom: 28px;
+}
+.hero-eyebrow .dot {
+  width: 6px; height: 6px; border-radius: 999px; background: var(--orange);
+  display: inline-block; margin-right: 8px; vertical-align: 2px;
+}
+.hero h1 {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+  text-wrap: balance;
+  font-size: clamp(56px, 8.5vw, 132px);
+  margin: 0 0 32px;
+  max-width: 14ch;
+}
+.hero h1 .accent {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--orange);
+}
+.hero p.lede {
+  font-size: clamp(18px, 1.6vw, 22px);
+  line-height: 1.45;
+  color: var(--ink-80);
+  max-width: 56ch;
+  margin: 0 0 36px;
+}
+.hero .install {
+  display: inline-block;
+  background: var(--bone-dim);
+  border: 1px solid var(--ink-10);
+  padding: 16px 22px;
+  border-radius: 12px;
+  font-family: var(--mono);
+  font-size: 15px;
+  color: var(--ink);
+}
+.hero .install .prompt { color: var(--orange); margin-right: 10px; }
+
+/* ============================================================
+   PACK GRID
+   ============================================================ */
+.packs { padding-block: clamp(72px, 9vw, 140px); border-top: var(--hairline); }
+.packs-head { margin-bottom: 56px; max-width: 60ch; }
+.packs h2 {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: clamp(40px, 6vw, 80px);
+  line-height: 0.95;
+  letter-spacing: -0.035em;
+  margin: 0 0 16px;
+  text-wrap: balance;
+}
+.packs h2 .accent {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--orange);
+}
+.packs p.lede {
+  color: var(--ink-80);
+  max-width: 60ch;
+  margin: 0;
+  font-size: 17px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 24px;
+}
+.pack {
+  border: 1px solid var(--ink-10);
+  border-radius: 18px;
+  padding: 36px;
+  background: var(--bone-dim);
+  display: flex; flex-direction: column; gap: 16px;
+  transition: border-color 200ms ease, transform 200ms ease;
+}
+.pack:hover { border-color: var(--ink-20); transform: translateY(-2px); }
+.pack .meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--orange);
+  text-transform: uppercase;
+}
+.pack h3 {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: 28px;
+  line-height: 1.1;
+  margin: 0;
+  letter-spacing: -0.025em;
+}
+.pack p {
+  margin: 0;
+  color: var(--ink-80);
+  font-size: 15.5px;
+  line-height: 1.55;
+}
+.pack .stats {
+  display: flex; gap: 18px; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 12px;
+  color: var(--ink-60);
+  padding-top: 14px; border-top: 1px solid var(--ink-10);
+}
+.pack .stats span strong { color: var(--ink); font-weight: 500; }
+.pack .install-cmd {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--ink-10);
+  font-family: var(--mono); font-size: 13.5px;
+  color: var(--ink-80);
+}
+
+/* ============================================================
+   HOW (the format outlives the tool)
+   ============================================================ */
+.how { padding-block: clamp(72px, 9vw, 140px); border-top: var(--hairline); }
+.how h2 {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: clamp(40px, 6vw, 80px);
+  line-height: 0.95;
+  letter-spacing: -0.035em;
+  margin: 0 0 48px;
+  text-wrap: balance;
+  max-width: 22ch;
+}
+.how h2 .accent {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--orange);
+}
+.how-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 56px;
+  align-items: start;
+}
+.how-grid h3 {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: 24px;
+  letter-spacing: -0.02em;
+  margin: 0 0 14px;
+  color: var(--ink);
+}
+.how-grid p {
+  color: var(--ink-80);
+  margin: 0 0 16px;
+  font-size: 16px;
+  line-height: 1.55;
+  max-width: 56ch;
+}
+
+@media (max-width: 800px) {
+  .how-grid { grid-template-columns: 1fr; gap: 32px; }
+  .grid { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ============================================================
+   FOOTER (verbatim from index.html)
+   ============================================================ */
+.foot {
+  border-top: var(--rule);
+  padding-block: 48px 40px;
+}
+.foot-big {
+  font-family: var(--grotesk);
+  font-weight: 600;
+  font-size: clamp(56px, 11vw, 180px);
+  letter-spacing: -0.05em;
+  line-height: 0.9;
+  color: var(--ink);
+  margin: 0 0 40px;
+}
+.foot-big .orange { color: var(--orange); }
+.foot-inner {
+  display: grid;
+  grid-template-columns: 1.5fr 1.2fr 1fr;
+  gap: 24px;
+  align-items: start;
+  border-top: var(--hairline);
+  padding-top: 28px;
+}
+.foot-inner p {
+  margin: 0;
+  max-width: 40ch;
+  font-size: 14px;
+  color: var(--ink-80);
+}
+.foot-nav {
+  display: flex; flex-wrap: wrap; gap: 8px 18px;
+  font-family: var(--grotesk);
+  font-size: 14px;
+  font-weight: 500;
+}
+.foot-nav a:hover { color: var(--orange); }
+.foot-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-60);
+  line-height: 1.6;
+  text-align: right;
+}
+@media (max-width: 800px) {
+  .foot-inner { grid-template-columns: 1fr; }
+  .foot-meta { text-align: left; }
+}
+  </style>
 </head>
 <body>
 
-<header class="top">
-  <div class="shell row">
+<header class="masthead">
+  <div class="shell masthead-inner">
     <a class="wordmark" href="/"><span class="dot"></span>Memee</a>
-    <nav class="top-nav">
+    <nav class="nav" aria-label="Primary">
       <a href="/#share">How it works</a>
       <a href="/#compare">Compare</a>
       <a href="/packs/">Packs</a>
       <a href="/#faq">FAQ</a>
       <a href="/#pricing">Pricing</a>
       <a href="https://github.com/gizmax/memee" rel="external">GitHub</a>
+      <a href="/#order" class="pill">Install →</a>
     </nav>
   </div>
 </header>
 
-<section class="hero shell">
-  <h1>Memory you <span class="accent">install</span>.</h1>
-  <p class="lede">
-    Hand-curated <code>.memee</code> packs for the stacks your agents already
-    know. Patterns, anti-patterns, decisions. Signed, sourced, idempotent.
-    Import in one command. User canon outranks pack defaults the moment you
-    record your first lesson.
-  </p>
-  <div class="install"><span class="prompt">$</span>memee pack install python-web</div>
-</section>
+<main id="top">
 
-<section class="packs shell">
-  <h2>Available packs.</h2>
-  <p class="lede">Two seed packs ship with v2.0.0. Community submissions land via PR to <a href="https://github.com/gizmax/memee" rel="external">github.com/gizmax/memee</a>.</p>
-
-  <div class="grid">
-
-    <article class="pack">
-      <span class="meta">v0.2.0 · python · MIT</span>
-      <h3>python-web</h3>
-      <p>FastAPI, SQLAlchemy 2.0, Pydantic v2, pytest, alembic. Async correctness, observability, deployment. Plus the OWASP-shaped security canon every Python service needs from day one.</p>
-      <div class="stats">
-        <span><strong>61</strong> memories</span>
-        <span><strong>38</strong> patterns</span>
-        <span><strong>17</strong> anti-patterns</span>
-        <span><strong>4</strong> decisions</span>
-      </div>
-      <div class="install-cmd">memee pack install python-web</div>
-    </article>
-
-    <article class="pack">
-      <span class="meta">v0.2.0 · react · MIT</span>
-      <h3>react-vite</h3>
-      <p>Hooks rules, forms, accessibility, animation perf, mobile gotchas. TypeScript strict, Tailwind, TanStack Query, React Router v6 loaders. Most rules generalise to any modern React SPA.</p>
-      <div class="stats">
-        <span><strong>52</strong> memories</span>
-        <span><strong>34</strong> patterns</span>
-        <span><strong>12</strong> anti-patterns</span>
-        <span><strong>3</strong> decisions</span>
-      </div>
-      <div class="install-cmd">memee pack install react-vite</div>
-    </article>
-
-    <article class="pack">
-      <span class="meta">v0.1.0 · mcp · MIT</span>
-      <h3>mcp-server-canon</h3>
-      <p>Build MCP servers that don&rsquo;t get pwned, abandoned, or ignored. Transport, tool design, security (lethal-trifecta read+write split, supply-chain pinning, prompt injection in descriptions), lifecycle, deployment.</p>
-      <div class="stats">
-        <span><strong>59</strong> memories</span>
-        <span><strong>32</strong> patterns</span>
-        <span><strong>21</strong> anti-patterns</span>
-        <span><strong>3</strong> decisions</span>
-      </div>
-      <div class="install-cmd">memee pack install mcp-server-canon</div>
-    </article>
-
-    <article class="pack">
-      <span class="meta">v0.1.0 · http · MIT</span>
-      <h3>http-api-canon</h3>
-      <p>RFC 9110 + 7807/9457 + 8725 + 9700 + OAuth 2.1 distilled. Status discipline, problem+json errors, conditional requests, JWT BCP (alg-none, key confusion), OAuth pitfalls (implicit flow, redirect-URI matching), idempotency keys, ETag concurrency. The IETF index nobody had written.</p>
-      <div class="stats">
-        <span><strong>91</strong> memories</span>
-        <span><strong>61</strong> patterns</span>
-        <span><strong>23</strong> anti-patterns</span>
-        <span><strong>5</strong> decisions</span>
-      </div>
-      <div class="install-cmd">memee pack install http-api-canon</div>
-    </article>
-
-    <article class="pack" style="opacity:0.5">
-      <span class="meta">coming · swift · MIT</span>
-      <h3>swiftui</h3>
-      <p>SwiftUI state, @State / @Observable / @Bindable, gesture pitfalls (DragGesture + offset structural bug), NavigationStack, preview crash modes, Swift Concurrency, UIKit interop.</p>
-      <div class="stats">
-        <span>Wanted: contributors</span>
-      </div>
-    </article>
-
-  </div>
-</section>
-
-<section class="how shell">
-  <h2>The format outlives the tool.</h2>
-  <div class="how-grid">
-    <div>
-      <h3>One file. Versioned. Signed.</h3>
-      <p>A <code>.memee</code> pack is a gzipped tarball: <code>manifest.toml</code> + <code>memories.jsonl</code> + an optional ed25519 signature. Distributable however you ship a file. GitHub releases, S3, an internal artefact store, an email attachment.</p>
-      <p>The format is documented (<a href="https://github.com/gizmax/memee/blob/main/docs/pack-format.md" rel="external">docs/pack-format.md</a>) and small. Build your own tooling. The format is the artefact, not the registry.</p>
+  <!-- HERO -->
+  <section class="hero shell">
+    <div class="hero-eyebrow eyebrow">
+      <span><span class="dot"></span>Portable institutional memory</span>
+      <span><span class="mark">·</span>4 packs · 263 entries · MIT</span>
     </div>
-    <div>
-      <h3>Imports respect your canon.</h3>
-      <p>Every memory in a pack imports with <code>source_type=import</code> (×0.6 confidence multiplier) and a per-pack confidence cap. Your hand-recorded lesson always outranks the pack default once you validate it.</p>
-      <p>Re-installing the same pack version is a no-op. Re-installing a newer version dedupes against the local canon and folds via the existing quality gate.</p>
-    </div>
-    <div>
-      <h3>Cold start, solved.</h3>
-      <p>A fresh <code>memee setup</code> used to ship empty. Day-one users had no canon to route, no anti-patterns to surface, no decisions to recall. The dogfooding theory took six weeks to populate the DB.</p>
-      <p>One pack collapses that to one command. <code>memee pack install python-web</code> and you have 30 sourced lessons before your first agent session.</p>
-    </div>
-    <div>
-      <h3>Authoring your own.</h3>
-      <p><code>memee pack export --canon-only &gt; team.memee</code> writes everything in your local DB at <code>maturity=validated|canon</code>. Strip identity columns, sign with <code>MEMEE_PACK_KEY</code>, ship.</p>
-      <p>Internal teams: cross-project canon as a packagable artefact. Agencies: client handover as a file. OSS maintainers: house style as a public download.</p>
-    </div>
-  </div>
-</section>
+    <h1>Memory you <span class="accent">install</span>.</h1>
+    <p class="lede">
+      Hand-curated <code>.memee</code> packs for the stacks your agents
+      already know. Patterns, anti-patterns, decisions. Signed, sourced,
+      idempotent. Import in one command. User canon outranks pack defaults
+      the moment you record your first lesson.
+    </p>
+    <div class="install"><span class="prompt">$</span>memee pack install python-web</div>
+  </section>
 
+  <!-- PACKS -->
+  <section class="packs shell">
+    <div class="packs-head">
+      <h2>Available <span class="accent">packs.</span></h2>
+      <p class="lede">Four packs ship with v2.0.0. Community submissions land via PR to <a href="https://github.com/gizmax/memee" rel="external" style="color:var(--ink);text-decoration:underline;text-decoration-color:var(--orange);text-underline-offset:2px">github.com/gizmax/memee</a>.</p>
+    </div>
+
+    <div class="grid">
+
+      <article class="pack">
+        <span class="meta">v0.2.0 · python · MIT</span>
+        <h3>python-web</h3>
+        <p>FastAPI, SQLAlchemy 2.0, Pydantic v2, pytest, alembic. Async correctness, observability, deployment. Plus the OWASP-shaped security canon every Python service needs from day one.</p>
+        <div class="stats">
+          <span><strong>61</strong> memories</span>
+          <span><strong>38</strong> patterns</span>
+          <span><strong>17</strong> anti-patterns</span>
+          <span><strong>4</strong> decisions</span>
+        </div>
+        <div class="install-cmd">memee pack install python-web</div>
+      </article>
+
+      <article class="pack">
+        <span class="meta">v0.2.0 · react · MIT</span>
+        <h3>react-vite</h3>
+        <p>Hooks rules, forms, accessibility, animation perf, mobile gotchas. TypeScript strict, Tailwind, TanStack Query, React Router v6 loaders. Most rules generalise to any modern React SPA.</p>
+        <div class="stats">
+          <span><strong>52</strong> memories</span>
+          <span><strong>34</strong> patterns</span>
+          <span><strong>12</strong> anti-patterns</span>
+          <span><strong>3</strong> decisions</span>
+        </div>
+        <div class="install-cmd">memee pack install react-vite</div>
+      </article>
+
+      <article class="pack">
+        <span class="meta">v0.1.0 · mcp · MIT</span>
+        <h3>mcp-server-canon</h3>
+        <p>Build MCP servers that don&rsquo;t get pwned, abandoned, or ignored. Transport, tool design, security (lethal-trifecta read+write split, supply-chain pinning, prompt injection in descriptions), lifecycle, deployment.</p>
+        <div class="stats">
+          <span><strong>59</strong> memories</span>
+          <span><strong>32</strong> patterns</span>
+          <span><strong>21</strong> anti-patterns</span>
+          <span><strong>3</strong> decisions</span>
+        </div>
+        <div class="install-cmd">memee pack install mcp-server-canon</div>
+      </article>
+
+      <article class="pack">
+        <span class="meta">v0.1.0 · http · MIT</span>
+        <h3>http-api-canon</h3>
+        <p>RFC 9110 + 7807/9457 + 8725 + 9700 + OAuth 2.1 distilled. Status discipline, problem+json errors, JWT BCP (alg-none, key confusion), OAuth pitfalls (implicit flow, redirect-URI matching), ETag concurrency. The IETF index nobody had written.</p>
+        <div class="stats">
+          <span><strong>91</strong> memories</span>
+          <span><strong>61</strong> patterns</span>
+          <span><strong>23</strong> anti-patterns</span>
+          <span><strong>5</strong> decisions</span>
+        </div>
+        <div class="install-cmd">memee pack install http-api-canon</div>
+      </article>
+
+      <article class="pack" style="opacity:0.5">
+        <span class="meta">coming · swift · MIT</span>
+        <h3>swiftui</h3>
+        <p>SwiftUI state, @State / @Observable / @Bindable, gesture pitfalls (DragGesture + offset structural bug), NavigationStack, preview crash modes, Swift Concurrency, UIKit interop.</p>
+        <div class="stats">
+          <span>Wanted: contributors</span>
+        </div>
+      </article>
+
+      <article class="pack" style="opacity:0.5">
+        <span class="meta">coming · postgres · MIT</span>
+        <h3>postgresql-canon</h3>
+        <p>Language-agnostic Postgres canon. Indexing strategy (partial, GIN, GiST, BRIN), EXPLAIN reading, lock contention, JSONB vs columns, pgbouncer modes, statement_timeout, VACUUM tuning.</p>
+        <div class="stats">
+          <span>Wanted: reviewers</span>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- HOW -->
+  <section class="how shell">
+    <h2>The format outlives <span class="accent">the tool.</span></h2>
+    <div class="how-grid">
+      <div>
+        <h3>One file. Versioned. Signed.</h3>
+        <p>A <code>.memee</code> pack is a gzipped tarball: <code>manifest.toml</code> + <code>memories.jsonl</code> + an optional ed25519 signature. Distributable however you ship a file. GitHub releases, S3, an internal artefact store, an email attachment.</p>
+        <p>The format is documented (<a href="https://github.com/gizmax/memee/blob/main/docs/pack-format.md" rel="external" style="color:var(--ink);text-decoration:underline;text-decoration-color:var(--orange);text-underline-offset:2px">docs/pack-format.md</a>) and small. Build your own tooling. The format is the artefact, not the registry.</p>
+      </div>
+      <div>
+        <h3>Imports respect your canon.</h3>
+        <p>Every memory in a pack imports with <code>source_type=import</code> (×0.6 confidence multiplier) and a per-pack confidence cap. Your hand-recorded lesson always outranks the pack default once you validate it.</p>
+        <p>Re-installing the same pack version is a no-op. Re-installing a newer version dedupes against the local canon and folds via the existing quality gate.</p>
+      </div>
+      <div>
+        <h3>Cold start, solved.</h3>
+        <p>A fresh <code>memee setup</code> used to ship empty. Day-one users had no canon to route, no anti-patterns to surface, no decisions to recall. The dogfooding theory took six weeks to populate the DB.</p>
+        <p>One pack collapses that to one command. <code>memee pack install python-web</code> and you have 61 sourced lessons before your first agent session.</p>
+      </div>
+      <div>
+        <h3>Authoring your own.</h3>
+        <p><code>memee pack export --canon-only &gt; team.memee</code> writes everything in your local DB at <code>maturity=validated|canon</code>. Strip identity columns, sign with <code>MEMEE_PACK_KEY</code>, ship.</p>
+        <p>Internal teams: cross-project canon as a packagable artefact. Agencies: client handover as a file. OSS maintainers: house style as a public download.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- FOOTER (verbatim from index.html, with anchors absolutised to /...) -->
 <footer class="foot">
   <div class="shell">
-    <p>Memee &copy; 2026 &middot; MIT-licensed core &middot; <a href="/">memee.eu</a> &middot; <a href="https://github.com/gizmax/memee" rel="external">GitHub</a> &middot; <a href="https://github.com/gizmax/memee/blob/main/docs/pack-format.md" rel="external">Pack format spec</a></p>
+    <h2 class="foot-big">Remember<span class="orange">.</span></h2>
+    <div class="foot-inner">
+      <div>
+        <p><strong style="font-weight:600;color:var(--ink)">Memee.</strong> Built by people who stopped teaching the same lesson to every new agent.</p>
+      </div>
+      <nav class="foot-nav" aria-label="Footer">
+        <a href="/#value">Why</a>
+        <a href="/#share">How it works</a>
+        <a href="/#compare">Compare</a>
+        <a href="/packs/">Packs</a>
+        <a href="/#faq">FAQ</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="https://github.com/gizmax/memee" rel="external">Docs</a>
+        <a href="https://github.com/gizmax/memee" rel="external">GitHub</a>
+        <a href="https://github.com/gizmax/memee/blob/main/CHANGELOG.md" rel="external">Changelog</a>
+      </nav>
+      <div class="foot-meta">
+        © 2026 Memee<br />
+        MIT-licensed core<br />
+        memee.eu
+      </div>
+    </div>
   </div>
 </footer>
 
