@@ -1,0 +1,54 @@
+# .memee pack manifest — agent-discipline v0.1.0
+# Format spec: see docs/pack-format.md
+# Governance: see docs/agent-discipline-CONTRIBUTING.md
+
+name = "agent-discipline"
+version = "0.1.0"
+title = "Agent discipline — failure modes that fail across every team"
+description = """
+Hand-curated decision-failure canon for AI coding agents. Where the other
+seed packs catalogue stack-specific bugs (wrong API call, wrong index type,
+wrong status code), this pack catalogues agent decision failures: wrong
+inference, wrong claim, wrong consent. Same Trigger / Consequence /
+Alternative format, different substrate.
+
+Covers nine categories drawn from the primary literature: verification
+discipline, sourcing + citation honesty, destructive-action consent,
+scope discipline, uncertainty disclosure, anti-sycophancy, tool-use
+hygiene, failure recovery, and the lethal trifecta. Every entry cites a
+named failure mode in Anthropic Claude Code docs, the arXiv 2509.18970
+agent-hallucination taxonomy, the AI Incident Database, Simon Willison's
+lethal-trifecta essay, the sycophancy.md protocol, the Stanford 2026
+sycophancy study, or vendor agent guidance (Cline, Cursor, OpenAI).
+
+For agent operators, not stack engineers. The rules are universal-truth
+canon — they hold regardless of the model family, the project, or the
+team. If a rule's negation is "we don't do that here" rather than "that
+is incorrect," it does not ship in this pack. The 80%-rejection editorial
+discipline is the only thing keeping the citation chain unbroken; without
+it the pack is just opinion.
+"""
+author = "Memee maintainers <info@memee.eu>"
+homepage = "https://memee.eu/packs/agent-discipline"
+license = "MIT"
+created = "2026-04-27"
+
+# Confidence cap: every memory in this pack starts at most this high.
+# User-validated memories will outrank pack defaults.
+confidence_cap = 0.6
+
+# Tags this pack expects to be relevant. Used by `memee pack search`.
+stack = ["agent", "ai", "llm", "claude", "gpt", "gemini"]
+
+# Counts (filled in after authoring).
+[counts]
+memories = 43
+patterns = 9
+anti_patterns = 31
+decisions = 3
+lessons = 0
+
+# Provenance — empty for v0.1 hand-authored seed packs.
+[[provenance]]
+kind = "seed"
+note = "Hand-curated by Memee maintainers as the v2.0.0 agent-discipline seed corpus."
