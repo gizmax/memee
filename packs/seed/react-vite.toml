@@ -1,8 +1,8 @@
-# .memee pack manifest — react-vite v0.1.0
+# .memee pack manifest — react-vite v0.2.0
 # Format spec: see docs/pack-format.md
 
 name = "react-vite"
-version = "0.1.0"
+version = "0.2.0"
 title = "React + Vite — modern SPA canon"
 description = """
 Patterns, anti-patterns, and decisions for React + TypeScript + Vite
@@ -20,11 +20,11 @@ confidence_cap = 0.6
 stack = ["react", "typescript", "vite", "tailwind"]
 
 [counts]
-memories = 28
-patterns = 14
-anti_patterns = 10
-decisions = 2
-lessons = 2
+memories = 52
+patterns = 34
+anti_patterns = 12
+decisions = 3
+lessons = 3
 
 [[provenance]]
 kind = "seed"

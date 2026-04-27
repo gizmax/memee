@@ -1,8 +1,8 @@
-# .memee pack manifest — python-web v0.1.0
+# .memee pack manifest — python-web v0.2.0
 # Format spec: see docs/pack-format.md
 
 name = "python-web"
-version = "0.1.0"
+version = "0.2.0"
 title = "Python web — FastAPI + SQLAlchemy + pytest canon"
 description = """
 Hand-curated patterns, anti-patterns, decisions, and lessons for Python
@@ -24,10 +24,10 @@ stack = ["python", "fastapi", "sqlalchemy", "pydantic", "pytest"]
 
 # Counts (filled in by `memee pack export`).
 [counts]
-memories = 30
-patterns = 16
-anti_patterns = 11
-decisions = 3
+memories = 61
+patterns = 38
+anti_patterns = 17
+decisions = 4
 lessons = 2
 
 # Provenance — empty for v0.1 hand-authored seed packs. Future packs
