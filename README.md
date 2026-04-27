@@ -47,21 +47,24 @@ A lesson earns trust by surviving. A second model family agrees: confidence ×1.
 
 ```bash
 pipx install memee
-memee setup
+memee setup                       # writes MCP + hooks to ~/.claude/settings.json
+memee pack install python-web     # day-one canon, 30 entries
 
 # Record something you just learned.
 memee record pattern "retry with jitter" \
   --tags reliability,http \
   -c "Exponential backoff, capped at 30s, idempotent verbs only."
 
-# Find it back.
-memee search "retry"
+# Ask the canon what it knows about a snippet.
+memee why "eval(user_input)"
 
-# Wire Claude Code / MCP, run a health check.
+# Health check (rerank state, hooks, cache).
 memee doctor
 ```
 
 That's it. Memory lives in `~/.memee/memee.db`. No account. Core read/write is fully local. Vector embeddings are optional — on by default via `sentence-transformers`, which fetches a ~80 MB model on first use. Set `TRANSFORMERS_OFFLINE=1` to skip.
+
+After `memee setup` your agent doesn't have to remember Memee exists. SessionStart and UserPromptSubmit hooks land a routed briefing into Claude Code's context automatically; Stop fires a post-task review. Opt out with `memee setup --no-hooks` if you want the plain MCP-only mode.
 
 ---
 
@@ -108,7 +111,7 @@ Full methodology + per-repo file sizes: [docs/benchmarks.md](docs/benchmarks.md)
 
 ## Benchmarks
 
-- **OrgMemEval v1.0**: 92.2 / 100 across propagation, avoidance, maturity, onboarding, recovery, calibration, synthesis, research. Competitors on the same scenarios: MemPalace 0.9, Letta 1.3, Zep 2.3, Mem0 3.5 (the closest).
+- **OrgMemEval v1.0**: 92.3 % across propagation, avoidance, maturity, onboarding, recovery, calibration, synthesis. Competitors on the same scenarios: MemPalace 0.9, Letta 1.3, Zep 2.3, Mem0 3.5 (the closest). v2.0.0 retired the autoresearch scenario alongside the engine.
 - **7-task A/B (with / without Memee):** time −71 %, iterations −65 %, quality 56 % → 93 %, ROI ≈ 10.7× at the $49 / month Team tier.
 - **GigaCorp simulation**, 100 projects, 100 agents, 18 months: incidents 12/mo → 3/mo, annual ROI ≈ 3× at the same flat Team tier.
 - **Retrieval**: 207-query × 255-memory eval harness with 7 difficulty
@@ -200,7 +203,7 @@ It writes from the conversation, not from your hand. It scores what it captures 
 
 Most memory projects remember *conversations*: you talked about X last Tuesday, here it is again. That's chat history with a vector index.
 
-Memee earns *canon*. A claim arrives at 0.5 confidence and goes nowhere until a second model family agrees and a second project re-uses it. On OrgMemEval v1.0 that capability gap shows up as **92.2 / 100** against a competitor baseline of **2.3**. Not because the others are bad. Because they aren't built for the job.
+Memee earns *canon*. A claim arrives at 0.5 confidence and goes nowhere until a second model family agrees and a second project re-uses it. On OrgMemEval v1.0 that capability gap shows up as **92.3 %** against a competitor baseline of **~2 %**. Not because the others are bad. Because they aren't built for the job.
 
 Conversation memory remembers what was said. Institutional memory remembers what was learned.
 

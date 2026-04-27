@@ -1,0 +1,31 @@
+# .memee pack manifest — react-vite v0.1.0
+# Format spec: see docs/pack-format.md
+
+name = "react-vite"
+version = "0.1.0"
+title = "React + Vite — modern SPA canon"
+description = """
+Patterns, anti-patterns, and decisions for React + TypeScript + Vite
+SPAs. Hooks rules, performance defaults, security baselines, build
+tooling choices. Tailwind + TanStack Query are the assumed stack but
+most rules generalise.
+"""
+author = "Memee maintainers <info@memee.eu>"
+homepage = "https://memee.eu/packs/react-vite"
+license = "MIT"
+created = "2026-04-27"
+
+confidence_cap = 0.6
+
+stack = ["react", "typescript", "vite", "tailwind"]
+
+[counts]
+memories = 28
+patterns = 14
+anti_patterns = 10
+decisions = 2
+lessons = 2
+
+[[provenance]]
+kind = "seed"
+note = "Hand-curated by Memee maintainers as the v2.0.0 seed corpus."

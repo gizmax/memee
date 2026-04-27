@@ -1429,7 +1429,7 @@ body::before { display: none; }
         <span><span class="dot"></span>Shared memory for AI agent teams</span>
         <span>
           <span class="mark">·</span>
-          <a href="https://github.com/gizmax/memee/releases/latest" rel="external">v1.2.0 on GitHub</a>
+          <a href="https://github.com/gizmax/memee/releases/latest" rel="external">v2.0.0 on GitHub</a>
           <span class="mark">·</span>
           <a href="https://pypi.org/project/memee/" rel="external">PyPI</a>
         </span>
@@ -1855,8 +1855,16 @@ body::before { display: none; }
           <div class="q">Q3</div>
           <h3>How is this different from Mem0, Letta, Zep, ChatGPT memory?</h3>
           <p>Most memory projects remember <em>conversations</em>: you talked about X last Tuesday, here it is again. That&rsquo;s chat history with a vector index.</p>
-          <p>Memee earns <em>canon</em>. A claim arrives at 0.5 confidence and goes nowhere until a second model family agrees and a second project re-uses it. On OrgMemEval v1.0 that capability gap shows up as <strong>92.2&nbsp;/&nbsp;100</strong> against a competitor baseline of <strong>2.3</strong>. Not because the others are bad. Because they aren&rsquo;t built for the job.</p>
+          <p>Memee earns <em>canon</em>. A claim arrives at 0.5 confidence and goes nowhere until a second model family agrees and a second project re-uses it. On OrgMemEval v1.0 that capability gap shows up as <strong>92.3&nbsp;%</strong> against a competitor baseline of <strong>~2&nbsp;%</strong>. Not because the others are bad. Because they aren&rsquo;t built for the job.</p>
           <p class="kicker-line">Conversation memory remembers what was said. Institutional memory remembers what was learned.</p>
+        </article>
+
+        <article class="faq-item reveal">
+          <div class="q">Q4</div>
+          <h3>So I install it and&hellip; it just works?</h3>
+          <p>After <code>memee setup</code>, yes. Hooks land in your Claude Code settings: <strong>SessionStart</strong> fires a routed briefing into the agent&rsquo;s context. <strong>UserPromptSubmit</strong> fires a task-aware brief on every prompt. <strong>Stop</strong> fires a post-task review. Three lines in your <code>settings.json</code>. You don&rsquo;t write them; <code>memee setup</code> writes them. You don&rsquo;t call <code>memory_search</code>; the hook called it.</p>
+          <p>Opt out with <code>memee setup --no-hooks</code> and use Memee as a plain MCP tool. Most don&rsquo;t.</p>
+          <p class="kicker-line">The agent doesn&rsquo;t have to remember Memee exists. The runtime injects what it needs.</p>
         </article>
       </div>
     </section>

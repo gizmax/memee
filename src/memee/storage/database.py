@@ -230,14 +230,12 @@ def _bootstrap_r10_indexes(engine) -> None:
     does not yet emit the WHERE clause through Index() on SQLite cleanly.
     """
     statements = (
-        "CREATE INDEX IF NOT EXISTS ix_research_iter_exp_num "
-        "  ON research_iterations(experiment_id, iteration_number)",
+        # research_iterations + learning_snapshots indexes were dropped in
+        # v2.0.0 with the research engine and the dashboard's snapshots feed.
         "CREATE INDEX IF NOT EXISTS ix_anti_patterns_severity "
         "  ON anti_patterns(severity)",
         "CREATE INDEX IF NOT EXISTS ix_memory_validations_created_at "
         "  ON memory_validations(created_at)",
-        "CREATE INDEX IF NOT EXISTS ix_learning_snapshots_date "
-        "  ON learning_snapshots(snapshot_date)",
         # Partial: LTR training query is the only consumer; non-partial wastes
         # space on every row where accepted is NULL (the vast majority).
         "CREATE INDEX IF NOT EXISTS ix_search_events_accepted_partial "

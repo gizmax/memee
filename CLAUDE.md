@@ -16,16 +16,18 @@ Cross-project, cross-model organizational memory. Patterns learned in one projec
 │    router.py    — smart briefing      search.py  — hybrid BM25+vec│
 │    briefing.py  — CLAUDE.md inject    review.py  — git diff check │
 │    feedback.py  — post-task loop      predictive — AP scan        │
+│    hooks_config — settings.json wire  citations  — memee why/cite │
 │                                                                    │
 │  QUALITY:                           LEARNING:                     │
 │    quality_gate — validate+dedup      confidence — adaptive scoring│
 │    plugins.py   — memee-team hooks    lifecycle  — aging+promote  │
 │    models.py    — model family detect dream.py   — nightly process│
+│    reranker.py  — cross-encoder       impact.py  — real ROI track │
 │                                                                    │
-│  GROWTH:                            MEASUREMENT:                  │
-│    propagation  — cross-project push  impact.py  — real ROI track │
-│    inheritance  — onboard from similar tokens.py  — savings calc  │
-│    research.py  — autoresearch engine benchmarks  — OrgMemEval    │
+│  GROWTH:                            DELIVERY:                     │
+│    propagation  — cross-project push  packs.py   — .memee export  │
+│    inheritance  — onboard from similar adapters/cmam — CMAM bridge│
+│    benchmarks   — OrgMemEval scoring  packs_format — file helpers │
 │                                                                    │
 ├───────────────────────────────────────────────────────────────────┤
 │  SQLite + FTS5 + Embeddings (384-dim) | ~/.memee/memee.db          │
@@ -60,18 +62,19 @@ memee suggest --context "my current task"
 memee propagate                   # Push patterns cross-project
 memee dream                       # Nightly: connect, find contradictions, promote
 memee review -                    # Pipe git diff for institutional review
+memee why "<code>"                # Canon that would have prevented or explained it
+memee cite <hash> [--confirm]     # Resolve a [mem:abc12345] to lineage
 memee embed                       # Generate vector embeddings
 
-# Autoresearch
-memee research start "goal" --metric acc --verify "pytest ..."
-memee research run <id>           # Execute one iteration
-memee research status             # Trajectory + keep rate
-memee research meta               # Meta-learning insights
+# Memory packs (new in v2.0.0)
+memee pack export --canon-only > my-team.memee
+memee pack install python-web    # Seed pack from packs/seed/
+memee pack install <FILE|--from-url URL>
+memee pack list
 
 # Analytics
-memee status                      # Learning dashboard
+memee status                      # Terminal dashboard (web dashboard removed in v2)
 memee benchmark                   # OrgMemEval: 92.2/100
-memee dashboard                   # Web UI at http://127.0.0.1:7878
 memee demo --weeks 52             # Generate demo data
 
 # CMAM bridge — push canon to Claude Managed Agents Memory
@@ -80,30 +83,40 @@ memee cmam sync --dry-run         # Preview without writing
 memee cmam status                 # Store size, count, headroom
 ```
 
-## Engine Modules (16) + Adapters
+## Engine Modules (15) + Adapters
 
 | Module | Purpose | Impact |
 |--------|---------|--------|
 | `confidence.py` | Adaptive scoring + maturity lifecycle | Core |
-| `search.py` | Hybrid BM25 + vector (sentence-transformers) | Core |
+| `search.py` | Hybrid BM25 + vector + tag-graph + reranker | Core |
 | `lifecycle.py` | Aging, auto-archive 60d, invalidation ratio deprecation | Core |
 | `quality_gate.py` | Validate + dedup + source classify + quality score | Core |
 | `router.py` | Smart task-aware briefing, 500 token budget, query expansion | Core |
 | `briefing.py` | CLAUDE.md injection, pre-task briefing generation | PUSH |
 | `feedback.py` | Post-task review, teaching effectiveness tracking | PUSH |
+| `citations.py` | `memee why` + `memee cite` + briefing footer | PUSH (v2.0) |
 | `propagation.py` | Cross-project auto-push + expanded tag inference | +68.8% IQ |
 | `predictive.py` | Anti-pattern push (critical → ALL projects) | +36.6% IQ |
 | `dream.py` | Nightly: propagate + connect + contradictions + promote | +24.8% IQ |
 | `review.py` | Git diff scan vs anti-pattern + pattern DB | +11.4% IQ |
 | `inheritance.py` | Stack+tag similarity, new project onboarding | +9.5% IQ |
-| `research.py` | Autoresearch: create/run/track/meta-learn | Autoresearch |
 | `embeddings.py` | sentence-transformers all-MiniLM-L6-v2 (384-dim) | Search |
+| `reranker.py` | Cross-encoder rerank, default-on when HF cache warm | +0.0355 nDCG |
 | `models.py` | Model family detection (8 families), diversity bonus | Multi-model |
 | `impact.py` | Measurable ROI: time saved, iterations saved, mistakes avoided | Measurement |
-| `tokens.py` | Token savings calculator per model pricing | Measurement |
 | `plugins.py` | Hook registry for `memee-team` plugin | Extension point |
 | `telemetry.py` | Retrieval event log (hit@1, hit@3, acceptance rate) | Quality metrics |
+| `packs.py` | `.memee` pack export/install/verify | Distribution (v2.0) |
+| `hooks_config.py` (root) | settings.json hook installation | DX (v2.0) |
+| `packs_format.py` (root) | `.memee` file-level helpers (TOML/JSONL/sign) | Distribution (v2.0) |
 | `adapters/cmam.py` | Claude Managed Agents Memory bridge (canon → CMAM) | Delivery |
+
+**Removed in v2.0.0:** `research.py` (autoresearch engine, 641 LOC),
+`canon_ledger.py` (418 LOC), `evidence.py` (133 LOC), `tokens.py`
+(279 LOC) — three substrate modules with zero production callers.
+The web dashboard at port 7878 (`api/routes/dashboard.py`, 556 LOC)
+went too. ~2,400 LOC fewer; the OSS pitch ends with "no dashboards,
+no copilots, no magic" and the codebase agrees now.
 
 *Note:* `scoping.py` (personal → team → org, promotion rules, onboarding) used
 to live here. It has been extracted to the proprietary `memee-team` package
@@ -236,9 +249,11 @@ MCP tool `sync_to_cmam` lets agents trigger the push themselves.
 
 ## Benchmarks
 
-**OrgMemEval v1.0:** 92.2/100 (competitors: 2.3/100)
+**OrgMemEval v1.0:** 81.2 / 88 = **92.3 %** (competitors: ~2 %)
 - Propagation 100% | Avoidance 100% | Maturity 89% | Onboarding 100%
-- Recovery 100% | Calibration 83% | Synthesis 82% | Research 92%
+- Recovery 100% | Calibration 83% | Synthesis 82%
+- (Research scenario removed in v2.0.0 with the autoresearch engine;
+  ceiling moved 100 → 88, headline pct unchanged)
 
 **Competitive:** Memee 6.5 | Mem0 3.5 | Zep 2.3 | Letta 1.3 | MemPalace 0.9
 

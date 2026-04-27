@@ -7,6 +7,135 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-04-27
+
+The loop-disappears + simplicity-reclamation release. Hooks land,
+packs ship, dashboard goes, autoresearch goes. Six MCP tools fewer,
+~2,400 LOC fewer, ~+0.0355 nDCG@10 by default.
+
+### Added
+
+- **Hooks in `memee setup`.** SessionStart, UserPromptSubmit, Stop
+  hooks land in `~/.claude/settings.json`. Every session starts with
+  a routed briefing; every user prompt triggers a task-aware brief;
+  Stop runs the post-task review. Idempotent merge (preserves your
+  hooks), `--no-hooks` opt-out, `--dry-run` preview, `memee doctor
+  --uninstall-hooks` removal. New module `src/memee/hooks_config.py`
+  centralises the hook definitions and the merge / strip / diff
+  helpers.
+- **`.memee` pack format.** Portable, optionally-signed bundle:
+  `manifest.toml + memories.jsonl + (signature.bin + pubkey.pem)`.
+  `memee pack export | install | list | verify`. Two seed packs ship:
+  python-web (30 entries), react-vite (30 entries). Imports go
+  through the existing quality gate; user canon outranks pack
+  defaults via `source_type=import` multiplier (×0.6) and per-pack
+  confidence cap. New module `src/memee/engine/packs.py` (DB-aware)
+  + `src/memee/packs_format.py` (file-level helpers, no SQLAlchemy).
+  Optional `[pack]` extra adds `cryptography>=42` for ed25519
+  sign/verify; the format itself works unsigned without it.
+- **`memee why "<code>"`.** Pipe in code, get back the canon that
+  would have prevented or explained it. Top 3 hits with cite tokens,
+  severities, alternatives. Sanitises FTS5-hostile inputs by
+  extracting identifier tokens and snake_case-splitting them so
+  `eval(user_input)` matches the eval AP cleanly. New module
+  `src/memee/engine/citations.py` exposes the helpers.
+- **`memee cite <id>`.** Resolves an 8-char hash (or full UUID) to
+  full lineage: who recorded, what validated, when promoted to canon.
+  `--confirm` bumps `application_count` and appends a `{kind:
+  "citation"}` entry to `evidence_chain` — the manual confirm path
+  is the trust foundation for citation telemetry.
+- **Citation tokens in compact briefings.** Footer instructs the
+  agent to cite applied memories with `[mem:abc12345]`. 58 tokens
+  measured, well under the 200-token cap. Ships only in the compact
+  format used by the SessionStart hook; verbose / `--full` formats
+  unchanged.
+
+### Changed
+
+- **Cross-encoder rerank is default-ON when the HF cache is warm.**
+  The R14 A/B run on the 207-query / 255-memory eval lifted macro
+  nDCG@10 from 0.7273 → 0.7628 (Δ +0.0355) when on. Off-by-default
+  left that lift on the table for every install whose cache was
+  already warm. Three escape hatches:
+  - `MEMEE_RERANK=0/off/false` — kill switch
+  - `MEMEE_RERANK_MODEL=<id>` — explicit override
+  - The cache probe is read-only: never downloads, never mkdirs
+- **`memee doctor`** reports rerank state. One of: `enabled (cached)`,
+  `enabled (env)`, `disabled (kill switch)`, `disabled (no model
+  cached)`. The disabled-no-model branch ships an actionable hint:
+  `pip install memee[rerank] then memee embed --download-rerank`.
+- **`installer.py`** post-setup screen is honest about hooks. Used
+  to claim "Memee is now live and fully automatic" before any hooks
+  existed; v2.0.0 makes the claim true.
+- **Grid search of ranker constants.** Swept TITLE_PHRASE_BOOST ×
+  BM25-only tag/conf coefficients × 3 maturity multiplier shapes
+  (243 combinations) against the 207-query harness. 66/243 beat
+  baseline; macro-best (Δ +0.0027) failed the p<0.10 gate. Honest
+  call: keep the hand-tuned defaults. Constants now exposed as
+  tunable globals (`TAG_BOOST_COEF`, `CONF_BOOST_COEF`, `BM25_ONLY_*`)
+  for future sweeps. Full artefacts in `.bench/v2_grid_search_*.json`.
+
+### Removed
+
+- **Web dashboard.** `src/memee/api/routes/dashboard.py` (~556 LOC),
+  `memee dashboard` and `memee serve` CLI commands gone. The pitch
+  ends with "no dashboards, no copilots, no magic" — the codebase
+  agrees now. `memee status` for the same numbers in your terminal.
+- **Autoresearch engine.** `src/memee/engine/research.py` (~641 LOC),
+  6 CLI subcommands, 5 MCP tools (research_create / log / status /
+  meta / complete), 2 schema tables (`research_experiments`,
+  `research_iterations`). It was a Karpathy-style self-improvement
+  harness, beautifully built and entirely orthogonal to "institutional
+  memory." Every session was paying MCP tokens for tools nobody
+  called. Migration `6d540c223770` drops the tables.
+- **`engine/canon_ledger.py`, `engine/evidence.py`, `engine/tokens.py`**
+  (~830 LOC of substrate with zero production callers). The
+  `evidence_chain` JSON column on `Memory` (used by `quality_gate`
+  dedup) stays. The dead modules go.
+- **`LearningSnapshot` schema** + `/api/v1/snapshots` endpoint. Was
+  written only by `demo.py`; queried only by the deleted dashboard.
+  Same migration drops the table.
+- **`fastapi`, `uvicorn[standard]`** moved from base dependencies to
+  the optional `[api]` extra. Memee's primary surfaces are the CLI
+  and MCP; the REST API is opt-in.
+
+### Migration notes
+
+If you're already running Memee from a previous version:
+
+```bash
+pipx upgrade memee
+memee doctor             # installs hooks; reports rerank status
+memee pack install python-web   # day-one canon
+memee pack install react-vite
+```
+
+The schema migration (`6d540c223770_drop_research_and_snapshots`)
+drops three tables. Their data was internal to the autoresearch and
+demo-snapshot subsystems — no user-recorded memory is touched.
+
+### Breaking
+
+- `memee dashboard`, `memee serve`, `memee research *` commands
+  removed. If you scripted against them, pin to v1.x.
+- 5 MCP `research_*` tools removed. Agents that called them will
+  see "tool not found"; nothing else affected.
+- REST `/api/v1/research/*` and `/api/v1/snapshots` endpoints removed.
+- `fastapi` and `uvicorn` are no longer in base dependencies. If
+  your installation script imports them transitively, add `memee[api]`.
+
+### Tests
+
+335 fast tests + 15 memee-team = 350 / 350 green. New regression
+files: `test_pack_format.py`, `test_pack_signing.py`,
+`test_pack_dedup.py`, `test_memee_why.py`, `test_memee_cite.py`,
+`test_citation_footer.py`, `test_setup_hooks.py`,
+`test_brief_compact.py`, `test_learn_auto.py`, `test_reranker_default.py`.
+Plus `tests/grid_search_ranker.py` for the hand-tuned-constant
+sweep. Heavy simulations (gigacorp, megacorp, enterprise,
+company_simulation, perf_simulation) all green; research code paths
+stripped from the fixtures, simulation cores intact.
+
 ## [1.2.0] — 2026-04-25
 
 R8 → R14 bundled into a minor bump. The headline: **search ranks

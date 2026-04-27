@@ -34,12 +34,8 @@ from memee.engine.lifecycle import run_aging_cycle
 from memee.engine.predictive import scan_project_for_warnings
 from memee.engine.propagation import run_propagation_cycle
 from memee.engine.quality_gate import run_quality_gate
-from memee.engine.research import (
-    complete_experiment, create_experiment, log_iteration,
-)
 from memee.engine.router import smart_briefing
 from memee.engine.search import search_memories
-from memee.engine.tokens import estimate_org_savings
 from memee.storage.models import (
     AntiPattern, MaturityLevel, Memory,
     MemoryConnection, MemoryType, MemoryValidation, Project, ProjectMemory,
@@ -193,7 +189,6 @@ class TestGigaCorp:
             "code_review_catches": 0,
             "propagated_links": 0,
             "onboarding_inherited": 0,
-            "experiments": 0, "experiment_keeps": 0, "experiment_total_iter": 0,
             "router_queries": 0, "router_tokens_used": 0,
             "monthly": [],
         }
@@ -348,24 +343,7 @@ class TestGigaCorp:
                 stats = inherit_memories(session, new_proj, min_memory_confidence=0.5)
                 M["onboarding_inherited"] += stats["memories_inherited"]
 
-            # ── Autoresearch (quarterly) ──
-            if week in (13, 26, 39, 52, 65):
-                proj = random.choice(projects[:20])
-                exp = create_experiment(session, proj.id, "Optimize metric", "metric",
-                                       "higher", "echo 0.5", baseline_value=0.5)
-                current = 0.5
-                for i in range(20):
-                    delta = random.gauss(0.008, 0.02)
-                    new_val = current + delta
-                    if new_val > current:
-                        log_iteration(session, exp.id, round(new_val, 4), "keep")
-                        current = new_val
-                        M["experiment_keeps"] += 1
-                    else:
-                        log_iteration(session, exp.id, round(new_val, 4), "discard")
-                    M["experiment_total_iter"] += 1
-                complete_experiment(session, exp, "completed")
-                M["experiments"] += 1
+            # Autoresearch block removed in v2.0.0 with the research engine.
 
             # ── Monthly snapshot ──
             if week % 4 == 0:
@@ -395,8 +373,6 @@ class TestGigaCorp:
         connections = session.query(func.count(MemoryConnection.source_id)).scalar()
         multi_model = session.query(Memory).filter(Memory.model_count >= 2).count()
 
-        # Token savings
-        token_savings = estimate_org_savings(agents=n_agents, model="claude-sonnet-4")
         router_avg_tokens = M["router_tokens_used"] / max(M["router_queries"], 1)
         full_dump_tokens = total_mem * 15  # If we dumped everything
 
@@ -453,32 +429,20 @@ class TestGigaCorp:
         print(f"    Full dump would be:{full_dump_tokens} tokens")
         print(f"    Token reduction:   {(1-router_avg_tokens/max(full_dump_tokens,1))*100:.0f}%")
 
-        # Token savings
-        print("\n  TOKEN SAVINGS (annual estimate)")
-        print(f"    Tokens saved:      {token_savings.total_tokens_saved/1_000_000:.0f}M tokens/year")
-        print(f"    Cost saved:        ${token_savings.total_cost_saved_usd:,.0f}/year")
-        print(f"    Token reduction:   {token_savings.reduction_pct:.0f}%")
-
-        # ROI
+        # ROI (dev time only — token-savings calculator removed in v2)
         time_saved_hours = M["time_saved_min"] / 60
         dev_cost_saved = time_saved_hours * 75  # $75/hr
         memee_cost = 199 * 12  # Org plan annual
-        total_saved = dev_cost_saved + token_savings.total_cost_saved_usd
+        total_saved = dev_cost_saved
         roi = total_saved / memee_cost
 
         print("\n  ROI")
         print(f"    Dev time saved:    {time_saved_hours:.0f} hours → ${dev_cost_saved:,.0f}")
-        print(f"    Token savings:     ${token_savings.total_cost_saved_usd:,.0f}")
         print(f"    Total saved:       ${total_saved:,.0f}/year")
         print(f"    Memee cost:        ${memee_cost:,}/year")
         print(f"    ROI:               {roi:.0f}x return")
 
-        # Autoresearch
-        keep_rate = M["experiment_keeps"] / max(M["experiment_total_iter"], 1)
-        print("\n  AUTORESEARCH")
-        print(f"    Experiments:       {M['experiments']}")
-        print(f"    Total iterations:  {M['experiment_total_iter']}")
-        print(f"    Keep rate:         {keep_rate:.0%}")
+        # Autoresearch block removed in v2.0.0.
 
         # Propagation
         print("\n  KNOWLEDGE TRANSFER")

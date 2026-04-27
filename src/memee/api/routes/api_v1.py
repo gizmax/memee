@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from memee.storage.database import get_engine, init_db
 from memee.storage.models import (
     AntiPattern,
-    LearningSnapshot,
     Memory,
     MemoryConnection,
     MemoryValidation,
@@ -257,40 +256,6 @@ def confidence_distribution(session: Session = Depends(get_db)):
     return dict(sorted(buckets.items()))
 
 
-@router.get("/experiments")
-def list_experiments_api(session: Session = Depends(get_db)):
-    """List all autoresearch experiments."""
-    from memee.engine.research import list_experiments
-
-    return list_experiments(session)
-
-
-@router.get("/experiments/{experiment_id}")
-def get_experiment_api(experiment_id: str, session: Session = Depends(get_db)):
-    """Get experiment details with trajectory."""
-    from memee.engine.research import get_experiment_status
-    from memee.storage.models import ResearchExperiment
-
-    # Try full or partial ID
-    exp = session.get(ResearchExperiment, experiment_id)
-    if not exp:
-        exps = session.query(ResearchExperiment).filter(
-            ResearchExperiment.id.like(f"{experiment_id}%")
-        ).all()
-        if len(exps) == 1:
-            experiment_id = exps[0].id
-
-    return get_experiment_status(session, experiment_id)
-
-
-@router.get("/meta-learning")
-def get_meta_learning_api(session: Session = Depends(get_db)):
-    """Meta-learning insights across all experiments."""
-    from memee.engine.research import get_meta_learning
-
-    return get_meta_learning(session)
-
-
 @router.get("/retrieval")
 def get_retrieval_metrics(session: Session = Depends(get_db)):
     """Retrieval health: hit@1, hit@3, acceptance rate, p50 latency.
@@ -342,25 +307,3 @@ def get_impact(session: Session = Depends(get_db)):
     from memee.engine.impact import get_impact_summary
 
     return get_impact_summary(session)
-
-
-@router.get("/snapshots")
-def get_snapshots(session: Session = Depends(get_db)):
-    """Learning snapshots over time."""
-    snapshots = (
-        session.query(LearningSnapshot)
-        .order_by(LearningSnapshot.snapshot_date)
-        .all()
-    )
-    return [
-        {
-            "date": s.snapshot_date.isoformat() if s.snapshot_date else None,
-            "total": s.total_memories,
-            "canon": s.canon_memories,
-            "hypothesis": s.hypothesis_memories,
-            "deprecated": s.deprecated_memories,
-            "avg_confidence": round(s.avg_confidence, 3) if s.avg_confidence else 0,
-            "learning_rate": round(s.learning_rate, 3) if s.learning_rate else 0,
-        }
-        for s in snapshots
-    ]

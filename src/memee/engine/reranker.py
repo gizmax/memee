@@ -11,9 +11,23 @@ nDCG@10 = 0.6795) and ``lexical_gap_hard`` (n=15, 0.7446) clusters.
 The trade-off is latency. A cross-encoder must run one forward pass per
 candidate, so we never run it on the whole corpus. We keep it in stage 5 of
 ``search_memories`` and only score the top-K of the RRF candidate list (K=30
-by default), which keeps the budget at ~50–200 ms per query on CPU. For
-that reason the reranker is **default OFF**; opt-in via the
-``MEMEE_RERANK_MODEL`` env var.
+by default), which keeps the budget at ~50–200 ms per query on CPU.
+
+v2.0.0 default-on policy. The R14 A/B run on the 207-query harness lifted
+macro nDCG@10 from 0.7273 → 0.7628 (Δ +0.0355) when the model was loaded —
+so the cost of being off when the weights are already cached is real. We
+flip the default: if ``~/.cache/huggingface/hub/models--cross-encoder--<model>``
+exists on disk, rerank is **on** (no env vars required). If the cache
+directory is missing, rerank stays off — we never pay the network round-
+trip to download an 80 MB model on the first search of a cold install.
+Three escape hatches:
+
+  * ``MEMEE_RERANK=0`` (or ``off`` / ``false``): force-disable, even if
+    the cache is warm. Useful for latency-sensitive paths and CI.
+  * ``MEMEE_RERANK_MODEL=<hub-id-or-path>``: explicit model selection.
+    A non-empty value enables rerank regardless of cache state — the
+    sentence-transformers loader will fetch on first use.
+  * The cache probe is read-only — we never mkdir, never download.
 
 Optional dependency: ``sentence-transformers``. The same package backs
 ``embeddings.py``, so installing ``memee[vectors]`` already gives you the
@@ -38,6 +52,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -63,21 +78,88 @@ DEFAULT_RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 DEFAULT_RERANK_TOP_K = 30
 
 
+def _hf_cache_root() -> Path:
+    """Return the Hugging Face hub cache root, honouring the standard env vars.
+
+    ``HF_HOME`` overrides ``~/.cache/huggingface``; the hub-specific
+    ``HF_HUB_CACHE`` overrides everything when set. We don't mkdir — the
+    probe is read-only.
+    """
+    hub = os.environ.get("HF_HUB_CACHE", "").strip()
+    if hub:
+        return Path(hub)
+    home = os.environ.get("HF_HOME", "").strip()
+    if home:
+        return Path(home) / "hub"
+    return Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def _model_cache_dir_name(model_name: str) -> str:
+    """Translate an HF hub id to its on-disk cache subdirectory name.
+
+    HF stores ``cross-encoder/ms-marco-MiniLM-L-6-v2`` under
+    ``models--cross-encoder--ms-marco-MiniLM-L-6-v2``. The convention is
+    ``models--`` prefix + path components joined by ``--``.
+    """
+    return "models--" + model_name.replace("/", "--")
+
+
+def _is_model_cached(model_name: str) -> bool:
+    """True iff the HF hub cache directory for ``model_name`` exists.
+
+    We deliberately don't validate the contents — partial downloads will
+    surface as a load failure later and the reranker self-disables. The
+    probe is one ``stat`` call, not a glob, so it's safe to run on every
+    process start.
+    """
+    if not model_name:
+        return False
+    return (_hf_cache_root() / _model_cache_dir_name(model_name)).is_dir()
+
+
+def _rerank_disabled_via_kill_switch() -> bool:
+    """True iff ``MEMEE_RERANK`` is set to a falsy value.
+
+    Empty / unset → False (we fall through to cache detection).
+    """
+    raw = os.environ.get("MEMEE_RERANK", "").strip().lower()
+    if not raw:
+        return False
+    return raw in {"0", "off", "false", "no"}
+
+
 def _model_name_from_env() -> str | None:
     """Return the configured model name, or ``None`` if rerank is off.
 
-    Recognised env values:
-      - unset / empty: rerank OFF (default)
-      - ``ms-marco-MiniLM-L-6-v2``: shorthand → ``cross-encoder/ms-marco-MiniLM-L-6-v2``
-      - any path containing ``/``: passed through as-is (HF hub id or local path)
+    Resolution order (first hit wins):
+      1. ``MEMEE_RERANK=0/off/false`` → rerank disabled even if cached.
+      2. ``MEMEE_RERANK_MODEL`` set:
+           - any path containing ``/``: passed through as-is.
+           - bare model name: prefixed with ``cross-encoder/``.
+      3. Auto-detect: if the HF cache holds the default model, return it.
+      4. Otherwise: ``None`` (rerank disabled — no model on disk, and we
+         won't trigger a network download from a search call).
+
+    Why the cache probe is the right default: the model is 80 MB and
+    most installs that run ``memee embed`` already pulled it via
+    sentence-transformers. The R14 A/B harness measured macro nDCG@10
+    +0.0355 when on; off-by-default left that lift on the table for
+    every install whose cache was already warm. The kill switch keeps
+    a one-line escape for users who want the old behaviour back.
     """
-    raw = os.environ.get("MEMEE_RERANK_MODEL", "").strip()
-    if not raw:
+    if _rerank_disabled_via_kill_switch():
         return None
-    if "/" in raw:
-        return raw
-    # Common shorthand: ms-marco-* → cross-encoder/ms-marco-*
-    return f"cross-encoder/{raw}"
+    raw = os.environ.get("MEMEE_RERANK_MODEL", "").strip()
+    if raw:
+        if "/" in raw:
+            return raw
+        # Common shorthand: ms-marco-* → cross-encoder/ms-marco-*
+        return f"cross-encoder/{raw}"
+    # Auto-detect: only enable when the weights are already on disk so we
+    # never trigger a model download from a hot-path search call.
+    if _is_model_cached(DEFAULT_RERANK_MODEL):
+        return DEFAULT_RERANK_MODEL
+    return None
 
 
 def _top_k_from_env() -> int:
@@ -269,3 +351,56 @@ def reset_for_tests() -> None:
         _CACHED_MODEL = None
         _CACHED_MODEL_NAME = None
         _LOAD_FAILED = False
+
+
+def rerank_status() -> dict:
+    """Diagnostic snapshot for ``memee doctor``.
+
+    Returns a dict with:
+      * ``enabled``  — True iff the next ``CrossEncoderReranker().is_enabled()``
+        will return True (env-only resolution; doesn't import torch).
+      * ``model``    — resolved model name (``cross-encoder/...``) or None.
+      * ``cached``   — True iff the resolved model's HF cache dir exists.
+      * ``source``   — one of:
+          * ``"kill_switch"``       — disabled by ``MEMEE_RERANK=0``
+          * ``"env_explicit"``      — ``MEMEE_RERANK_MODEL`` set
+          * ``"auto_cached"``       — auto-detected via cache probe
+          * ``"no_cache"``          — disabled because no weights on disk
+      * ``cache_dir`` — absolute path the probe checks (for the user-facing
+        message even when nothing is found).
+    """
+    cache_root = _hf_cache_root()
+    cache_dir = cache_root / _model_cache_dir_name(DEFAULT_RERANK_MODEL)
+    if _rerank_disabled_via_kill_switch():
+        return {
+            "enabled": False,
+            "model": None,
+            "cached": cache_dir.is_dir(),
+            "source": "kill_switch",
+            "cache_dir": str(cache_dir),
+        }
+    raw = os.environ.get("MEMEE_RERANK_MODEL", "").strip()
+    if raw:
+        model = raw if "/" in raw else f"cross-encoder/{raw}"
+        return {
+            "enabled": True,
+            "model": model,
+            "cached": (cache_root / _model_cache_dir_name(model)).is_dir(),
+            "source": "env_explicit",
+            "cache_dir": str(cache_root / _model_cache_dir_name(model)),
+        }
+    if cache_dir.is_dir():
+        return {
+            "enabled": True,
+            "model": DEFAULT_RERANK_MODEL,
+            "cached": True,
+            "source": "auto_cached",
+            "cache_dir": str(cache_dir),
+        }
+    return {
+        "enabled": False,
+        "model": None,
+        "cached": False,
+        "source": "no_cache",
+        "cache_dir": str(cache_dir),
+    }

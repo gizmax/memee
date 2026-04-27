@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Memee Packs — portable institutional memory</title>
+<meta name="description" content="Memory you can install. Curated `.memee` packs for Python web, React, SwiftUI, k8s, security canon. Import in one command. Sourced and signed." />
+<meta property="og:title" content="Memee Packs" />
+<meta property="og:description" content="Memory you can install. Curated `.memee` packs for the stacks your agents already know." />
+<meta property="og:image" content="https://memee.eu/og-image.png" />
+<link rel="canonical" href="https://memee.eu/packs" />
+
+<!-- Google Analytics — gizmax.cz convention -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-ZN1K4G2TCZ');
+</script>
+
+<style>
+  :root {
+    --ink: #EDEFF4;
+    --ink-80: #EDEFF4d9;
+    --ink-60: #EDEFF499;
+    --ink-20: #EDEFF422;
+    --ink-10: #EDEFF411;
+    --bone: #0E1116;
+    --bone-dim: #161A22;
+    --orange: #00E5C7;
+    --orange-soft: #00E5C71a;
+    --serif: "Source Serif 4", "Tiempos", Georgia, serif;
+    --mono: "JetBrains Mono", "Berkeley Mono", ui-monospace, SFMono-Regular, monospace;
+    --pad-x: clamp(20px, 4vw, 80px);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bone);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--orange); }
+  a:hover { color: var(--orange); }
+  code, pre { font-family: var(--mono); }
+  pre {
+    background: var(--bone-dim);
+    padding: 18px 22px;
+    border-radius: 12px;
+    border: 1px solid var(--ink-10);
+    overflow-x: auto;
+    font-size: 14px;
+  }
+  .shell {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding-inline: var(--pad-x);
+  }
+  header.top {
+    border-bottom: 1px solid var(--ink-10);
+    padding-block: 22px;
+  }
+  header.top .row {
+    display: flex; justify-content: space-between; align-items: center; gap: 24px;
+  }
+  .brand {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .brand .dot { color: var(--orange); }
+  nav.top-nav { display: flex; gap: 24px; font-family: var(--mono); font-size: 13px; }
+  nav.top-nav a { text-decoration: none; color: var(--ink-80); }
+  nav.top-nav a:hover { color: var(--orange); }
+
+  .hero { padding-block: clamp(60px, 8vw, 120px); border-bottom: 1px solid var(--ink-10); }
+  .hero h1 {
+    font-family: var(--serif);
+    font-size: clamp(48px, 7vw, 96px);
+    line-height: 0.95;
+    letter-spacing: -0.025em;
+    margin: 0 0 24px;
+    max-width: 18ch;
+  }
+  .hero h1 .accent { color: var(--orange); font-style: italic; }
+  .hero p.lede {
+    font-size: 20px;
+    line-height: 1.5;
+    color: var(--ink-80);
+    max-width: 60ch;
+    margin: 0 0 32px;
+  }
+  .hero .install {
+    display: inline-block;
+    background: var(--bone-dim);
+    border: 1px solid var(--ink-10);
+    padding: 16px 22px;
+    border-radius: 12px;
+    font-family: var(--mono);
+    font-size: 15px;
+  }
+  .hero .install .prompt { color: var(--orange); margin-right: 10px; }
+
+  .packs { padding-block: clamp(60px, 8vw, 120px); }
+  .packs h2 {
+    font-family: var(--serif);
+    font-size: clamp(36px, 5vw, 56px);
+    line-height: 1;
+    margin: 0 0 12px;
+  }
+  .packs p.lede {
+    color: var(--ink-80);
+    max-width: 50ch;
+    margin: 0 0 48px;
+    font-size: 17px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 24px;
+  }
+  .pack {
+    border: 1px solid var(--ink-10);
+    border-radius: 16px;
+    padding: 32px;
+    background: var(--bone-dim);
+    display: flex; flex-direction: column; gap: 14px;
+    transition: border-color 200ms ease, transform 200ms ease;
+  }
+  .pack:hover { border-color: var(--ink-20); transform: translateY(-2px); }
+  .pack .meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    color: var(--orange);
+    text-transform: uppercase;
+  }
+  .pack h3 {
+    font-family: var(--serif);
+    font-size: 26px;
+    line-height: 1.15;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .pack p { margin: 0; color: var(--ink-80); font-size: 15px; line-height: 1.55; }
+  .pack .stats {
+    display: flex; gap: 18px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 12px;
+    color: var(--ink-60);
+    padding-top: 12px; border-top: 1px solid var(--ink-10);
+  }
+  .pack .stats span strong { color: var(--ink); font-weight: 500; }
+  .pack .install-cmd {
+    margin-top: auto;
+    padding-top: 14px;
+    border-top: 1px solid var(--ink-10);
+    font-family: var(--mono); font-size: 13px;
+    color: var(--ink-80);
+  }
+
+  .how { padding-block: clamp(60px, 8vw, 120px); border-top: 1px solid var(--ink-10); }
+  .how h2 {
+    font-family: var(--serif);
+    font-size: clamp(36px, 5vw, 56px);
+    line-height: 1;
+    margin: 0 0 32px;
+  }
+  .how-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    align-items: start;
+  }
+  @media (max-width: 800px) { .how-grid { grid-template-columns: 1fr; } }
+  .how-grid h3 {
+    font-family: var(--serif);
+    font-size: 22px;
+    margin: 0 0 12px;
+    color: var(--ink);
+  }
+  .how-grid p { color: var(--ink-80); margin: 0 0 16px; }
+
+  footer.foot {
+    padding-block: 56px;
+    border-top: 1px solid var(--ink-10);
+    color: var(--ink-60);
+    font-size: 14px;
+  }
+  footer.foot a { color: var(--ink-80); }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="shell row">
+    <a class="brand" href="/">memee<span class="dot">.</span></a>
+    <nav class="top-nav">
+      <a href="/#share">How it works</a>
+      <a href="/#compare">Compare</a>
+      <a href="/#faq">FAQ</a>
+      <a href="/packs">Packs</a>
+      <a href="/#pricing">Pricing</a>
+      <a href="https://github.com/gizmax/memee" rel="external">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero shell">
+  <h1>Memory you <span class="accent">install</span>.</h1>
+  <p class="lede">
+    Hand-curated <code>.memee</code> packs for the stacks your agents already
+    know. Patterns, anti-patterns, decisions. Signed, sourced, idempotent.
+    Import in one command. User canon outranks pack defaults the moment you
+    record your first lesson.
+  </p>
+  <div class="install"><span class="prompt">$</span>memee pack install python-web</div>
+</section>
+
+<section class="packs shell">
+  <h2>Available packs.</h2>
+  <p class="lede">Two seed packs ship with v2.0.0. Community submissions land via PR to <a href="https://github.com/gizmax/memee" rel="external">github.com/gizmax/memee</a>.</p>
+
+  <div class="grid">
+
+    <article class="pack">
+      <span class="meta">v0.1.0 · python · MIT</span>
+      <h3>python-web</h3>
+      <p>FastAPI, SQLAlchemy 2.0, Pydantic v2, pytest, alembic, ruff, uv. Plus the OWASP-shaped security canon every Python service needs from day one.</p>
+      <div class="stats">
+        <span><strong>30</strong> memories</span>
+        <span><strong>16</strong> patterns</span>
+        <span><strong>11</strong> anti-patterns</span>
+        <span><strong>3</strong> decisions</span>
+      </div>
+      <div class="install-cmd">memee pack install python-web</div>
+    </article>
+
+    <article class="pack">
+      <span class="meta">v0.1.0 · react · MIT</span>
+      <h3>react-vite</h3>
+      <p>Hooks rules, performance defaults, security baselines, build tooling. TypeScript strict, Tailwind, TanStack Query. Most rules generalise to any modern React SPA.</p>
+      <div class="stats">
+        <span><strong>28</strong> memories</span>
+        <span><strong>14</strong> patterns</span>
+        <span><strong>10</strong> anti-patterns</span>
+        <span><strong>2</strong> decisions</span>
+      </div>
+      <div class="install-cmd">memee pack install react-vite</div>
+    </article>
+
+    <article class="pack" style="opacity:0.5">
+      <span class="meta">coming · k8s · MIT</span>
+      <h3>k8s-canon</h3>
+      <p>Kubernetes deployment patterns, resource budgeting, autoscaling tradeoffs, the ten anti-patterns that fill every postmortem. Open a PR with rules from your fleet.</p>
+      <div class="stats">
+        <span>Wanted: contributors</span>
+      </div>
+    </article>
+
+    <article class="pack" style="opacity:0.5">
+      <span class="meta">coming · swift · MIT</span>
+      <h3>swiftui</h3>
+      <p>SwiftUI state, @StateObject vs @ObservedObject vs @Bindable, gesture pitfalls, navigation patterns, UIKit interop. Same shape as the Python and React packs.</p>
+      <div class="stats">
+        <span>Wanted: contributors</span>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<section class="how shell">
+  <h2>The format outlives the tool.</h2>
+  <div class="how-grid">
+    <div>
+      <h3>One file. Versioned. Signed.</h3>
+      <p>A <code>.memee</code> pack is a gzipped tarball: <code>manifest.toml</code> + <code>memories.jsonl</code> + an optional ed25519 signature. Distributable however you ship a file. GitHub releases, S3, an internal artefact store, an email attachment.</p>
+      <p>The format is documented (<a href="https://github.com/gizmax/memee/blob/main/docs/pack-format.md" rel="external">docs/pack-format.md</a>) and small. Build your own tooling. The format is the artefact, not the registry.</p>
+    </div>
+    <div>
+      <h3>Imports respect your canon.</h3>
+      <p>Every memory in a pack imports with <code>source_type=import</code> (×0.6 confidence multiplier) and a per-pack confidence cap. Your hand-recorded lesson always outranks the pack default once you validate it.</p>
+      <p>Re-installing the same pack version is a no-op. Re-installing a newer version dedupes against the local canon and folds via the existing quality gate.</p>
+    </div>
+    <div>
+      <h3>Cold start, solved.</h3>
+      <p>A fresh <code>memee setup</code> used to ship empty. Day-one users had no canon to route, no anti-patterns to surface, no decisions to recall. The dogfooding theory took six weeks to populate the DB.</p>
+      <p>One pack collapses that to one command. <code>memee pack install python-web</code> and you have 30 sourced lessons before your first agent session.</p>
+    </div>
+    <div>
+      <h3>Authoring your own.</h3>
+      <p><code>memee pack export --canon-only &gt; team.memee</code> writes everything in your local DB at <code>maturity=validated|canon</code>. Strip identity columns, sign with <code>MEMEE_PACK_KEY</code>, ship.</p>
+      <p>Internal teams: cross-project canon as a packagable artefact. Agencies: client handover as a file. OSS maintainers: house style as a public download.</p>
+    </div>
+  </div>
+</section>
+
+<footer class="foot">
+  <div class="shell">
+    <p>Memee &copy; 2026 &middot; MIT-licensed core &middot; <a href="/">memee.eu</a> &middot; <a href="https://github.com/gizmax/memee" rel="external">GitHub</a> &middot; <a href="https://github.com/gizmax/memee/blob/main/docs/pack-format.md" rel="external">Pack format spec</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

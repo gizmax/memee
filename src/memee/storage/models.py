@@ -59,13 +59,6 @@ class Severity(str, Enum):
     CRITICAL = "critical"
 
 
-class ResearchStatus(str, Enum):
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
 # ── Core Tables ──
 
 
@@ -104,12 +97,6 @@ class Project(Base):
     organization = relationship("Organization", back_populates="projects")
     memories = relationship(
         "ProjectMemory",
-        back_populates="project",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
-    experiments = relationship(
-        "ResearchExperiment",
         back_populates="project",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -374,71 +361,10 @@ class AntiPattern(Base):
     )
 
 
-# ── Autoresearch Tracking ──
-
-
-class ResearchExperiment(Base):
-    __tablename__ = "research_experiments"
-
-    id = Column(String(36), primary_key=True, default=new_id)
-    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
-    goal = Column(Text, nullable=False)
-    metric_name = Column(String(255), nullable=False)
-    metric_direction = Column(String(10), nullable=False)
-    verify_command = Column(Text, nullable=False)
-    guard_command = Column(Text)
-    scope_globs = Column(JSON, default=list)
-
-    status = Column(String(20), nullable=False, default=ResearchStatus.RUNNING.value)
-    baseline_value = Column(Float)
-    final_value = Column(Float)
-    best_value = Column(Float)
-    total_iterations = Column(Integer, default=0)
-    keeps = Column(Integer, default=0)
-    discards = Column(Integer, default=0)
-    crashes = Column(Integer, default=0)
-
-    started_at = Column(DateTime, default=utcnow)
-    completed_at = Column(DateTime)
-
-    project = relationship("Project", back_populates="experiments")
-    iterations = relationship(
-        "ResearchIteration",
-        back_populates="experiment",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
-
-
-class ResearchIteration(Base):
-    __tablename__ = "research_iterations"
-
-    id = Column(String(36), primary_key=True, default=new_id)
-    experiment_id = Column(
-        String(36),
-        ForeignKey("research_experiments.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    iteration_number = Column(Integer, nullable=False)
-    commit_hash = Column(String(40))
-    metric_value = Column(Float)
-    delta = Column(Float)
-    guard_passed = Column(Boolean)
-    status = Column(String(20), nullable=False)
-    description = Column(Text)
-    created_at = Column(DateTime, default=utcnow)
-
-    experiment = relationship("ResearchExperiment", back_populates="iterations")
-
-    __table_args__ = (
-        # R10 db audit win #1: ``get_meta_learning`` runs one ordered fetch
-        # of iterations per experiment (often hundreds of experiments per
-        # call). Without a covering composite index SQLite SCANs the table
-        # plus a TEMP B-TREE for ORDER BY iteration_number — measured 200×
-        # full-scan loop. With this index the plan flips to SEARCH USING
-        # INDEX (experiment_id=?), no temp sort.
-        Index("ix_research_iter_exp_num", "experiment_id", "iteration_number"),
-    )
+# ── Autoresearch Tracking — REMOVED in v2.0.0 ──
+# ``ResearchExperiment`` + ``ResearchIteration`` and the ``ResearchStatus``
+# enum lived here. The schema is dropped via the alembic migration that
+# accompanies this commit; ``init_db`` no longer creates the tables.
 
 
 # ── Analytics ──
@@ -582,22 +508,6 @@ class LTRModel(Base):
     notes = Column(Text)
 
 
-class LearningSnapshot(Base):
-    __tablename__ = "learning_snapshots"
-
-    id = Column(String(36), primary_key=True, default=new_id)
-    snapshot_date = Column(DateTime, nullable=False, default=utcnow)
-    total_memories = Column(Integer)
-    canon_memories = Column(Integer)
-    hypothesis_memories = Column(Integer)
-    deprecated_memories = Column(Integer)
-    avg_confidence = Column(Float)
-    cross_project_applications = Column(Integer)
-    anti_patterns_avoided = Column(Integer)
-    research_experiments_completed = Column(Integer)
-    learning_rate = Column(Float)
-
-    __table_args__ = (
-        # R10 db audit: /snapshots endpoint orders by snapshot_date.
-        Index("ix_learning_snapshots_date", "snapshot_date"),
-    )
+# ``LearningSnapshot`` was the dashboard's time-series feed. Removed in
+# v2.0.0 along with the dashboard and its ``/snapshots`` endpoint. The
+# alembic migration drops ``learning_snapshots``.

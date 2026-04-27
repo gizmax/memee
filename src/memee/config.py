@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     cmam_api_base: str = "https://api.anthropic.com"
     cmam_redact: bool = True
 
+    # ``.memee`` pack signing key. Optional; if set, ``memee pack export``
+    # signs the pack with this ed25519 PEM private key. The CLI flag
+    # ``--key`` takes precedence over the env var.
+    pack_key: Path | None = None
+
     model_config = {"env_prefix": "MEMEE_"}
 
 

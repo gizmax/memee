@@ -158,9 +158,16 @@ class TestRawPerformance:
         # Should handle 5000+ inserts/second
         assert results[-1][2] > 3000, f"Insert throughput too low: {results[-1][2]:.0f} ops/s"
 
-    def test_search_latency(self, bench_env):
+    def test_search_latency(self, bench_env, monkeypatch):
         """Measure search latency at various database sizes."""
         session, projects, org = bench_env
+
+        # v2.0.0: rerank is default-on when the HF cache is warm. This
+        # benchmark is timing the FAST BM25 path, so we explicitly disable
+        # rerank for the duration. Otherwise the cross-encoder cold-load
+        # gets folded into the very first BM25 query and the threshold
+        # assertion fails for reasons unrelated to the BM25 stack.
+        monkeypatch.setenv("MEMEE_RERANK", "0")
 
         # Seed data
         for i in range(2000):

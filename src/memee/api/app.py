@@ -1,4 +1,15 @@
-"""FastAPI application — Memee Dashboard & API."""
+"""FastAPI application — Memee REST API.
+
+The web dashboard at port 7878 was removed in v2.0.0. The remaining surface
+is a thin GET-only JSON API for integrations (memory CRUD, search,
+retrieval telemetry, impact). The CLI is the primary interface for humans;
+agents talk to Memee via MCP.
+
+Install the optional ``api`` extra to use this — it's no longer in the
+base dependency set:
+
+    pip install "memee[api]"
+"""
 
 import logging
 import traceback
@@ -6,7 +17,6 @@ import traceback
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from memee.api.routes.dashboard import router as dashboard_router
 from memee.api.routes.api_v1 import router as api_router
 
 logger = logging.getLogger("memee.api")
@@ -38,5 +48,4 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 
-app.include_router(dashboard_router)
 app.include_router(api_router, prefix="/api/v1")

@@ -20,7 +20,6 @@ import json
 import os
 import random
 import sys
-import tempfile
 from pathlib import Path
 
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -101,8 +100,6 @@ def _fake_memory(record: dict):
 
 def main(label: str = "default"):
     from memee.engine.calibration import (
-        CurveRegistry,
-        beta_binomial_posterior,
         calibration_metrics,
         fit_beta_binomial,
         fit_curves,

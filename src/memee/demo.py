@@ -1,7 +1,8 @@
 """Demo data generator — populates Memee with realistic enterprise-scale data.
 
 Creates a virtual company with 30 projects, 20 agents, 52 weeks of data.
-Then opens the dashboard to visualize learning.
+Use ``memee status`` for a quick summary or ``memee benchmark`` to score
+the resulting org with OrgMemEval.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from memee.storage.database import get_session, init_db
 from memee.storage.models import (
     AntiPattern,
     Decision,
-    LearningSnapshot,
     MaturityLevel,
     Memory,
     MemoryType,
@@ -241,30 +241,11 @@ def generate_demo_data(weeks: int = 52, org_name: str = "NovaTech-Enterprise"):
             new_proj = random.choice(projects)
             inherit_memories(session, new_proj, min_memory_confidence=0.55)
 
-        # Take snapshot
-        total = session.query(func.count(Memory.id)).scalar()
-        canon = session.query(func.count(Memory.id)).filter(
-            Memory.maturity == MaturityLevel.CANON.value).scalar()
-        hypo = session.query(func.count(Memory.id)).filter(
-            Memory.maturity == MaturityLevel.HYPOTHESIS.value).scalar()
-        depr = session.query(func.count(Memory.id)).filter(
-            Memory.maturity == MaturityLevel.DEPRECATED.value).scalar()
-        avg_conf = session.query(func.avg(Memory.confidence_score)).scalar() or 0
-        validated_count = session.query(func.count(Memory.id)).filter(
-            Memory.maturity == MaturityLevel.VALIDATED.value).scalar()
-
-        snap = LearningSnapshot(
-            total_memories=total,
-            canon_memories=canon,
-            hypothesis_memories=hypo,
-            deprecated_memories=depr,
-            avg_confidence=avg_conf,
-            learning_rate=validated_count / max(total, 1),
-        )
-        session.add(snap)
-        session.commit()
-
         if week % 10 == 0 or week == 1:
+            total = session.query(func.count(Memory.id)).scalar()
+            canon = session.query(func.count(Memory.id)).filter(
+                Memory.maturity == MaturityLevel.CANON.value).scalar()
+            avg_conf = session.query(func.avg(Memory.confidence_score)).scalar() or 0
             print(f"    Week {week:3d}/{weeks}: {total} memories, "
                   f"conf={avg_conf:.3f}, canon={canon}")
 

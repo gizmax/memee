@@ -24,7 +24,6 @@ from memee.engine.lifecycle import run_aging_cycle
 from memee.engine.search import search_anti_patterns, search_memories
 from memee.storage.models import (
     AntiPattern,
-    LearningSnapshot,
     MaturityLevel,
     Memory,
     MemoryConnection,
@@ -32,9 +31,6 @@ from memee.storage.models import (
     MemoryValidation,
     Project,
     ProjectMemory,
-    ResearchExperiment,
-    ResearchIteration,
-    ResearchStatus,
     Severity,
 )
 
@@ -892,96 +888,9 @@ class TestMaturityProgression:
         assert memories["fresh_hypothesis"].maturity == MaturityLevel.HYPOTHESIS.value
 
 
-# ── Test 6: Autoresearch Simulation ──
-
-
-class TestAutoresearchSimulation:
-    """Simulate autoresearch experiment tracking."""
-
-    def test_research_experiment_lifecycle(self, populated_session):
-        """Simulate a 50-iteration autoresearch experiment."""
-        session, projects, org = populated_session
-
-        experiment = ResearchExperiment(
-            project_id=projects["InvestmentBot"].id,
-            goal="Increase prediction accuracy to 70%",
-            metric_name="accuracy",
-            metric_direction="higher",
-            verify_command="pytest tests/test_accuracy.py --tb=short",
-            guard_command="pytest tests/ -q --tb=no",
-            scope_globs=["src/**/*.py"],
-            baseline_value=0.52,
-        )
-        session.add(experiment)
-        session.commit()
-
-        # Simulate 50 iterations with realistic improvement curve
-        random.seed(42)
-        current_best = 0.52
-        iteration_results = []
-
-        for i in range(1, 51):
-            # Each iteration has a chance of improvement
-            delta = random.gauss(0.003, 0.01)  # Small improvements, some regressions
-            new_value = current_best + delta
-            guard_passed = random.random() > 0.1  # 10% crash rate
-
-            if not guard_passed:
-                status = "crash"
-            elif new_value > current_best:
-                status = "keep"
-                current_best = new_value
-            else:
-                status = "discard"
-
-            iteration = ResearchIteration(
-                experiment_id=experiment.id,
-                iteration_number=i,
-                metric_value=round(new_value, 4),
-                delta=round(delta, 4),
-                guard_passed=guard_passed,
-                status=status,
-                description=f"Iteration {i}: {status}",
-            )
-            session.add(iteration)
-
-            experiment.total_iterations += 1
-            if status == "keep":
-                experiment.keeps += 1
-                experiment.best_value = current_best
-            elif status == "discard":
-                experiment.discards += 1
-            else:
-                experiment.crashes += 1
-
-            iteration_results.append((i, new_value, status))
-
-        experiment.status = ResearchStatus.COMPLETED.value
-        experiment.final_value = current_best
-        experiment.completed_at = datetime.now(timezone.utc)
-        session.commit()
-
-        # Print results
-        keep_rate = experiment.keeps / experiment.total_iterations
-        print(f"\n  Autoresearch experiment: '{experiment.goal}'")
-        print(f"  Baseline: {experiment.baseline_value}")
-        print(f"  Final:    {experiment.final_value:.4f}")
-        print(f"  Improvement: {(experiment.final_value - experiment.baseline_value):.4f}")
-        print(f"  Iterations: {experiment.total_iterations}")
-        print(f"  Keeps: {experiment.keeps} ({keep_rate:.0%})")
-        print(f"  Discards: {experiment.discards}")
-        print(f"  Crashes: {experiment.crashes}")
-
-        # Visualize
-        print("\n  Metric trajectory (sampled every 5):")
-        for i, val, status in iteration_results[::5]:
-            bar = "█" * int((val - 0.4) * 100)
-            icon = {"keep": "+", "discard": ".", "crash": "X"}[status]
-            print(f"    {i:3d} [{icon}] {val:.4f} {bar}")
-
-        assert experiment.final_value > experiment.baseline_value
-        assert experiment.keeps > 0
-        assert experiment.total_iterations == 50
+# ── Test 6: Autoresearch Simulation — REMOVED in v2.0.0 ──
+# The research engine and its ResearchExperiment / ResearchIteration models
+# were deleted with the rest of the autoresearch surface.
 
 
 # ── Test 7: Multi-Agent Collaboration ──
@@ -1184,16 +1093,8 @@ class TestOrganizationalLearning:
             )
             avg_conf = session.query(func.avg(Memory.confidence_score)).scalar() or 0
 
-            snapshot = LearningSnapshot(
-                total_memories=total,
-                canon_memories=canon,
-                hypothesis_memories=hypothesis,
-                deprecated_memories=deprecated,
-                avg_confidence=avg_conf,
-                learning_rate=validated / max(total, 1),
-            )
-            session.add(snapshot)
-            session.commit()
+            # LearningSnapshot persistence dropped in v2.0.0 — keep only
+            # the in-memory list the rest of the test asserts on.
 
             snapshots.append({
                 "week": week,

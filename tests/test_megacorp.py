@@ -10,7 +10,6 @@ Scenarios:
   - New hire onboarding speed
   - Cross-team knowledge transfer
   - Code review catches at scale
-  - Autoresearch experiments
   - Quality gate filtering garbage
 
 Run: pytest tests/test_megacorp.py -v -s
@@ -30,7 +29,6 @@ from memee.engine.lifecycle import run_aging_cycle
 from memee.engine.predictive import scan_project_for_warnings
 from memee.engine.propagation import run_propagation_cycle
 from memee.engine.quality_gate import run_quality_gate
-from memee.engine.research import create_experiment, complete_experiment, log_iteration
 from memee.engine.review import review_diff
 from memee.engine.search import search_memories
 from memee.storage.models import (
@@ -181,7 +179,6 @@ class TestMegaCorp:
             "code_review_catches": 0,
             "onboarding_patterns": 0,
             "propagated_links": 0,
-            "experiments_completed": 0,
             "total_memories": 0,
             "canon_memories": 0,
             "avg_confidence": 0,
@@ -420,26 +417,7 @@ class TestMegaCorp:
                 # WITHOUT: new hire takes 4-8 weeks to learn what the org knows
                 without_memee["onboarding_weeks"] += random.randint(4, 8)
 
-            # ─── Autoresearch (twice a year) ───
-            if week in (15, 40):
-                proj = random.choice(projects[:10])
-                exp = create_experiment(
-                    session, proj.id, "Optimize performance", "latency", "lower",
-                    "echo 'latency: 0.5'", baseline_value=0.5,
-                )
-                current = 0.5
-                for i in range(25):
-                    delta = random.gauss(0.008, 0.02)
-                    new_val = current - abs(delta)
-                    if new_val < current:
-                        log_iteration(session, exp.id, round(new_val, 4), "keep")
-                        current = new_val
-                    elif random.random() < 0.08:
-                        log_iteration(session, exp.id, 0, "crash")
-                    else:
-                        log_iteration(session, exp.id, round(new_val, 4), "discard")
-                complete_experiment(session, exp, "completed")
-                with_memee["experiments_completed"] += 1
+            # Autoresearch block removed in v2.0.0 with the research engine.
 
             with_memee["weekly_log"].append(week_data)
 

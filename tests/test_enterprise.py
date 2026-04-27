@@ -23,12 +23,6 @@ from memee.engine.inheritance import inherit_memories
 from memee.engine.lifecycle import run_aging_cycle
 from memee.engine.predictive import scan_project_for_warnings
 from memee.engine.propagation import run_propagation_cycle
-from memee.engine.research import (
-    complete_experiment,
-    create_experiment,
-    get_meta_learning,
-    log_iteration,
-)
 from memee.engine.review import review_diff
 from memee.storage.models import (
     AntiPattern,
@@ -239,15 +233,7 @@ ENTERPRISE_DIFFS = [
      False),
 ]
 
-# Autoresearch experiments
-ENTERPRISE_EXPERIMENTS = [
-    ("CoreAPI", "Reduce P95 API latency below 100ms", "latency_p95", "lower", 0.250),
-    ("ETLPipeline", "Increase ETL throughput to 1M rows/min", "throughput", "higher", 0.4),
-    ("CustomerPortal", "Improve Lighthouse performance score to 95", "lighthouse", "higher", 0.72),
-    ("FraudDetection", "Reduce false positive rate below 5%", "false_positive_rate", "lower", 0.40),
-    ("SearchRanker", "Improve NDCG@10 to 0.85", "ndcg", "higher", 0.65),
-    ("CIPipeline", "Reduce CI time below 10 minutes", "ci_time_minutes", "lower", 45.0),
-]
+# Autoresearch experiments — removed in v2.0.0 with the research engine.
 
 MODELS = ["claude-opus-4", "claude-sonnet-4", "gpt-4o", "gpt-4-turbo",
           "gemini-2.0-flash", "gemini-1.5-pro", "llama-3.1-70b"]
@@ -292,7 +278,6 @@ class TestEnterpriseSimulation:
         incident_log = []
         avoidance_log = []
         review_log = []
-        experiment_results = []
         quarterly_metrics = []
 
         start_time = time.time()
@@ -452,61 +437,8 @@ class TestEnterpriseSimulation:
                     f"NEW PROJECT: MLOps inherits {inherit_stats2['memories_inherited']} patterns"
                 )
 
-            # ─── Autoresearch experiments (start at specific weeks) ───
-            if week == 10:
-                for proj_name, goal, metric, direction, baseline in ENTERPRISE_EXPERIMENTS[:3]:
-                    proj = projects[proj_name]
-                    exp = create_experiment(
-                        session, proj.id, goal, metric, direction,
-                        f"echo '{metric}: {baseline}'", baseline_value=baseline,
-                    )
-                    # Run 20 iterations
-                    current = baseline
-                    for i in range(20):
-                        delta = random.gauss(0.01, 0.025) * (1 if direction == "higher" else -1)
-                        new_val = current + delta
-                        improves = (direction == "higher" and new_val > current) or \
-                                   (direction == "lower" and new_val < current)
-                        if improves:
-                            log_iteration(session, exp.id, round(new_val, 4), "keep")
-                            current = new_val
-                        elif random.random() < 0.08:
-                            log_iteration(session, exp.id, 0, "crash")
-                        else:
-                            log_iteration(session, exp.id, round(new_val, 4), "discard")
-                    complete_experiment(session, exp, "completed")
-                    experiment_results.append({
-                        "project": proj_name, "goal": goal,
-                        "baseline": baseline, "final": exp.best_value,
-                        "keep_rate": exp.keeps / max(exp.total_iterations, 1),
-                    })
-
-            if week == 30:
-                for proj_name, goal, metric, direction, baseline in ENTERPRISE_EXPERIMENTS[3:]:
-                    proj = projects[proj_name]
-                    exp = create_experiment(
-                        session, proj.id, goal, metric, direction,
-                        f"echo '{metric}: {baseline}'", baseline_value=baseline,
-                    )
-                    current = baseline
-                    for i in range(20):
-                        delta = random.gauss(0.01, 0.025) * (1 if direction == "higher" else -1)
-                        new_val = current + delta
-                        improves = (direction == "higher" and new_val > current) or \
-                                   (direction == "lower" and new_val < current)
-                        if improves:
-                            log_iteration(session, exp.id, round(new_val, 4), "keep")
-                            current = new_val
-                        elif random.random() < 0.08:
-                            log_iteration(session, exp.id, 0, "crash")
-                        else:
-                            log_iteration(session, exp.id, round(new_val, 4), "discard")
-                    complete_experiment(session, exp, "completed")
-                    experiment_results.append({
-                        "project": proj_name, "goal": goal,
-                        "baseline": baseline, "final": exp.best_value,
-                        "keep_rate": exp.keeps / max(exp.total_iterations, 1),
-                    })
+            # Autoresearch experiments removed in v2.0.0 — the engine and
+            # its schema were cut as part of the simplicity reclamation pass.
 
             # ─── Quarterly snapshot ───
             if week % 13 == 0:
@@ -601,22 +533,7 @@ class TestEnterpriseSimulation:
             print(f"\n  Accuracy: {correct}/{total_reviews} ({correct/total_reviews*100:.0f}%)")
 
         # Autoresearch
-        if experiment_results:
-            print(f"\n{'═' * 80}")
-            print(f"  AUTORESEARCH EXPERIMENTS ({len(experiment_results)})")
-            print(f"{'═' * 80}")
-            for exp in experiment_results:
-                improvement = exp["final"] - exp["baseline"] if exp["final"] else 0
-                sign = "+" if improvement > 0 else ""
-                print(f"  {exp['project']:25s} {exp['goal'][:40]}")
-                print(f"    Baseline: {exp['baseline']:.4f} → Final: {exp['final']:.4f} "
-                      f"({sign}{improvement:.4f}) Keep: {exp['keep_rate']:.0%}")
-
-            meta = get_meta_learning(session)
-            if meta.get("insights"):
-                print("\n  Meta-learning insights:")
-                for insight in meta["insights"]:
-                    print(f"    - {insight}")
+        # Autoresearch experiment block removed in v2.0.0.
 
         # Agent leaderboard
         print(f"\n{'═' * 80}")
@@ -667,7 +584,6 @@ class TestEnterpriseSimulation:
         print(f"  Prevention ratio:      {len(avoidance_log)}:{len(incident_log)} "
               f"({len(avoidance_log)/max(len(incident_log),1):.0f}x)")
         print(f"  Code review accuracy:  {sum(1 for r in review_log if r['correct'])}/{len(review_log)}")
-        print(f"  Experiments completed: {len(experiment_results)}")
         print(f"  Simulation time:       {elapsed:.1f}s")
 
         # ─── Run OrgMemEval benchmark on this data ───

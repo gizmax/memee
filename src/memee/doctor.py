@@ -46,6 +46,9 @@ AI_TOOLS = [
         "config_path": Path.home() / ".claude" / "settings.json",
         "config_key": "mcpServers",
         "mcp_entry": {"memee": {"command": "memee", "args": ["serve"]}},
+        # Hooks: Claude Code's harness runs commands on SessionStart /
+        # UserPromptSubmit / Stop. This is what makes Memee fully automatic.
+        "supports_hooks": True,
     },
     {
         "id": "claude_desktop",
@@ -54,6 +57,8 @@ AI_TOOLS = [
         "config_path": Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
         "config_key": "mcpServers",
         "mcp_entry": {"memee": {"command": "memee", "args": ["serve"]}},
+        # Claude Desktop has no hook system — purely MCP-driven.
+        "supports_hooks": False,
     },
     {
         "id": "cursor",
@@ -62,6 +67,9 @@ AI_TOOLS = [
         "config_path": Path.home() / ".cursor" / "mcp.json",
         "config_key": "mcpServers",
         "mcp_entry": {"memee": {"command": "memee", "args": ["serve"]}},
+        # Cursor's mcp.json (~/.cursor/mcp.json) accepts mcpServers but has
+        # no harness-level hooks block as of 2026-04. MCP-only.
+        "supports_hooks": False,
     },
     {
         "id": "windsurf",
@@ -70,6 +78,8 @@ AI_TOOLS = [
         "config_path": Path.home() / ".codeium" / "windsurf" / "mcp_config.json",
         "config_key": "mcpServers",
         "mcp_entry": {"memee": {"command": "memee", "args": ["serve"]}},
+        # Windsurf's mcp_config.json is MCP-only — no hook system.
+        "supports_hooks": False,
     },
 ]
 
@@ -85,12 +95,15 @@ CLI_TOOLS = [
 
 def detect_ai_tools() -> list[dict]:
     """Scan system for installed AI tools and their MCP config status."""
+    from memee.hooks_config import MEMEE_MARK
+
     results = []
 
     for tool in AI_TOOLS:
         detected = tool["detect_path"].exists()
         configured = False
         config_exists = False
+        hooks_configured = False
 
         if detected and tool.get("config_path"):
             config_path = tool["config_path"]
@@ -100,6 +113,27 @@ def detect_ai_tools() -> list[dict]:
                     config = json.loads(config_path.read_text())
                     servers = config.get(tool["config_key"], {})
                     configured = "memee" in servers
+                    # Detect Memee-owned hooks by walking the (event → blocks
+                    # → hooks) tree looking for our marker. We don't depend on
+                    # the exact command string so it survives version bumps.
+                    if tool.get("supports_hooks"):
+                        for blocks in (config.get("hooks") or {}).values():
+                            if not isinstance(blocks, list):
+                                continue
+                            for block in blocks:
+                                if not isinstance(block, dict):
+                                    continue
+                                for entry in block.get("hooks") or []:
+                                    if (
+                                        isinstance(entry, dict)
+                                        and entry.get(MEMEE_MARK) is True
+                                    ):
+                                        hooks_configured = True
+                                        break
+                                if hooks_configured:
+                                    break
+                            if hooks_configured:
+                                break
                 except (json.JSONDecodeError, KeyError):
                     pass
 
@@ -111,6 +145,8 @@ def detect_ai_tools() -> list[dict]:
             "configured": configured,
             "config_path": str(tool.get("config_path", "")),
             "can_auto_fix": detected and not configured,
+            "supports_hooks": tool.get("supports_hooks", False),
+            "hooks_configured": hooks_configured,
         })
 
     # CLI tools
@@ -210,6 +246,80 @@ def configure_all_detected() -> list[dict]:
     return configured
 
 
+def install_hooks_for(tool_id: str, *, dry_run: bool = False) -> dict | None:
+    """Install Memee hooks into the named tool's settings.json.
+
+    Returns the result dict from ``hooks_config.install_hooks_for_tool`` or
+    None if the tool doesn't support hooks (Cursor, Windsurf, Claude Desktop
+    today). The caller renders the dict to the user.
+    """
+    from memee.hooks_config import install_hooks_for_tool
+
+    tool_def = next((t for t in AI_TOOLS if t["id"] == tool_id), None)
+    if not tool_def or not tool_def.get("supports_hooks"):
+        return None
+    return install_hooks_for_tool(tool_def["config_path"], dry_run=dry_run)
+
+
+def uninstall_hooks_for(tool_id: str, *, dry_run: bool = False) -> dict | None:
+    """Remove Memee hooks from the named tool's settings.json."""
+    from memee.hooks_config import uninstall_hooks_for_tool
+
+    tool_def = next((t for t in AI_TOOLS if t["id"] == tool_id), None)
+    if not tool_def or not tool_def.get("supports_hooks"):
+        return None
+    return uninstall_hooks_for_tool(tool_def["config_path"], dry_run=dry_run)
+
+
+def install_hooks_all(*, dry_run: bool = False) -> list[dict]:
+    """Install hooks for every detected tool that supports them.
+
+    Returns a list of result dicts (one per tool that supports hooks) with
+    a ``tool`` key added so the caller can label them.
+    """
+    results = []
+    for tool in detect_ai_tools():
+        if not tool.get("supports_hooks") or not tool["detected"]:
+            continue
+        res = install_hooks_for(tool["id"], dry_run=dry_run)
+        if res is None:
+            continue
+        res["tool"] = tool["name"]
+        res["tool_id"] = tool["id"]
+        results.append(res)
+    return results
+
+
+def uninstall_hooks_all(*, dry_run: bool = False) -> list[dict]:
+    """Remove Memee hooks from every detected tool that supports them."""
+    results = []
+    for tool in detect_ai_tools():
+        if not tool.get("supports_hooks") or not tool["detected"]:
+            continue
+        res = uninstall_hooks_for(tool["id"], dry_run=dry_run)
+        if res is None:
+            continue
+        res["tool"] = tool["name"]
+        res["tool_id"] = tool["id"]
+        results.append(res)
+    return results
+
+
+def get_rerank_health() -> dict:
+    """Snapshot whether the cross-encoder reranker will fire on next search.
+
+    Wrapper around ``reranker.rerank_status`` so the report layer can stay
+    free of engine imports — and so a reranker import failure (e.g. an
+    older install where the module hasn't shipped yet) degrades gracefully
+    instead of breaking ``memee doctor``.
+    """
+    try:
+        from memee.engine.reranker import rerank_status
+        return rerank_status()
+    except Exception as e:
+        return {"error": str(e), "enabled": False}
+
+
 def get_db_health() -> dict:
     """Check database health."""
     from memee import config
@@ -291,14 +401,34 @@ def get_knowledge_health() -> dict:
         return {"error": True}
 
 
-def run_doctor(auto_fix: bool = True) -> dict:
-    """Run full health check and return results."""
+def run_doctor(
+    auto_fix: bool = True,
+    install_hooks: bool = True,
+    uninstall_hooks: bool = False,
+    dry_run: bool = False,
+) -> dict:
+    """Run full health check and return results.
+
+    Args:
+        auto_fix: when True, fix MCP misconfigurations.
+        install_hooks: when True (default), also install Memee hooks into
+            tools that support them (currently Claude Code only). Pass False
+            with ``--no-hooks`` to wire only MCP.
+        uninstall_hooks: when True, strip Memee hooks. Mutually exclusive
+            with ``install_hooks`` — if both are set, uninstall wins (it's
+            the more conservative action — the user explicitly asked).
+        dry_run: when True, no files are written. Doctor reports what it
+            *would* change so the user can preview before committing.
+    """
     results = {
         "tools": detect_ai_tools(),
         "database": get_db_health(),
         "knowledge": get_knowledge_health(),
+        "rerank": get_rerank_health(),
         "issues": [],
         "fixed": [],
+        "hooks": [],
+        "dry_run": dry_run,
     }
 
     # Check for issues
@@ -333,7 +463,7 @@ def run_doctor(auto_fix: bool = True) -> dict:
             })
 
     # Auto-fix tool configs if requested
-    if auto_fix:
+    if auto_fix and not dry_run:
         for issue in results["issues"]:
             if issue["type"] == "tool_not_configured":
                 try:
@@ -346,22 +476,19 @@ def run_doctor(auto_fix: bool = True) -> dict:
                 if success:
                     results["fixed"].append(issue["tool"])
 
-        # Sweep zombie research experiments left by Ctrl-C / crash.
-        try:
-            from memee.engine.research import reset_zombie_experiments
-            from memee.storage.database import get_session, init_db
+        # Zombie research-experiment sweep was removed with the research
+        # engine (v2.0.0). The whole experiment tracker is gone, no zombies.
 
-            session = get_session(init_db())
-            zombie_count = reset_zombie_experiments(session)
-            session.close()
-            if zombie_count:
-                results["fixed"].append(
-                    f"reset {zombie_count} zombie experiment"
-                    f"{'s' if zombie_count != 1 else ''}"
-                )
-        except Exception:
-            # Non-critical; don't break doctor over this.
-            pass
+    # Hook layer: this is what makes Memee fully automatic. We only act on
+    # tools that report ``supports_hooks=True`` AND are detected. The
+    # uninstall path runs first so a "doctor --uninstall-hooks" doesn't
+    # accidentally re-install one second later.
+    if uninstall_hooks:
+        results["hooks"] = uninstall_hooks_all(dry_run=dry_run)
+    elif install_hooks:
+        # Re-detect after MCP fixes so "claude_code" appears configured
+        # before we lay hooks on top. Same data structure either way.
+        results["hooks"] = install_hooks_all(dry_run=dry_run)
 
     return results
 
@@ -404,11 +531,55 @@ def print_doctor_report(results: dict):
         if tool["detected"] and tool["id"] in mcp_tool_ids:
             any_mcp_detected = True
 
+        # Append hook status for tools that support hooks. We add a small
+        # tag so the user can see at a glance whether the loop is wired.
+        if tool.get("supports_hooks"):
+            if tool.get("hooks_configured"):
+                status += f" {C.DIM}+ hooks{C.RESET}"
+            elif tool["configured"]:
+                status += f" {C.DIM}(no hooks){C.RESET}"
+        elif tool["detected"] and tool["id"] in {"cursor", "windsurf", "claude_desktop"}:
+            # Be honest about why some tools don't get the full automatic
+            # experience: their config file has no harness-level hooks block.
+            status += f" {C.DIM}(MCP only — client has no hooks){C.RESET}"
+
         config_hint = ""
         if tool.get("config_path") and tool["configured"]:
             config_hint = f"  {C.DIM}{tool['config_path']}{C.RESET}"
 
         print(f"    {icon} {tool['name']:<18s} {status}{config_hint}")
+
+    # Hook installation report — what was just written (or would be in
+    # dry-run). Only print this section if doctor actually touched hooks.
+    hook_results = results.get("hooks") or []
+    if hook_results:
+        dry = " (dry run — no changes)" if results.get("dry_run") else ""
+        print(f"\n  {C.BOLD}Hooks{dry}:{C.RESET}")
+        for hr in hook_results:
+            label = hr.get("tool", hr.get("path", "?"))
+            if hr.get("skipped_reason"):
+                print(
+                    f"    {C.YELLOW}!{C.RESET} {label}: "
+                    f"{C.DIM}{hr['skipped_reason']}{C.RESET}"
+                )
+                continue
+            diff = hr.get("diff", {})
+            added = sum(len(v) for v in diff.get("added", {}).values())
+            removed = sum(len(v) for v in diff.get("removed", {}).values())
+            changed = sum(len(v) for v in diff.get("changed", {}).values())
+            wrote = hr.get("wrote", False)
+            backup = hr.get("backup_path")
+            if wrote or results.get("dry_run"):
+                action = "would write" if results.get("dry_run") else "wrote"
+                print(
+                    f"    {C.GREEN}✓{C.RESET} {label}: {action} "
+                    f"+{added} ~{changed} -{removed} hooks"
+                    + (f"  {C.DIM}backup: {backup}{C.RESET}" if backup else "")
+                )
+            else:
+                print(
+                    f"    {C.DIM}-{C.RESET} {label}: nothing to do"
+                )
 
     # Show the manual snippet when no MCP client was detected — mirrors the
     # installer behaviour, so an agent running in an unsupported client still
@@ -418,6 +589,23 @@ def print_doctor_report(results: dict):
         print(f"    {C.DIM}No MCP client detected. If you use one not auto-configured,{C.RESET}")
         print(f"    {C.DIM}add this to its settings file:{C.RESET}")
         print(f'      {C.BCYAN}{{"mcpServers": {{"memee": {{"command": "memee", "args": ["serve"]}}}}}}{C.RESET}')
+
+    # Cross-encoder reranker status. Default-on when the HF cache is warm;
+    # off + actionable hint when the weights aren't on disk.
+    rr = results.get("rerank") or {}
+    print(f"\n  {C.BOLD}Reranker:{C.RESET}")
+    if rr.get("enabled"):
+        if rr.get("source") == "env_explicit":
+            print(f"    {C.GREEN}✓{C.RESET} rerank: enabled (MEMEE_RERANK_MODEL)")
+        else:
+            print(f"    {C.GREEN}✓{C.RESET} rerank: enabled (cached)")
+    else:
+        if rr.get("source") == "kill_switch":
+            print(f"    {C.YELLOW}!{C.RESET} rerank: disabled (MEMEE_RERANK kill switch)")
+        elif rr.get("error"):
+            print(f"    {C.YELLOW}!{C.RESET} rerank: disabled ({rr['error']})")
+        else:
+            print(f"    {C.YELLOW}!{C.RESET} rerank: disabled (no model cached; pip install memee[rerank] then memee embed --download-rerank)")
 
     # Knowledge Health
     kh = results["knowledge"]

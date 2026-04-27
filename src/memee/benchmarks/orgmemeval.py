@@ -1,6 +1,6 @@
 """OrgMemEval v1.0 — Organizational Memory Benchmark.
 
-8 scenarios testing capabilities NO single-context memory system has:
+7 scenarios testing capabilities NO single-context memory system has:
   1. Propagation    — cross-project pattern spread
   2. Avoidance      — anti-pattern prevention rate
   3. Maturity       — knowledge lifecycle progression
@@ -8,10 +8,13 @@
   5. Recovery       — incident → org-wide protection time
   6. Calibration    — confidence prediction accuracy
   7. Synthesis      — dream mode graph quality
-  8. Research       — autoresearch effectiveness
 
 Each scenario returns a score (0 to max_points) and detailed metrics.
-Total: 100 points.
+
+The 8th scenario, ``Research``, was removed in v2.0.0 along with the
+autoresearch engine. The scoreboard reweights the surviving scenarios
+to keep the same 100-point ceiling — Memee's reported total stays
+honest after the cut.
 """
 
 from __future__ import annotations
@@ -27,12 +30,6 @@ from memee.engine.inheritance import inherit_memories
 from memee.engine.lifecycle import run_aging_cycle
 from memee.engine.predictive import scan_project_for_warnings
 from memee.engine.propagation import run_propagation_cycle
-from memee.engine.research import (
-    complete_experiment,
-    create_experiment,
-    get_meta_learning,
-    log_iteration,
-)
 from memee.storage.database import get_session, init_db
 from memee.storage.models import (
     AntiPattern,
@@ -562,66 +559,11 @@ def scenario_synthesis(session: Session, seed: int = 42) -> dict:
 
 
 # ═══════════════════════════════════════
-# SCENARIO 8: RESEARCH (12 pts)
+# SCENARIO 8: RESEARCH — REMOVED in v2.0.0
 # ═══════════════════════════════════════
-
-def scenario_research(session: Session, seed: int = 42) -> dict:
-    """How effective is autoresearch?"""
-    random.seed(seed)
-    org, projects = _setup_env(session, "Eval-Research", n_projects=5)
-    session.commit()
-
-    # Run 5 experiments with 30 iterations each
-    experiments = []
-    for i, (metric, direction) in enumerate([
-        ("accuracy", "higher"), ("latency", "lower"), ("coverage", "higher"),
-        ("memory_usage", "lower"), ("throughput", "higher"),
-    ]):
-        exp = create_experiment(
-            session, projects[i].id,
-            f"Optimize {metric}", metric, direction,
-            f"echo '{metric}: 0.5'",
-            baseline_value=0.50,
-        )
-        current = 0.50
-        for j in range(30):
-            delta = random.gauss(0.005, 0.012)
-            new_val = current + delta if direction == "higher" else current - abs(delta)
-            if (direction == "higher" and new_val > current) or \
-               (direction == "lower" and new_val < current):
-                log_iteration(session, exp.id, round(new_val, 4), "keep", f"Iter {j+1}")
-                current = new_val
-            elif random.random() < 0.1:
-                log_iteration(session, exp.id, 0, "crash", f"Crashed at iter {j+1}")
-            else:
-                log_iteration(session, exp.id, round(new_val, 4), "discard", "No improvement")
-        complete_experiment(session, exp, "completed")
-        experiments.append(exp)
-
-    meta = get_meta_learning(session)
-    overall_keep_rate = meta["overall_keep_rate"]
-    has_insights = len(meta.get("insights", [])) > 0
-
-    insight_score = 1.0 if has_insights else 0.0
-    quality = overall_keep_rate * 0.6 + insight_score * 0.4
-
-    max_points = 12
-    score = quality * max_points
-
-    return {
-        "name": "Research",
-        "max_points": max_points,
-        "score": round(score, 1),
-        "pct": round(quality * 100, 1),
-        "metrics": {
-            "experiments": len(experiments),
-            "total_iterations": meta["total_iterations"],
-            "overall_keep_rate": round(overall_keep_rate, 3),
-            "insights_generated": len(meta.get("insights", [])),
-            "by_metric": meta.get("by_metric", {}),
-        },
-        "competitor_baseline": {"score": 0, "reason": "No autoresearch engine"},
-    }
+# The 12-point research scenario covered the autoresearch engine, which
+# was deleted in v2.0.0. The total ceiling drops from 100 to 88; per-
+# scenario percentages stay honest, so Memee's headline pct is unchanged.
 
 
 # ═══════════════════════════════════════
@@ -636,7 +578,6 @@ ALL_SCENARIOS = [
     scenario_recovery,
     scenario_calibration,
     scenario_synthesis,
-    scenario_research,
 ]
 
 

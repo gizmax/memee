@@ -25,8 +25,24 @@ def cli(ctx, org):
 @cli.command()
 @click.argument("mode", required=False, default=None,
                 type=click.Choice(["solo", "join", "team", None]))
-def setup(mode):
+@click.option(
+    "--no-hooks", is_flag=True,
+    help="Wire MCP only — skip the SessionStart/UserPromptSubmit/Stop hooks "
+         "that make Memee fully automatic. Default: hooks on.",
+)
+@click.option(
+    "--dry-run", is_flag=True,
+    help="Show what setup would change without writing any files.",
+)
+def setup(mode, no_hooks, dry_run):
     """Interactive setup wizard with beautiful terminal UI."""
+    # The installer reads these via module-level globals so the wizard's
+    # rich UI can decide whether to advertise the automatic experience or
+    # the MCP-only one.
+    from memee import installer as _installer
+
+    _installer.SETUP_FLAGS = {"no_hooks": no_hooks, "dry_run": dry_run}
+
     from memee.installer import run_setup, _setup_solo, _setup_join, _setup_team_lead, _clear
 
     if mode == "solo":
@@ -53,11 +69,28 @@ def setup(mode):
 
 @cli.command()
 @click.option("--no-fix", is_flag=True, help="Don't auto-fix issues, just report")
-def doctor(no_fix):
+@click.option(
+    "--no-hooks", is_flag=True,
+    help="Wire MCP only — don't install SessionStart/UserPromptSubmit/Stop hooks.",
+)
+@click.option(
+    "--uninstall-hooks", is_flag=True,
+    help="Remove Memee-installed hooks (leaves user's other hooks intact).",
+)
+@click.option(
+    "--dry-run", is_flag=True,
+    help="Show what doctor would change without writing any files.",
+)
+def doctor(no_fix, no_hooks, uninstall_hooks, dry_run):
     """Health check: scan system, detect AI tools, fix configuration."""
     from memee.doctor import print_doctor_report, run_doctor
 
-    results = run_doctor(auto_fix=not no_fix)
+    results = run_doctor(
+        auto_fix=not no_fix,
+        install_hooks=not no_hooks and not uninstall_hooks,
+        uninstall_hooks=uninstall_hooks,
+        dry_run=dry_run,
+    )
     print_doctor_report(results)
 
 
@@ -407,7 +440,7 @@ def validate(memory_id, evidence, project):
 
 @cli.command()
 def status():
-    """Show organizational learning dashboard."""
+    """Show organizational learning summary."""
     from sqlalchemy import func
 
     from memee.storage.database import get_session, init_db
@@ -456,267 +489,11 @@ def status():
         click.echo(f"  {t:15s} {count:4d}")
 
 
-# ── Research Commands ──
-
-
-@cli.group()
-def research():
-    """Autoresearch experiment management."""
-    pass
-
-
-@research.command("start")
-@click.argument("goal")
-@click.option("--metric", "-m", required=True, help="Metric name (e.g. accuracy, coverage)")
-@click.option("--direction", "-d", type=click.Choice(["higher", "lower"]), default="higher")
-@click.option("--verify", "-v", required=True, help="Command to measure metric")
-@click.option("--guard", "-g", default="", help="Command that must pass (exit 0)")
-@click.option("--scope", "-s", default="", help="File globs (comma-separated)")
-@click.option("--project", "-p", default="", help="Project path")
-@click.option("--baseline", "-b", default=None, type=float, help="Baseline value (auto-measured if omitted)")
-def research_start(goal, metric, direction, verify, guard, scope, project, baseline):
-    """Start a new autoresearch experiment."""
-    from memee.engine.research import create_experiment
-    from memee.storage.database import get_session, init_db
-    from memee.storage.models import Project as ProjectModel
-
-    engine = init_db()
-    session = get_session(engine)
-
-    project_id = None
-    if project:
-        abs_path = str(Path(project).resolve())
-        proj = session.query(ProjectModel).filter_by(path=abs_path).first()
-        if proj:
-            project_id = proj.id
-
-    if not project_id:
-        proj = session.query(ProjectModel).first()
-        project_id = proj.id if proj else None
-
-    if not project_id:
-        click.echo("No project found. Register one first with 'memee project register'.")
-        return
-
-    scope_list = [s.strip() for s in scope.split(",") if s.strip()] if scope else []
-
-    exp = create_experiment(
-        session, project_id, goal, metric, direction, verify,
-        guard_command=guard, scope_globs=scope_list, baseline_value=baseline,
-    )
-
-    click.echo(f"Experiment started: {exp.id[:8]}")
-    click.echo(f"  Goal: {goal}")
-    click.echo(f"  Metric: {metric} ({direction})")
-    click.echo(f"  Baseline: {exp.baseline_value}")
-    click.echo(f"  Verify: {verify}")
-    if guard:
-        click.echo(f"  Guard: {guard}")
-
-
-@research.command("log")
-@click.argument("experiment_id")
-@click.argument("metric_value", type=float)
-@click.argument("status", type=click.Choice(["keep", "discard", "crash"]))
-@click.option("--desc", "-d", default="", help="Description")
-@click.option("--commit", "-c", default="", help="Git commit hash")
-def research_log_cmd(experiment_id, metric_value, status, desc, commit):
-    """Log an iteration result."""
-    from memee.engine.research import log_iteration
-    from memee.storage.database import get_session, init_db
-
-    engine = init_db()
-    session = get_session(engine)
-
-    try:
-        it = log_iteration(session, experiment_id, metric_value, status, desc, commit)
-        exp = it.experiment
-        keep_rate = exp.keeps / max(exp.total_iterations, 1)
-        click.echo(f"Iteration {it.iteration_number}: [{status.upper()}] "
-                    f"value={metric_value} delta={it.delta:+.4f}")
-        click.echo(f"  Keep rate: {keep_rate:.0%} ({exp.keeps}/{exp.total_iterations})")
-    except ValueError as e:
-        click.echo(f"Error: {e}")
-
-
-@research.command("run")
-@click.argument("experiment_id")
-@click.option("--desc", "-d", default="", help="Description of this iteration's changes")
-@click.option("--commit", "-c", default="", help="Git commit hash")
-@click.option("--cwd", default=None, help="Working directory for commands")
-def research_run_cmd(experiment_id, desc, commit, cwd):
-    """Run one iteration: execute guard → verify → compare → keep/discard."""
-    from memee.engine.research import run_iteration
-    from memee.storage.database import get_session, init_db
-    from memee.storage.models import ResearchExperiment
-
-    engine = init_db()
-    session = get_session(engine)
-
-    exp = session.get(ResearchExperiment, experiment_id)
-    if not exp:
-        # Try partial ID
-        exps = session.query(ResearchExperiment).filter(
-            ResearchExperiment.id.like(f"{experiment_id}%")
-        ).all()
-        exp = exps[0] if len(exps) == 1 else None
-
-    if not exp:
-        click.echo(f"Experiment not found: {experiment_id}")
-        return
-
-    click.echo(f"Running iteration {exp.total_iterations + 1}...")
-    it = run_iteration(session, exp, description=desc, commit_hash=commit, cwd=cwd)
-
-    icon = {"keep": "+", "discard": ".", "crash": "X"}[it.status]
-    click.echo(f"  [{icon}] {it.status.upper()}: "
-               f"value={it.metric_value} delta={it.delta:+.4f}" if it.metric_value else
-               f"  [X] CRASH: {it.description}")
-
-    keep_rate = exp.keeps / max(exp.total_iterations, 1)
-    click.echo(f"  Best: {exp.best_value} | Keep rate: {keep_rate:.0%}")
-
-
-@research.command("status")
-@click.argument("experiment_id", default="")
-def research_status_cmd(experiment_id):
-    """Show experiment status (or list all if no ID given)."""
-    from memee.engine.research import get_experiment_status, list_experiments
-    from memee.storage.database import get_session, init_db
-
-    engine = init_db()
-    session = get_session(engine)
-
-    if not experiment_id:
-        experiments = list_experiments(session)
-        if not experiments:
-            click.echo("No experiments found.")
-            return
-        click.echo(f"{'ID':>8s} | {'Status':>10s} | {'Goal':<30s} | {'Keep%':>5s} | {'Baseline':>8s} | {'Best':>8s}")
-        click.echo(f"{'─'*8} | {'─'*10} | {'─'*30} | {'─'*5} | {'─'*8} | {'─'*8}")
-        for e in experiments:
-            click.echo(
-                f"{e['id'][:8]:>8s} | {e['status']:>10s} | {e['goal'][:30]:<30s} | "
-                f"{e['keep_rate']:5.0%} | {e['baseline'] or 0:8.4f} | {e['best'] or 0:8.4f}"
-            )
-        return
-
-    status = get_experiment_status(session, experiment_id)
-    if "error" in status:
-        # Try partial ID
-        from memee.storage.models import ResearchExperiment
-        exps = session.query(ResearchExperiment).filter(
-            ResearchExperiment.id.like(f"{experiment_id}%")
-        ).all()
-        if len(exps) == 1:
-            status = get_experiment_status(session, exps[0].id)
-        else:
-            click.echo(status["error"])
-            return
-
-    click.echo(f"Experiment: {status['id'][:8]}")
-    click.echo(f"  Goal:       {status['goal']}")
-    click.echo(f"  Metric:     {status['metric']} ({status['direction']})")
-    click.echo(f"  Status:     {status['status']}")
-    click.echo(f"  Baseline:   {status['baseline']}")
-    click.echo(f"  Best:       {status['best']}")
-    click.echo(f"  Improvement:{status['improvement']:+.4f}")
-    click.echo(f"  Iterations: {status['total_iterations']} "
-               f"(keep:{status['keeps']} discard:{status['discards']} crash:{status['crashes']})")
-    click.echo(f"  Keep rate:  {status['keep_rate']:.0%}")
-
-    if status["trajectory"]:
-        click.echo("\n  Trajectory:")
-        for t in status["trajectory"]:
-            icon = {"keep": "+", "discard": ".", "crash": "X"}.get(t["status"], "?")
-            val = f"{t['value']:.4f}" if t["value"] is not None else "N/A"
-            delta = f"{t['delta']:+.4f}" if t["delta"] is not None else ""
-            bar = "█" * int((t["value"] or 0) * 20) if t["value"] else ""
-            click.echo(f"    {t['iteration']:3d} [{icon}] {val} {delta} {bar}")
-
-
-@research.command("meta")
-def research_meta_cmd():
-    """Show meta-learning insights across all experiments."""
-    from memee.engine.research import get_meta_learning
-    from memee.storage.database import get_session, init_db
-
-    engine = init_db()
-    session = get_session(engine)
-
-    meta = get_meta_learning(session)
-    if "message" in meta:
-        click.echo(meta["message"])
-        return
-
-    click.echo("=== AUTORESEARCH META-LEARNING ===")
-    click.echo(f"  Total experiments: {meta['total_experiments']}")
-    click.echo(f"  Completed: {meta['completed']}")
-    click.echo(f"  Total iterations: {meta['total_iterations']}")
-    click.echo(f"  Overall keep rate: {meta['overall_keep_rate']:.0%}")
-    click.echo(f"  Keeps/Discards/Crashes: {meta['keeps']}/{meta['discards']}/{meta['crashes']}")
-
-    if meta.get("by_metric"):
-        click.echo("\n  By Metric:")
-        for name, stats in meta["by_metric"].items():
-            click.echo(f"    {name}: keep={stats['keep_rate']:.0%} "
-                       f"avg_improvement={stats['avg_improvement']:+.4f} "
-                       f"({stats['experiments']} experiments)")
-
-    if meta.get("improvement_by_phase"):
-        click.echo("\n  Improvement by Phase:")
-        for phase, total in meta["improvement_by_phase"].items():
-            bar = "█" * int(total * 10)
-            click.echo(f"    {phase:15s}: {total:.4f} {bar}")
-
-    if meta.get("insights"):
-        click.echo("\n  Insights:")
-        for insight in meta["insights"]:
-            click.echo(f"    - {insight}")
-
-
-@research.command("complete")
-@click.argument("experiment_id")
-@click.option("--status", "-s", type=click.Choice(["completed", "failed", "cancelled"]), default="completed")
-def research_complete_cmd(experiment_id, status):
-    """Mark an experiment as completed/failed/cancelled."""
-    from memee.engine.research import complete_experiment
-    from memee.storage.database import get_session, init_db
-    from memee.storage.models import ResearchExperiment
-
-    engine = init_db()
-    session = get_session(engine)
-
-    exp = session.get(ResearchExperiment, experiment_id)
-    if not exp:
-        exps = session.query(ResearchExperiment).filter(
-            ResearchExperiment.id.like(f"{experiment_id}%")
-        ).all()
-        exp = exps[0] if len(exps) == 1 else None
-
-    if not exp:
-        click.echo(f"Experiment not found: {experiment_id}")
-        return
-
-    complete_experiment(session, exp, status)
-    click.echo(f"Experiment {exp.id[:8]} marked as {status}.")
-    if status == "completed" and exp.keeps > 0:
-        click.echo("  Lesson recorded to organizational memory.")
-
-
-@research.command("reset-zombies")
-@click.option("--stale-hours", type=int, default=24,
-              help="Minimum age (hours) of a running experiment before it's considered stale.")
-def research_reset_zombies_cmd(stale_hours):
-    """Reset stale 'running' experiments (crashed/killed) to 'failed'."""
-    from memee.engine.research import reset_zombie_experiments
-    from memee.storage.database import get_session, init_db
-
-    engine = init_db()
-    session = get_session(engine)
-
-    count = reset_zombie_experiments(session, stale_after_hours=stale_hours)
-    click.echo(f"Reset {count} zombie experiment{'s' if count != 1 else ''}.")
+# ── Research Commands — REMOVED in v2.0.0 ──
+# The autoresearch engine (create/log/run/status/meta/complete) was an
+# orthogonal Karpathy-style harness, not institutional memory. It bloated
+# every agent's MCP tool list and shipped a ~1.4 KLOC schema for nobody.
+# Use a dedicated tool (e.g. wandb, optuna) for experiment tracking.
 
 
 # ── LTR / hard-negative mining commands ──
@@ -1076,21 +853,121 @@ def review(diff_source):
 @click.option("--task", "-t", default="", help="What you're about to do")
 @click.option("--budget", "-b", default=500, help="Max tokens for briefing")
 @click.option("--full", is_flag=True, help="Full briefing (no token limit)")
-def brief(project, task, budget, full):
-    """Smart briefing: only relevant knowledge, token-budgeted."""
+@click.option(
+    "--format", "fmt",
+    type=click.Choice(["default", "compact"]),
+    default="default",
+    help="Output format. 'compact' strips headers and emits 5-7 short bullet "
+         "lines; designed for hook injection where every token counts.",
+)
+def brief(project, task, budget, full, fmt):
+    """Smart briefing: only relevant knowledge, token-budgeted.
+
+    Wraps the smart router (default) or the full briefing engine (``--full``).
+    The hook layer calls this on SessionStart and UserPromptSubmit with
+    ``--format compact --budget 200..300``; humans usually want the default.
+    """
     from memee.storage.database import get_session, init_db
 
     session = get_session(init_db())
-    abs_path = str(Path(project).resolve())
+    # Project may not exist locally yet (e.g. fresh git worktree the agent
+    # opens before any setup). Path.resolve(strict=False) handles that.
+    try:
+        abs_path = str(Path(project).resolve(strict=False))
+    except OSError:
+        abs_path = project
 
-    if full:
-        from memee.engine.briefing import briefing
-        result = briefing(session, abs_path, task_description=task)
-    else:
-        from memee.engine.router import smart_briefing
-        result = smart_briefing(session, abs_path, task=task, token_budget=budget)
+    try:
+        if full:
+            from memee.engine.briefing import briefing
+            result = briefing(
+                session, abs_path,
+                task_description=task,
+                compact=(fmt == "compact"),
+            )
+        elif fmt == "compact":
+            # Compact is the hook format: render via smart_briefing then
+            # post-trim to 5-7 short lines (no decoration, no footer noise)
+            # and re-check the budget. The router already enforces the
+            # budget; we just strip and tighten.
+            from memee.engine.router import _count_tokens, smart_briefing
+            raw = smart_briefing(
+                session, abs_path, task=task, token_budget=budget
+            )
+            result = _to_compact(raw, budget=budget, count_tokens=_count_tokens)
+        else:
+            from memee.engine.router import smart_briefing
+            result = smart_briefing(
+                session, abs_path, task=task, token_budget=budget
+            )
+    except Exception as e:
+        # A briefing failure must never break the agent's session. Hooks run
+        # this command on every prompt; if a corrupt DB or a search error
+        # bubbled out, every keystroke would error out. Log to stderr and
+        # exit 0 so the harness moves on.
+        click.echo(f"memee brief: {e}", err=True)
+        return
 
     click.echo(result)
+
+
+def _to_compact(raw: str, budget: int, count_tokens) -> str:
+    """Trim a smart-briefing into a compact 5-7 line bullet list.
+
+    Drops the verbose footer (the ``[N memories — memee search ...]`` and
+    the ``[~X tokens / Y budget]`` lines) and any blank separators so the
+    result fits comfortably inside the agent's context. Bullet markers
+    from the router (``⚠``, ``✓``, ``[SEV]``) survive — they're already
+    short and signal severity at a glance.
+
+    Citation footer (``---\\nCite Memee canon …``) is appended after
+    trimming so the agent always sees the cite contract; the footer is
+    capped to ≤200 tokens by spec, well under any realistic budget.
+
+    If the trimmed output still exceeds the budget, lines are dropped from
+    the tail until it fits or only one line remains. The citation footer
+    is preserved at the cost of bullets — it's the load-bearing
+    instruction; bullets without a cite contract are decoration.
+    """
+    if not raw:
+        return ""
+    from memee.engine.citations import get_citation_footer
+
+    bullets: list[str] = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Skip footer lines and section headers — bullets only.
+        if stripped.startswith("[") and stripped.endswith("]"):
+            continue
+        if stripped.endswith(":") and not stripped.startswith(("⚠", "✓", "[")):
+            continue
+        bullets.append(stripped)
+        if len(bullets) >= 7:
+            break
+
+    footer = get_citation_footer()
+    footer_tokens = count_tokens(footer)
+    # The hook layer ships at budget=200..300 where the footer is well
+    # under the ceiling. If the caller passed a budget so small the
+    # footer alone would blow it, drop the footer rather than the bullets
+    # (callers running at budget≪footer aren't shipping to a session
+    # hook — they're tests or ad-hoc trims).
+    include_footer = budget >= footer_tokens
+    if include_footer:
+        while bullets and count_tokens("\n".join(bullets)) + footer_tokens > budget:
+            if len(bullets) == 1:
+                break
+            bullets.pop()
+    else:
+        while len(bullets) > 1 and count_tokens("\n".join(bullets)) > budget:
+            bullets.pop()
+
+    pieces = bullets[:]
+    if include_footer:
+        pieces.append(footer)
+    return "\n".join(pieces)
 
 
 @cli.command()
@@ -1151,6 +1028,125 @@ def embed():
 
 
 @cli.command()
+@click.option(
+    "--auto", is_flag=True,
+    help="Run in hook mode: infer project + diff from CWD, exit 0 on no-op, "
+         "write nothing to stdout unless something was learned.",
+)
+@click.option(
+    "--project", "-p", default="",
+    help="Project path (default: current directory)",
+)
+@click.option(
+    "--diff", "diff_text", default="",
+    help="git diff text to review. Default: read from `git diff` in --project.",
+)
+@click.option(
+    "--outcome", default="success",
+    type=click.Choice(["success", "failure"]),
+    help="Outcome of the task being reviewed.",
+)
+@click.option("--agent", default="", help="Agent / developer name")
+@click.option("--model", default="", help="AI model used (claude-opus-4, gpt-4o, ...)")
+def learn(auto, project, diff_text, outcome, agent, model):
+    """Post-task review: scan the latest diff, validate patterns, log impact.
+
+    The Stop hook fires this with ``--auto`` so the loop closes without the
+    agent having to remember. In auto mode:
+
+      * The current directory is treated as the project.
+      * ``git diff`` (working tree) is captured and fed to the review engine.
+      * On a no-op (empty diff, no recent activity), exit 0 silently.
+      * On a successful review, print exactly one structured line.
+      * Any error goes to stderr and we still exit 0 — a hook MUST NOT
+        fail the agent's session.
+
+    Manual mode (without ``--auto``) is for humans / scripts that want to
+    explicitly drive the review against a chosen diff.
+    """
+    import os as _os
+    import subprocess as _sub
+
+    try:
+        # Resolve the project path. In --auto mode the hook is fired from
+        # whatever CWD Claude Code launched in; that's almost always the
+        # project root.
+        if not project:
+            project = _os.environ.get("CLAUDE_PROJECT_DIR") or _os.getcwd()
+        try:
+            abs_path = str(Path(project).resolve(strict=False))
+        except OSError:
+            abs_path = project
+
+        # Source the diff. Caller-provided wins; otherwise, in a git repo,
+        # take the working-tree diff. If the directory isn't a git repo the
+        # subprocess returns non-zero — treat as no-op in --auto mode.
+        if not diff_text:
+            try:
+                proc = _sub.run(
+                    ["git", "diff", "--no-color", "--unified=0"],
+                    cwd=abs_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0,
+                )
+                if proc.returncode == 0:
+                    diff_text = proc.stdout
+            except (FileNotFoundError, _sub.TimeoutExpired, OSError):
+                # No git, or hung — silent no-op in auto, surface in manual.
+                if not auto:
+                    click.echo("memee learn: git not available or timed out", err=True)
+
+        if not diff_text.strip():
+            if auto:
+                # Silent no-op: hook fires on every Stop, including chats
+                # with no code changes. Nothing to learn.
+                return
+            click.echo("memee learn: no diff to review", err=True)
+            return
+
+        from memee.engine.feedback import post_task_review
+        from memee.storage.database import get_session, init_db
+
+        session = get_session(init_db())
+        result = post_task_review(
+            session,
+            diff_text=diff_text,
+            project_path=abs_path,
+            agent=agent,
+            model=model,
+            outcome=outcome,
+        )
+    except Exception as e:
+        # Hook safety: never break the session. Errors go to stderr,
+        # exit code stays 0.
+        click.echo(f"memee learn: {e}", err=True)
+        return
+
+    patterns_followed = result.get("patterns_followed", 0)
+    warnings_violated = result.get("warnings_violated", 0)
+    # ``new_patterns`` placeholder for future expansion (when feedback also
+    # auto-records candidate patterns from the diff). For now report 0 so
+    # the structured-line shape is stable for parsers.
+    new_patterns = 0
+
+    if auto:
+        # Silent unless something was learned. A noisy hook gets disabled.
+        if patterns_followed == 0 and warnings_violated == 0:
+            return
+        click.echo(
+            f"memee learn: ok (warnings_avoided={warnings_violated}, "
+            f"patterns_followed={patterns_followed}, new_patterns={new_patterns})"
+        )
+    else:
+        click.echo(
+            f"Patterns followed: {patterns_followed}\n"
+            f"Warnings violated: {warnings_violated}\n"
+            f"Outcome: {result.get('outcome', outcome)}"
+        )
+
+
+@cli.command()
 def serve():
     """Start Memee as MCP stdio server for Claude Code."""
     from memee.mcp_server import mcp
@@ -1164,12 +1160,12 @@ def serve():
 @cli.command()
 @click.option("--weeks", "-w", default=52, help="Weeks to simulate")
 def demo(weeks):
-    """Generate enterprise-scale demo data for the dashboard."""
+    """Generate enterprise-scale demo data."""
     from memee.demo import generate_demo_data
 
     click.echo("Generating demo data...")
     generate_demo_data(weeks=weeks)
-    click.echo("Done! Run 'memee dashboard' to view.")
+    click.echo("Done! Run 'memee status' for a summary or 'memee benchmark' to score.")
 
 
 # ── CMAM (Claude Managed Agents Memory) ──
@@ -1261,6 +1257,221 @@ def cmam_status(store_id, backend, local_root, api_base):
             click.echo(f"  ... +{len(info['paths']) - 20} more")
 
 
+# ── Pack format (.memee) ──
+
+
+@cli.group()
+def pack():
+    """Build, install, verify ``.memee`` knowledge packs.
+
+    A ``.memee`` pack is a portable, optionally-signed bundle of validated
+    memories. See ``docs/pack-format.md`` for the full spec.
+    """
+
+
+def _resolve_signing_key(key_arg: str | None) -> bytes | None:
+    """Locate a private signing key.
+
+    Order: explicit ``--key`` arg → ``MEMEE_PACK_KEY`` env var → none.
+    Returns the PEM bytes or ``None`` if no key is configured.
+    """
+    import os as _os
+
+    candidate = key_arg or _os.environ.get("MEMEE_PACK_KEY")
+    if not candidate:
+        return None
+    p = Path(candidate)
+    if not p.exists():
+        raise click.ClickException(f"signing key not found: {p}")
+    return p.read_bytes()
+
+
+@pack.command("export")
+@click.option("--name", default=None, help="Pack name (default: parent dir basename)")
+@click.option("--pack-version", "version", default="0.1.0", help="Pack version (semver)")
+@click.option("--title", default=None, help="Pack title (default: derived from name)")
+@click.option("--description", default="", help="Pack description")
+@click.option("--author", default="", help="Pack author")
+@click.option("--license", "license_", default="MIT", help="SPDX licence id")
+@click.option("--confidence-cap", default=0.6, type=float,
+              help="Cap imported confidences at this value")
+@click.option("--stack", default="", help="Comma-separated stack tags")
+@click.option("--canon-only", is_flag=True,
+              help="Only export memories at maturity=canon (else canon+validated)")
+@click.option("--out", "out_path", default=None,
+              help="Output file (default: <name>.memee in cwd; '-' for stdout)")
+@click.option("--key", "key_path", default=None,
+              help="Path to ed25519 private key (PEM). Falls back to MEMEE_PACK_KEY.")
+def pack_export(
+    name, version, title, description, author, license_,
+    confidence_cap, stack, canon_only, out_path, key_path,
+):
+    """Export validated/canon memories as a ``.memee`` pack."""
+    from memee.engine.packs import export_pack, export_pack_to_stream
+    from memee.storage.database import get_session, init_db
+
+    if not name:
+        name = Path.cwd().name
+    if not title:
+        title = f"{name} canon"
+    stack_list = [s.strip() for s in stack.split(",") if s.strip()] if stack else []
+
+    private_key = _resolve_signing_key(key_path)
+
+    engine = init_db()
+    session = get_session(engine)
+
+    if out_path == "-":
+        # Streaming to stdout — emit no human-readable line, only the bytes.
+        result = export_pack_to_stream(
+            session,
+            name=name, version=version, title=title,
+            stream=sys.stdout.buffer,
+            description=description,
+            confidence_cap=confidence_cap,
+            stack=stack_list,
+            canon_only=canon_only,
+            private_key_pem=private_key,
+        )
+        click.echo(
+            f"pack exported: <stdout> ({result.memories} memories, "
+            f"signed={'Y' if result.signed else 'N'})",
+            err=True,
+        )
+        return
+
+    result = export_pack(
+        session,
+        name=name, version=version, title=title,
+        out=out_path,
+        description=description,
+        author=author,
+        license=license_,
+        confidence_cap=confidence_cap,
+        stack=stack_list,
+        canon_only=canon_only,
+        private_key_pem=private_key,
+    )
+    size_kb = max(1, result.size_bytes // 1024)
+    click.echo(
+        f"pack exported: {result.out_path} ({result.memories} memories, "
+        f"signed={'Y' if result.signed else 'N'}, size={size_kb} KB)"
+    )
+
+
+@pack.command("install")
+@click.argument("source", required=False)
+@click.option("--from-url", "from_url", default=None,
+              help="HTTPS URL of a .memee pack to download and install")
+@click.option("--unsigned", is_flag=True,
+              help="Allow installing an unsigned or invalidly-signed pack")
+@click.option("--upgrade", is_flag=True,
+              help="If a different version of this pack is installed, install alongside")
+def pack_install(source, from_url, unsigned, upgrade):
+    """Install a ``.memee`` pack into the local DB."""
+    from memee.engine.packs import install_pack
+    from memee.storage.database import get_session, init_db
+
+    if not source and not from_url:
+        raise click.UsageError("provide a FILE argument or --from-url URL")
+    if source and from_url:
+        raise click.UsageError("FILE and --from-url are mutually exclusive")
+
+    target = from_url or source
+    pack_filename = Path(source).name if source else None
+
+    engine = init_db()
+    session = get_session(engine)
+
+    try:
+        result = install_pack(
+            session,
+            target,
+            allow_unsigned=unsigned,
+            overwrite_version=upgrade,
+            pack_filename=pack_filename,
+        )
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    except FileNotFoundError as e:
+        raise click.ClickException(str(e))
+
+    if not result.signed and not unsigned:
+        # Reachable when allow_unsigned was True due to nothing being signed
+        # — never warn unless the pack actually claimed a sig.
+        pass
+
+    if result.no_op:
+        click.echo(
+            f"pack already installed: {result.name} v{result.version} (no-op)"
+        )
+        return
+
+    if not result.signed:
+        click.secho(
+            f"WARNING: pack {result.name} v{result.version} is unsigned. "
+            f"Trust depends on where you got it.",
+            fg="yellow",
+        )
+
+    click.echo(
+        f"pack installed: {result.name} v{result.version} "
+        f"(imported={result.imported}, merged={result.merged}, "
+        f"skipped={result.skipped}, signed={'Y' if result.signed else 'N'})"
+    )
+    if result.rejected:
+        click.echo(f"  {result.rejected} rows rejected by quality gate")
+
+
+@pack.command("list")
+def pack_list():
+    """List installed packs from ``~/.memee/packs.json``."""
+    from memee.engine.packs import list_installed
+
+    rows = list_installed()
+    if not rows:
+        click.echo("No packs installed.")
+        return
+
+    click.echo(f"{'NAME':<24s} {'VERSION':<10s} {'INSTALLED':<26s} {'SIGNED':<7s} COUNT")
+    click.echo("-" * 80)
+    for r in rows:
+        installed = (r.get("installed_at") or "")[:19].replace("T", " ")
+        signed = "Y" if r.get("signed") else "N"
+        count = int(r.get("imported", 0)) + int(r.get("merged", 0))
+        click.echo(
+            f"{(r.get('name') or '')[:24]:<24s} "
+            f"{(r.get('version') or '')[:10]:<10s} "
+            f"{installed:<26s} {signed:<7s} {count}"
+        )
+
+
+@pack.command("verify")
+@click.argument("source")
+def pack_verify(source):
+    """Verify a ``.memee`` pack's signature without installing.
+
+    Exit 0 on a valid signature OR an unsigned pack with no signature claim.
+    Exit 1 on tamper, signature mismatch, or unverifiable claim.
+    """
+    from memee.engine.packs import verify_file
+
+    try:
+        result = verify_file(source)
+    except (FileNotFoundError, ValueError) as e:
+        raise click.ClickException(str(e))
+
+    click.echo(f"pack: {result.name} v{result.version}")
+    click.echo(f"  memories: {result.memories}")
+    if result.counts:
+        click.echo(f"  manifest counts: {dict(result.counts)}")
+    click.echo(f"  signed: {'Y' if result.signed else 'N'}")
+    click.echo(f"  signature: {result.reason}")
+
+    if not result.valid:
+        sys.exit(1)
+
+
 # ── Retrieval feedback ──
 
 
@@ -1276,8 +1487,8 @@ def feedback(event_id, memory_id, position):
 
     EVENT_ID is the ``query_event_id`` printed by ``memee search`` (or
     returned by the MCP ``memory_search`` tool). MEMORY_ID is the memory you
-    ended up using. Memee uses this signal to compute hit@1 / hit@3 for the
-    dashboard Retrieval Health panel.
+    ended up using. Memee uses this signal to compute hit@1 / hit@3
+    retrieval health metrics (surfaced via ``/api/v1/retrieval``).
     """
     from memee.engine.telemetry import mark_event_accepted
     from memee.storage.database import get_session, init_db
@@ -1378,29 +1589,11 @@ def calibration_fit():
     )
 
 
-# ── Dashboard ──
-
-
-@cli.command()
-@click.option("--port", "-p", default=7878, help="Port number")
-@click.option("--open/--no-open", default=True, help="Open browser automatically")
-def dashboard(port, open):
-    """Start the web dashboard."""
-    import uvicorn
-
-    click.echo(f"Starting Memee dashboard at http://127.0.0.1:{port}")
-    if open:
-        import threading
-        import webbrowser
-
-        def _open():
-            import time
-            time.sleep(1)
-            webbrowser.open(f"http://127.0.0.1:{port}")
-
-        threading.Thread(target=_open, daemon=True).start()
-
-    uvicorn.run("memee.api.app:app", host="127.0.0.1", port=port, log_level="warning")
+# ── Dashboard — REMOVED in v2.0.0 ──
+# The web dashboard at port 7878 was deleted. Memee's pitch ends with
+# "no dashboards, no copilots, no magic." The CLI is the human surface;
+# agents talk to Memee via MCP. The JSON ``memee.api`` app still exists
+# (under the optional ``[api]`` extra) for integrations.
 
 
 # ── Helpers ──
@@ -1440,6 +1633,219 @@ def _get_or_create_project(session, project_path: str):
 
     abs_path = str(Path(project_path).resolve())
     return session.query(Project).filter_by(path=abs_path).first()
+
+
+
+@cli.command("why")
+@click.argument("snippet", required=False, default="")
+@click.option(
+    "--file", "-f", "file_path", default="",
+    help="Read snippet from a file instead of the positional argument.",
+)
+@click.option(
+    "--stdin", "use_stdin", is_flag=True,
+    help="Read snippet from stdin (e.g. `git diff | memee why --stdin`).",
+)
+@click.option(
+    "--limit", "-n", default=3, type=int,
+    help="Top N canon entries to surface (default: 3).",
+)
+@click.option(
+    "--format", "fmt",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Output format. JSON is for tooling; text is the screenshotable view.",
+)
+def why_cmd(snippet, file_path, use_stdin, limit, fmt):
+    """Explain a snippet against canon: which lesson would have prevented it.
+
+    Pass code or a free-form question as the positional argument, or
+    pipe a diff via ``--stdin``, or read from a file via ``--file``.
+    Returns the canon entries (anti-patterns + lessons) that match —
+    formatted as one screenshotable block per hit.
+    """
+    import json as _json
+    import sys as _sys
+
+    from memee.engine.citations import cite_token, explain
+    from memee.storage.database import get_session, init_db
+
+    # Resolve input: CLI arg > --file > --stdin (in that priority).
+    text_in = snippet or ""
+    if not text_in and file_path:
+        try:
+            text_in = Path(file_path).read_text(encoding="utf-8")
+        except OSError as e:
+            click.echo(f"memee why: cannot read {file_path}: {e}", err=True)
+            return
+    if not text_in and use_stdin:
+        text_in = _sys.stdin.read()
+
+    if not text_in.strip():
+        click.echo(
+            "memee why: pass a snippet, --file <path>, or --stdin", err=True
+        )
+        return
+
+    engine = init_db()
+    session = get_session(engine)
+
+    hits = explain(session, text_in, limit=limit)
+
+    if fmt == "json":
+        payload = []
+        for h in hits:
+            m = h["memory"]
+            ap = m.anti_pattern
+            payload.append({
+                "id": m.id,
+                "cite": cite_token(m.id),
+                "title": m.title,
+                "type": m.type,
+                "maturity": m.maturity,
+                "confidence": m.confidence_score,
+                "severity": ap.severity if ap else None,
+                "trigger": ap.trigger if ap else None,
+                "consequence": ap.consequence if ap else None,
+                "alternative": ap.alternative if ap else None,
+                "score": h.get("score", 0.0),
+            })
+        click.echo(_json.dumps({"hits": payload}, indent=2))
+        return
+
+    if not hits:
+        click.echo(
+            "no canon hit. either you're safe, or this is a new lesson — "
+            "record it with: memee record …"
+        )
+        return
+
+    for i, h in enumerate(hits):
+        m = h["memory"]
+        ap = m.anti_pattern
+        cite = cite_token(m.id)
+        conf = f"conf={m.confidence_score:.2f}"
+        click.echo(
+            f"{cite}   {m.title}          ({m.maturity}, {conf})"
+        )
+        if ap:
+            if ap.trigger:
+                click.echo(f"                 Trigger: {ap.trigger}")
+            if ap.consequence:
+                click.echo(f"                 Consequence: {ap.consequence}")
+            if ap.alternative:
+                click.echo(f"                 Alternative: {ap.alternative}")
+            click.echo(f"                 Severity: {ap.severity}")
+        else:
+            # Lesson rendering — show the body directly.
+            body = (m.content or "").strip()
+            if body and body != m.title:
+                # Take the first ~3 short lines so the screenshot fits.
+                for line in body.splitlines()[:3]:
+                    click.echo(f"                 {line}")
+        if i < len(hits) - 1:
+            click.echo("")
+
+
+@cli.command("cite")
+@click.argument("hash_or_id")
+@click.option(
+    "--confirm", is_flag=True,
+    help="Mark the citation as applied: bump application_count and append "
+         "an evidence_chain entry of kind 'citation'.",
+)
+@click.option(
+    "--note", default="",
+    help="Optional note attached to the citation evidence entry.",
+)
+@click.option(
+    "--format", "fmt",
+    type=click.Choice(["text", "json"]),
+    default="text",
+)
+def cite_cmd(hash_or_id, confirm, note, fmt):
+    """Resolve a `[mem:abc12345]` citation to its full lineage.
+
+    Accepts an 8-char short hash, a dashed UUID prefix, or the full
+    UUID. Use ``--confirm`` to record that the agent actually applied
+    this memory (a soft validation, see docs).
+    """
+    import json as _json
+
+    from memee.engine.citations import (
+        cite_token,
+        confirm_citation,
+        lineage,
+        resolve,
+    )
+    from memee.storage.database import get_session, init_db
+
+    engine = init_db()
+    session = get_session(engine)
+
+    memory = resolve(session, hash_or_id)
+    if memory is None:
+        click.echo(
+            f"memee cite: no unique memory matches '{hash_or_id}' "
+            "(unknown or ambiguous prefix)",
+            err=True,
+        )
+        sys.exit(1)
+        return
+
+    confirm_result = None
+    if confirm:
+        confirm_result = confirm_citation(session, memory, note=note)
+        # Re-fetch the lineage AFTER the confirm so the new entry shows up.
+
+    lin = lineage(session, memory)
+
+    if fmt == "json":
+        ap = memory.anti_pattern
+        payload = {
+            "id": memory.id,
+            "cite": cite_token(memory.id),
+            "title": memory.title,
+            "type": memory.type,
+            "maturity": memory.maturity,
+            "confidence": memory.confidence_score,
+            "severity": ap.severity if ap else None,
+            "source_url": memory.source_url,
+            "lineage": lin,
+        }
+        if confirm_result is not None:
+            payload["confirmed"] = confirm_result
+        click.echo(_json.dumps(payload, indent=2))
+        return
+
+    cite = cite_token(memory.id)
+    click.echo(f"{cite}   {memory.title}")
+    parts = [f"Type: {memory.type}"]
+    ap = memory.anti_pattern
+    if ap:
+        parts.append(f"severity={ap.severity}")
+    parts.append(f"maturity={memory.maturity}")
+    parts.append(f"conf={memory.confidence_score:.2f}")
+    click.echo(", ".join(parts))
+    click.echo("")
+    if lin:
+        click.echo("Lineage:")
+        for entry in lin:
+            ts = entry.get("ts", "")[:10]  # YYYY-MM-DD
+            kind = entry.get("kind", "?")
+            note_txt = entry.get("note", "")
+            click.echo(f"  {ts}  {note_txt}" if note_txt else f"  {ts}  {kind}")
+        click.echo("")
+    if memory.source_url:
+        click.echo("Source:")
+        click.echo(f"  {memory.source_url}")
+    if confirm_result is not None:
+        click.echo("")
+        click.echo(
+            f"Confirmed citation — application_count is now "
+            f"{confirm_result['application_count']}."
+        )
+
 
 
 def main() -> None:

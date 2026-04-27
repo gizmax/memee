@@ -1,0 +1,38 @@
+# .memee pack manifest — python-web v0.1.0
+# Format spec: see docs/pack-format.md
+
+name = "python-web"
+version = "0.1.0"
+title = "Python web — FastAPI + SQLAlchemy + pytest canon"
+description = """
+Hand-curated patterns, anti-patterns, decisions, and lessons for Python
+web services. Covers FastAPI, SQLAlchemy 2.0, Pydantic v2, pytest,
+alembic, ruff, uv, and the OWASP-shaped security canon every Python
+service needs from day one.
+"""
+author = "Memee maintainers <info@memee.eu>"
+homepage = "https://memee.eu/packs/python-web"
+license = "MIT"
+created = "2026-04-27"
+
+# Confidence cap: every memory in this pack starts at most this high.
+# User-validated memories will outrank pack defaults.
+confidence_cap = 0.6
+
+# Tags this pack expects to be relevant. Used by `memee pack search`.
+stack = ["python", "fastapi", "sqlalchemy", "pydantic", "pytest"]
+
+# Counts (filled in by `memee pack export`).
+[counts]
+memories = 30
+patterns = 16
+anti_patterns = 11
+decisions = 3
+lessons = 2
+
+# Provenance — empty for v0.1 hand-authored seed packs. Future packs
+# exported from a real DB will fill this with [project, contributor]
+# attribution chains.
+[[provenance]]
+kind = "seed"
+note = "Hand-curated by Memee maintainers as the v2.0.0 seed corpus."

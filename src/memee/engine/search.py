@@ -42,10 +42,36 @@ W_CONFIDENCE = 0.08
 # For our short candidate lists (typically 30–60 per retriever) k=40 keeps
 # the rank-1 lead pronounced without flattening the tail. Empirically on
 # our retrieval bench k=40 dominates k=60 by ~3 nDCG points.
+#
+# v2.0.0 grid search (tests/grid_search_ranker.py, 243 combinations):
+# swept ``TITLE_PHRASE_BOOST`` ∈ [1.10..1.50], BM25-only tag/conf
+# coefficients ±50 % (3×3 grid), and three ``MATURITY_MULTIPLIER`` shapes
+# (baseline / flatter / steeper) against the 207-query / 255-memory eval
+# with ``MEMEE_RERANK=0``. RRF_K is documented but unmeasurable in BM25-
+# only mode — left at 40. 66 / 243 runs beat baseline; the macro-best
+# (0.7300 vs baseline 0.7273, Δ +0.0027) failed the p<0.10 gate at
+# p=0.284. No variant passed both gates so the v2.0.0 ranker keeps the
+# tuned-by-hand defaults below. See .bench/v2_grid_search_log.json for
+# the full sweep + per-cluster artefacts.
 RRF_K = 40
 
 # Title boost: exact query or ≥3-word contiguous substring match (applied at most once).
 TITLE_PHRASE_BOOST = 1.3
+
+# Post-RRF heuristic boost coefficients. These multiplicatively lift docs
+# that have strong tag overlap with the query and / or high
+# confidence-weighted maturity. Tunable so the grid-search harness can
+# sweep them without monkeypatching the ranker body.
+TAG_BOOST_COEF = 0.5
+CONF_BOOST_COEF = 0.4
+
+# Linear blend coefficients for the BM25-only path (no embeddings on disk).
+# RRF degenerates to a single retriever in that case, so we keep the
+# legacy weighted sum. Tunable for the same reason as the post-RRF coefs:
+# the grid search harness needs to sweep them without monkeypatching.
+BM25_ONLY_BM25_W = 0.55
+BM25_ONLY_TAG_W = 0.25
+BM25_ONLY_CONF_W = 0.20
 
 # R13 project-aware reranking. When the caller passes ``project_id`` to
 # ``search_memories``, memories whose ``validated_project_ids`` contains
@@ -432,14 +458,18 @@ def search_memories(
                 rrf_score += 1.0 / (RRF_K + tag_rank[memory_id] + 1)
             # Tag and confidence are post-RRF signal boosts (multiplicative).
             # 1 + α gives a +α multiplier when the signal is at its max.
-            total = rrf_score * (1.0 + 0.5 * tag_score) * (1.0 + 0.4 * conf_score)
+            total = (
+                rrf_score
+                * (1.0 + TAG_BOOST_COEF * tag_score)
+                * (1.0 + CONF_BOOST_COEF * conf_score)
+            )
         else:
             # No vector retriever — fall back to the legacy linear blend so
             # BM25-only deployments don't lose tag/confidence weighting.
             total = (
-                0.55 * bm25_score
-                + 0.25 * tag_score
-                + 0.20 * conf_score
+                BM25_ONLY_BM25_W * bm25_score
+                + BM25_ONLY_TAG_W * tag_score
+                + BM25_ONLY_CONF_W * conf_score
             )
 
         # Apply title phrase boost (at most once) and intent boost (at most once).
@@ -485,11 +515,12 @@ def search_memories(
     # Stage 5a: optional cross-encoder rerank over the top-K of the RRF
     # stack. R14 ships this as the better candidate generator for the
     # ``paraphrastic`` and ``lexical_gap_hard`` clusters where pure RRF
-    # under-recalls. Default OFF (``MEMEE_RERANK_MODEL`` unset) because the
-    # cross-encoder is +50–200 ms / query at top-30; opt-in for callers
-    # whose latency budget can absorb it. When LTR is also active it runs
-    # AFTER the cross-encoder in stage 5b, so LTR sees the higher-quality
-    # candidate ordering as input.
+    # under-recalls. v2.0.0 made rerank default-ON when the HF cache is
+    # warm (see reranker.py); the +50-200 ms latency lifts macro nDCG@10
+    # by 0.0355. Cold start adds a one-shot 1-3 s model load on the first
+    # search of a process; subsequent searches reuse the module-cached
+    # CrossEncoder. When LTR is also active it runs AFTER the cross-encoder
+    # in stage 5b, so LTR sees the higher-quality candidate ordering.
     ranker_version = "rrf_v1"
     ranker_model_id: str | None = None
     try:

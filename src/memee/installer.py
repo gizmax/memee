@@ -50,6 +50,12 @@ class C:
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
+# Setup-time flags from `memee setup --no-hooks` / `--dry-run`. The CLI
+# command sets these on the module before invoking the wizard. Defaults
+# describe the happy path: hooks on, real writes.
+SETUP_FLAGS: dict = {"no_hooks": False, "dry_run": False}
+
+
 def _visible_len(s: str) -> int:
     """Length of `s` ignoring ANSI colour escapes, so box padding lands correctly."""
     return len(_ANSI_RE.sub("", s))
@@ -267,18 +273,32 @@ def _setup_solo():
     # ── Auto-configure AI tools ──
     _section("CONFIGURING AI TOOLS")
 
-    from memee.doctor import detect_ai_tools, configure_tool
+    from memee.doctor import (
+        configure_tool,
+        detect_ai_tools,
+        install_hooks_for,
+    )
+
+    no_hooks = bool(SETUP_FLAGS.get("no_hooks"))
+    dry_run = bool(SETUP_FLAGS.get("dry_run"))
 
     tools = detect_ai_tools()
     configured_tools = []
+    hooked_tools: list[str] = []
     for tool in tools:
         if tool["detected"] and not tool["configured"] and tool.get("can_auto_fix"):
             sys.stdout.write(f"  {C.GREEN}✓{C.RESET} {tool['name']:<18s} found → configuring... ")
             sys.stdout.flush()
-            success = configure_tool(tool["id"])
-            print(f"{C.GREEN}✓ done{C.RESET}" if success else f"{C.RED}✗ failed{C.RESET}")
-            if success:
+            if dry_run:
+                # In dry-run we don't write — just claim it would have worked
+                # so the rest of the wizard reads the same shape.
+                print(f"{C.DIM}(dry run){C.RESET}")
                 configured_tools.append(tool["name"])
+            else:
+                success = configure_tool(tool["id"])
+                print(f"{C.GREEN}✓ done{C.RESET}" if success else f"{C.RED}✗ failed{C.RESET}")
+                if success:
+                    configured_tools.append(tool["name"])
         elif tool["detected"] and tool["configured"]:
             print(f"  {C.GREEN}✓{C.RESET} {tool['name']:<18s} already configured")
             configured_tools.append(tool["name"])
@@ -287,6 +307,37 @@ def _setup_solo():
             print(f"  {C.GREEN}✓{C.RESET} {tool['name']:<18s} {note}")
         else:
             print(f"  {C.DIM}-{C.RESET} {tool['name']:<18s} not installed")
+
+        # Hook layer: only fire for tools that support it (Claude Code today).
+        # We do this in the same loop so the user sees per-tool progress and
+        # the post-setup summary can name the hooked tools accurately.
+        if (
+            tool["detected"]
+            and tool.get("supports_hooks")
+            and not no_hooks
+        ):
+            try:
+                hook_res = install_hooks_for(tool["id"], dry_run=dry_run)
+            except Exception as e:
+                hook_res = {"skipped_reason": str(e)}
+            if hook_res:
+                if hook_res.get("skipped_reason"):
+                    print(
+                        f"      {C.YELLOW}!{C.RESET} hooks skipped: "
+                        f"{C.DIM}{hook_res['skipped_reason']}{C.RESET}"
+                    )
+                else:
+                    label = "would write" if dry_run else "wired"
+                    backup = hook_res.get("backup_path")
+                    backup_hint = (
+                        f"  {C.DIM}backup: {Path(backup).name}{C.RESET}"
+                        if backup else ""
+                    )
+                    print(
+                        f"      {C.GREEN}↳{C.RESET} hooks {label} "
+                        f"(SessionStart, UserPromptSubmit, Stop){backup_hint}"
+                    )
+                    hooked_tools.append(tool["name"])
 
     tools_str = ", ".join(configured_tools) if configured_tools else "none (run memee doctor later)"
 
@@ -306,7 +357,26 @@ def _setup_solo():
     # ── You're done. Say so clearly. ──
     _section("YOU'RE DONE")
 
-    print(f"  {C.BOLD}Memee is now live and fully automatic.{C.RESET}")
+    if hooked_tools and not dry_run:
+        print(f"  {C.BOLD}Memee is now live and fully automatic.{C.RESET}")
+        print(
+            f"  {C.GREEN}Hooks installed{C.RESET}: every "
+            f"{', '.join(hooked_tools)} session starts with a routed briefing,"
+        )
+        print("  every prompt gets task-routed context, every Stop runs post-task review.")
+    elif no_hooks:
+        print(f"  {C.BOLD}Memee MCP is wired. Hooks were skipped (--no-hooks).{C.RESET}")
+        print("  The agent can call Memee tools when it remembers — but the")
+        print("  automatic loop is off. Run `memee doctor` (without --no-hooks)")
+        print("  any time to enable hooks.")
+    elif dry_run:
+        print(f"  {C.BOLD}Dry run complete. No files were written.{C.RESET}")
+        print("  Re-run `memee setup` (without --dry-run) to apply changes.")
+    else:
+        # No hook-capable tool detected — be honest.
+        print(f"  {C.BOLD}Memee is wired via MCP.{C.RESET}")
+        print("  No hook-capable client detected, so the automatic loop is off.")
+        print("  When you install Claude Code, run `memee doctor` to wire hooks.")
     print()
     print("  From this moment, every time your AI assistant works on a task:")
     print(f"  {C.GREEN}•{C.RESET} it sees only the memories that matter for that task (routed)")
@@ -338,7 +408,7 @@ def _setup_solo():
         ("Record a pattern", 'memee record pattern "Always use timeout" -t python,api'),
         ("Search memories",  'memee search "timeout API"'),
         ("Check anti-patterns", 'memee check "processing PDF files"'),
-        ("Run the dashboard", 'memee dashboard'),
+        ("See learning summary", 'memee status'),
         ("Reproduce the benchmarks", 'memee benchmark'),
     ]
 
