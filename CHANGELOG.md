@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] — 2026-04-27
+
+The "doctor heals itself" patch. v2.0.1 added detection for the
+PATH-shadowing bug; v2.0.2 makes `memee doctor` actually fix it instead
+of just printing a hint.
+
+### Added
+
+- **`memee doctor` auto-removes the shadowing install** when it's safe.
+  "Safe" means: the active install is pip-managed (Homebrew Python or
+  user pip — not system Python, which would need sudo); the shadowed
+  install on PATH is a newer version (or the active one is broken and
+  has no readable version, e.g. an editable install pointing at a
+  deleted worktree); and no other Python packages depend on memee in
+  that interpreter. Anything else falls through to the manual hint
+  v2.0.1 already shipped, so the unsafe paths are unchanged.
+- **Interactive confirmation in TTY.** Doctor prints which binary it
+  wants to remove and which one will take over, then prompts before
+  running `pip uninstall`. Non-TTY (CI, piped) skips the prompt to
+  match the existing auto-fix convention. `--yes / -y` skips it in a
+  TTY too.
+- **`--dry-run` covers multi-install too.** Reports the exact
+  `pip uninstall` command doctor would have run, without touching
+  anything.
+- **Visible fix outcome in the Installations section.** New `[removed]`
+  / `[would remove]` / `[promoted]` row tags replace the static
+  `[active]` / `[shadowed]` when an auto-fix has run, plus a one-line
+  "Fixed:" / "Would fix:" / "Auto-fix not run: <reason>" footer that
+  surfaces pip's own output (or the safety gate's reason for skipping).
+
+### Caveat
+
+This change can't help users whose currently active install is older
+than v2.0.2 — those binaries don't contain the auto-fix code. They get
+the v2.0.1 manual cleanup hint, fix the PATH once, and from there every
+future drift is handled automatically.
+
+### Tests
+
+- `tests/test_multi_install_detection.py` — 10 new cases: safety gate
+  for each install kind, refusal when reverse deps exist, refusal when
+  shadowed is older, dry-run doesn't call pip, run_doctor wires the
+  uninstall and removes the issue from the report on success.
+
 ## [2.0.1] — 2026-04-27
 
 The "no-such-command-pack" patch. Three layers of defence against the

@@ -284,7 +284,8 @@ def test_version_flag_single_install(monkeypatch, tmp_path):
     assert result.exit_code == 0
     # Just asserts the version line is the first thing printed and the
     # binary path appears somewhere — exact formatting may evolve.
-    assert "memee 2.0.1" in result.output
+    from memee import __version__
+    assert f"memee {__version__}" in result.output
     assert str(bindir / "memee") in result.output
     # Single install → no "alt:" line.
     assert "alt:" not in result.output
@@ -303,6 +304,314 @@ def test_version_flag_multi_install_warns(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert "alt:" in result.output
     assert "memee doctor" in result.output
+
+
+# ── memee doctor --ignore-multi-install ────────────────────────────────
+
+
+# ── Auto-fix safety gate ──────────────────────────────────────────────
+
+
+def _fake_pip_show(required_by: list[str]) -> callable:
+    """Return a subprocess.run replacement that fakes ``pip show memee``.
+
+    We accept any ``[python, -m, pip, show, memee]`` invocation and respond
+    with a ``Required-by:`` line built from ``required_by``. The real
+    subprocess module isn't touched.
+    """
+    def fake_run(cmd, **kwargs):
+        import subprocess as _sp
+
+        text = "Name: memee\nVersion: 2.0.1\nRequired-by:"
+        if required_by:
+            text += " " + ", ".join(required_by)
+        return _sp.CompletedProcess(args=cmd, returncode=0, stdout=text, stderr="")
+
+    return fake_run
+
+
+def test_can_safely_remove_homebrew_python_no_deps(monkeypatch, tmp_path):
+    """Active = homebrew-python with newer shadowed pipx + no reverse deps
+    → safe."""
+    py = tmp_path / "py"
+    py.write_text("")
+    py.chmod(0o755)
+    active = {
+        "path": "/opt/homebrew/bin/memee",
+        "install_kind": "homebrew-python",
+        "shebang_python": str(py),
+        "version": "1.1.0",
+    }
+    shadowed = [{
+        "path": "/Users/x/.local/bin/memee",
+        "install_kind": "pipx",
+        "version": "2.0.1",
+    }]
+    monkeypatch.setattr(doctor.subprocess, "run", _fake_pip_show([]))
+    ok, reason = doctor._can_safely_remove(active, shadowed)
+    assert ok, reason
+    assert reason == ""
+
+
+def test_can_safely_remove_user_pip_unknown_active_version(monkeypatch, tmp_path):
+    """Editable install pointing at a deleted worktree reports no version
+    via --version. That's exactly the case this fix exists for — treat as
+    older."""
+    py = tmp_path / "py"
+    py.write_text("")
+    py.chmod(0o755)
+    active = {
+        "path": "/Users/x/.local/bin/memee",
+        "install_kind": "user-pip",
+        "shebang_python": str(py),
+        "version": None,
+    }
+    shadowed = [{
+        "install_kind": "pipx",
+        "version": "2.0.1",
+    }]
+    monkeypatch.setattr(doctor.subprocess, "run", _fake_pip_show([]))
+    ok, _ = doctor._can_safely_remove(active, shadowed)
+    assert ok
+
+
+def test_can_safely_remove_refuses_system_python(monkeypatch, tmp_path):
+    """sudo-required uninstalls aren't auto-fixed — too risky."""
+    py = tmp_path / "py"
+    py.write_text("")
+    py.chmod(0o755)
+    active = {
+        "path": "/usr/bin/memee",
+        "install_kind": "system-python",
+        "shebang_python": str(py),
+        "version": "1.0.0",
+    }
+    shadowed = [{"install_kind": "pipx", "version": "2.0.1"}]
+    ok, reason = doctor._can_safely_remove(active, shadowed)
+    assert not ok
+    assert "system Python" in reason or "homebrew" in reason.lower() or "pip-managed" in reason
+
+
+def test_can_safely_remove_refuses_when_shadowed_older(monkeypatch, tmp_path):
+    """Shadowed is OLDER than active → don't downgrade."""
+    py = tmp_path / "py"
+    py.write_text("")
+    py.chmod(0o755)
+    active = {
+        "install_kind": "homebrew-python",
+        "shebang_python": str(py),
+        "version": "2.0.1",
+    }
+    shadowed = [{"install_kind": "pipx", "version": "1.0.0"}]
+    ok, reason = doctor._can_safely_remove(active, shadowed)
+    assert not ok
+    assert "downgrade" in reason or "older" in reason
+
+
+def test_can_safely_remove_refuses_when_reverse_deps_exist(monkeypatch, tmp_path):
+    """Other packages depend on memee → leave alone."""
+    py = tmp_path / "py"
+    py.write_text("")
+    py.chmod(0o755)
+    active = {
+        "install_kind": "homebrew-python",
+        "shebang_python": str(py),
+        "version": "1.1.0",
+    }
+    shadowed = [{"install_kind": "pipx", "version": "2.0.1"}]
+    monkeypatch.setattr(
+        doctor.subprocess, "run", _fake_pip_show(["memee-extras", "some-plugin"])
+    )
+    ok, reason = doctor._can_safely_remove(active, shadowed)
+    assert not ok
+    assert "memee-extras" in reason
+
+
+def test_can_safely_remove_refuses_when_pip_show_fails(monkeypatch, tmp_path):
+    """pip not runnable → don't auto-fix; surface the reason."""
+    py = tmp_path / "py"
+    py.write_text("")
+    py.chmod(0o755)
+    active = {
+        "install_kind": "homebrew-python",
+        "shebang_python": str(py),
+        "version": "1.1.0",
+    }
+    shadowed = [{"install_kind": "pipx", "version": "2.0.1"}]
+
+    def fake_run_fail(cmd, **kwargs):
+        import subprocess as _sp
+        return _sp.CompletedProcess(args=cmd, returncode=1, stdout="", stderr="boom")
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run_fail)
+    ok, reason = doctor._can_safely_remove(active, shadowed)
+    assert not ok
+    assert "pip show" in reason
+
+
+def test_uninstall_active_dry_run_does_not_call_subprocess(monkeypatch, tmp_path):
+    """dry_run=True returns success without invoking pip."""
+    called = {"n": 0}
+
+    def fake_run(*a, **kw):
+        called["n"] += 1
+        raise AssertionError("subprocess.run should NOT be called in dry-run")
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run)
+    py = tmp_path / "py"
+    py.write_text("")
+    out = doctor._uninstall_active(
+        {"shebang_python": str(py)}, dry_run=True
+    )
+    assert out["ok"]
+    assert out["dry_run"]
+    assert called["n"] == 0
+    assert out["command"][:3] == [str(py), "-m", "pip"]
+
+
+def _inject_installs(monkeypatch, installs: list[dict]) -> None:
+    """Bypass the PATH scan: stuff ``installs`` straight into the cache.
+
+    Real PATH-scan tests live above; these tests only care about run_doctor's
+    branching once detection has happened. install_kind classification needs
+    real /opt/homebrew/... paths — easier to inject than to reproduce in tmp_path.
+    """
+    doctor._MEMEE_INSTALL_CACHE = installs
+
+
+def test_run_doctor_auto_fixes_safe_multi_install(monkeypatch, tmp_path):
+    """Happy path: detection finds two installs, ``run_doctor`` invokes
+    pip uninstall, the result is reported as ``fixed``."""
+    py_homebrew = tmp_path / "py3.14"
+    py_homebrew.write_text("")
+    py_homebrew.chmod(0o755)
+    _inject_installs(monkeypatch, [
+        {
+            "path": "/opt/homebrew/bin/memee",
+            "real_path": "/opt/homebrew/bin/memee",
+            "mtime": 0.0,
+            "version": "1.1.0",
+            "install_kind": "homebrew-python",
+            "shebang_python": str(py_homebrew),
+        },
+        {
+            "path": "/Users/x/.local/bin/memee",
+            "real_path": "/Users/x/.local/pipx/venvs/memee/bin/memee",
+            "mtime": 0.0,
+            "version": "2.0.1",
+            "install_kind": "pipx",
+            "shebang_python": "/Users/x/.local/pipx/venvs/memee/bin/python",
+        },
+    ])
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        import subprocess as _sp
+
+        calls.append(cmd)
+        if "show" in cmd:
+            return _sp.CompletedProcess(
+                args=cmd, returncode=0,
+                stdout="Name: memee\nRequired-by:", stderr="",
+            )
+        if "uninstall" in cmd:
+            return _sp.CompletedProcess(
+                args=cmd, returncode=0,
+                stdout="Found existing installation: memee 1.1.0\nSuccessfully uninstalled memee-1.1.0\n",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected subprocess: {cmd}")
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run)
+    results = doctor.run_doctor(auto_fix=True, install_hooks=False)
+
+    assert "multi_install" in results.get("fixed", [])
+    assert "multi_install" not in [
+        i.get("type") for i in results.get("issues", [])
+    ]
+    assert any(
+        "uninstall" in c and c[0] == str(py_homebrew)
+        for c in calls
+    ), f"expected pip uninstall on {py_homebrew}, got: {calls}"
+    # Cache should have been invalidated so a re-scan would see the new state.
+    assert doctor._MEMEE_INSTALL_CACHE is None
+
+
+def test_run_doctor_skips_install_fix_when_requested(monkeypatch, tmp_path):
+    """skip_install_fix=True → detection runs but no pip uninstall."""
+    py_homebrew = tmp_path / "py3"
+    py_homebrew.write_text("")
+    py_homebrew.chmod(0o755)
+    _inject_installs(monkeypatch, [
+        {
+            "path": "/opt/homebrew/bin/memee",
+            "install_kind": "homebrew-python",
+            "shebang_python": str(py_homebrew),
+            "version": "1.1.0",
+        },
+        {
+            "path": "/Users/x/.local/bin/memee",
+            "install_kind": "pipx",
+            "version": "2.0.1",
+        },
+    ])
+
+    def boom(cmd, **kwargs):
+        if "uninstall" in cmd:
+            raise AssertionError("uninstall must not run when skip_install_fix=True")
+        import subprocess as _sp
+        return _sp.CompletedProcess(args=cmd, returncode=0, stdout="Required-by:", stderr="")
+
+    monkeypatch.setattr(doctor.subprocess, "run", boom)
+    results = doctor.run_doctor(
+        auto_fix=True, install_hooks=False, skip_install_fix=True
+    )
+    assert "multi_install" not in results.get("fixed", [])
+    # Issue stays in the list so the report still warns the user.
+    assert "multi_install" in [i.get("type") for i in results.get("issues", [])]
+
+
+def test_run_doctor_dry_run_does_not_remove(monkeypatch, tmp_path):
+    """dry_run=True → record what would happen, don't run pip."""
+    py_homebrew = tmp_path / "py3"
+    py_homebrew.write_text("")
+    py_homebrew.chmod(0o755)
+    _inject_installs(monkeypatch, [
+        {
+            "path": "/opt/homebrew/bin/memee",
+            "install_kind": "homebrew-python",
+            "shebang_python": str(py_homebrew),
+            "version": "1.1.0",
+        },
+        {
+            "path": "/Users/x/.local/bin/memee",
+            "install_kind": "pipx",
+            "version": "2.0.1",
+        },
+    ])
+
+    def fake_run(cmd, **kwargs):
+        import subprocess as _sp
+
+        if "uninstall" in cmd:
+            raise AssertionError("uninstall must not run in dry-run mode")
+        if "show" in cmd:
+            return _sp.CompletedProcess(
+                args=cmd, returncode=0,
+                stdout="Name: memee\nRequired-by:", stderr="",
+            )
+        raise AssertionError(f"unexpected subprocess: {cmd}")
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run)
+    results = doctor.run_doctor(
+        auto_fix=True, install_hooks=False, dry_run=True
+    )
+    outcome = results["installs"].get("fix_outcome")
+    assert outcome is not None
+    assert outcome["dry_run"] is True
+    # multi_install stays in issues — dry-run doesn't actually fix.
+    assert "multi_install" in [i.get("type") for i in results.get("issues", [])]
 
 
 # ── memee doctor --ignore-multi-install ────────────────────────────────

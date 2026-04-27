@@ -190,15 +190,59 @@ def setup(mode, no_hooks, dry_run, ignore_multi_install):
          "warning is added to the issues list — for users who genuinely "
          "want two memee binaries side by side.",
 )
-def doctor(no_fix, no_hooks, uninstall_hooks, dry_run, ignore_multi_install):
+@click.option(
+    "--yes", "-y", "assume_yes", is_flag=True,
+    help="Skip the confirmation prompt before destructive auto-fixes "
+         "(currently: removing a shadowing memee install). Implied in "
+         "non-interactive shells.",
+)
+def doctor(
+    no_fix, no_hooks, uninstall_hooks, dry_run, ignore_multi_install, assume_yes
+):
     """Health check: scan system, detect AI tools, fix configuration."""
-    from memee.doctor import print_doctor_report, run_doctor
+    from memee.doctor import (
+        _can_safely_remove,
+        _install_kind_label,
+        detect_memee_installs,
+        print_doctor_report,
+        run_doctor,
+    )
+
+    # Pre-flight: when we're about to run a destructive multi-install fix
+    # in an interactive TTY, ask once. Non-TTY (CI, piped) skips the prompt
+    # — same convention as ``doctor``'s existing MCP-config auto-fix.
+    auto_fix = not no_fix
+    skip_install_fix = ignore_multi_install
+    if auto_fix and not skip_install_fix and not dry_run:
+        installs = detect_memee_installs()
+        if len(installs) > 1:
+            ok, _ = _can_safely_remove(installs[0], installs[1:])
+            if ok and sys.stdin.isatty() and not assume_yes:
+                active = installs[0]
+                target = installs[1]
+                click.echo(
+                    "\033[33m!\033[0m Two memee installs on PATH. "
+                    "Doctor wants to remove the active one:"
+                )
+                click.echo(
+                    f"    \033[1mremove\033[0m: {active['path']}  "
+                    f"v{active.get('version') or '?'}  "
+                    f"({_install_kind_label(active['install_kind'])})"
+                )
+                click.echo(
+                    f"    \033[1mkeep\033[0m:   {target['path']}  "
+                    f"v{target.get('version') or '?'}  "
+                    f"({_install_kind_label(target['install_kind'])})"
+                )
+                if not click.confirm("  Proceed?", default=False):
+                    skip_install_fix = True
 
     results = run_doctor(
-        auto_fix=not no_fix,
+        auto_fix=auto_fix,
         install_hooks=not no_hooks and not uninstall_hooks,
         uninstall_hooks=uninstall_hooks,
         dry_run=dry_run,
+        skip_install_fix=skip_install_fix,
     )
     if ignore_multi_install:
         results["issues"] = [

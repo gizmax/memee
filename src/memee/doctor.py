@@ -374,6 +374,159 @@ def _fix_hint(active: dict, shadowed: dict) -> list[str]:
     ]
 
 
+def _parse_version_tuple(version: str | None) -> tuple[int, ...] | None:
+    """Parse a version string like ``2.0.1`` into ``(2, 0, 1)`` for ordered
+    comparison. Returns None if the string isn't recognisable as a version,
+    so we can treat "unknown version" as "definitely older" downstream.
+
+    We don't pull in ``packaging`` for this — the version strings we get
+    from `memee --version` are dotted-numeric with maybe a ``.devN`` /
+    ``.rcN`` suffix. Stripping non-digit suffixes from each component is
+    enough for the only thing we use this for: "is the active install older
+    than the shadowed one".
+    """
+    if not version:
+        return None
+    parts: list[int] = []
+    for chunk in version.split("."):
+        digits = ""
+        for ch in chunk:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        if not digits:
+            return None
+        parts.append(int(digits))
+    return tuple(parts) if parts else None
+
+
+def _pip_required_by(python_path: str, package: str = "memee") -> list[str] | None:
+    """Return the list of packages that depend on ``package`` in this Python.
+
+    Runs ``<python> -m pip show <package>`` and parses the ``Required-by:``
+    line. Empty list = nothing depends on it (safe to uninstall). None =
+    couldn't run pip (don't auto-fix; let the user handle it manually).
+    """
+    try:
+        result = subprocess.run(
+            [python_path, "-m", "pip", "show", package],
+            capture_output=True,
+            timeout=10,
+            text=True,
+        )
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
+        return None
+    if result.returncode != 0:
+        return None
+    for line in (result.stdout or "").splitlines():
+        if line.startswith("Required-by:"):
+            tail = line[len("Required-by:"):].strip()
+            if not tail:
+                return []
+            return [p.strip() for p in tail.split(",") if p.strip()]
+    return None
+
+
+def _can_safely_remove(
+    active: dict, shadowed: list[dict]
+) -> tuple[bool, str]:
+    """Decide whether we're allowed to ``pip uninstall`` the active binary.
+
+    Returns ``(ok, reason)``. ``ok=True`` means doctor will run the
+    uninstall as part of auto-fix. Otherwise ``reason`` is the human-readable
+    "why not", shown in the report so the user understands why doctor left
+    a manual hint instead.
+    """
+    kind = active.get("install_kind")
+    if kind not in ("homebrew-python", "user-pip"):
+        return False, (
+            f"active install is {_install_kind_label(kind)} — "
+            "doctor only auto-removes pip-managed installs (Homebrew "
+            "Python or user pip)"
+        )
+
+    shebang = active.get("shebang_python")
+    if not shebang or not os.path.isfile(shebang):
+        return False, (
+            "can't locate the Python interpreter for the active install "
+            "(no readable shebang)"
+        )
+
+    if not shadowed:
+        return False, "no shadowed install to fall back to"
+    target = shadowed[0]
+
+    active_v = _parse_version_tuple(active.get("version"))
+    target_v = _parse_version_tuple(target.get("version"))
+    # If we can't read the active version (broken editable / pre-2.0.1
+    # install), we treat it as the older one — that case is *exactly* what
+    # this fix exists for, so refusing on missing version would defeat it.
+    if active_v is not None and target_v is not None and active_v >= target_v:
+        return False, (
+            f"active v{active.get('version')} is not older than shadowed "
+            f"v{target.get('version')} — doctor won't downgrade"
+        )
+    if target_v is None:
+        return False, (
+            "shadowed install doesn't report a version — doctor needs a "
+            "known-good fallback before removing the active one"
+        )
+
+    deps = _pip_required_by(shebang)
+    if deps is None:
+        return False, (
+            f"couldn't run `{shebang} -m pip show memee` to verify safety"
+        )
+    if deps:
+        return False, (
+            f"other packages depend on memee in this Python: {', '.join(deps)}"
+        )
+    return True, ""
+
+
+def _uninstall_active(active: dict, *, dry_run: bool) -> dict:
+    """Run ``<python> -m pip uninstall -y memee`` for the active install.
+
+    Returns ``{"ok": bool, "stdout": str, "stderr": str, "returncode": int,
+    "command": list[str], "dry_run": bool}``. The caller decides what to do
+    with failures — we don't raise so doctor's report can show pip's actual
+    error rather than a generic traceback.
+    """
+    python_path = active.get("shebang_python") or ""
+    cmd = [python_path, "-m", "pip", "uninstall", "-y", "memee"]
+    if dry_run:
+        return {
+            "ok": True,
+            "stdout": "",
+            "stderr": "",
+            "returncode": 0,
+            "command": cmd,
+            "dry_run": True,
+        }
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, timeout=60, text=True
+        )
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError) as e:
+        return {
+            "ok": False,
+            "stdout": "",
+            "stderr": f"{type(e).__name__}: {e}",
+            "returncode": -1,
+            "command": cmd,
+            "dry_run": False,
+        }
+    return {
+        "ok": result.returncode == 0,
+        "stdout": result.stdout or "",
+        "stderr": result.stderr or "",
+        "returncode": result.returncode,
+        "command": cmd,
+        "dry_run": False,
+    }
+
+
 def get_install_health() -> dict:
     """Snapshot the multi-install state for the report layer."""
     installs = detect_memee_installs()
@@ -697,6 +850,7 @@ def run_doctor(
     install_hooks: bool = True,
     uninstall_hooks: bool = False,
     dry_run: bool = False,
+    skip_install_fix: bool = False,
 ) -> dict:
     """Run full health check and return results.
 
@@ -710,6 +864,11 @@ def run_doctor(
             the more conservative action — the user explicitly asked).
         dry_run: when True, no files are written. Doctor reports what it
             *would* change so the user can preview before committing.
+        skip_install_fix: when True, never run the destructive multi-install
+            uninstall even if ``auto_fix`` is on. The CLI sets this when the
+            user declines the interactive prompt or passes
+            ``--ignore-multi-install``. The detection itself still runs so
+            the report shows the warning.
     """
     results = {
         "tools": detect_ai_tools(),
@@ -723,10 +882,13 @@ def run_doctor(
         "dry_run": dry_run,
     }
 
-    # Multi-install warning is its own issue type so the caller can render
-    # the cleanup hint specifically. We don't auto-fix this one — yanking
-    # someone's binary would be out of line.
+    # Multi-install: warn always, auto-fix when safe. "Safe" = pip-managed
+    # active install, no reverse deps, and a newer shadowed binary on PATH
+    # to fall back to. Anything else falls through to the manual fix block.
     if results["installs"]["multi"]:
+        installs = results["installs"]["installs"]
+        active = installs[0]
+        shadowed = installs[1:]
         results["issues"].append(
             {
                 "type": "multi_install",
@@ -736,6 +898,26 @@ def run_doctor(
                 ),
             }
         )
+        ok, reason = _can_safely_remove(active, shadowed)
+        results["installs"]["fix_safe"] = ok
+        results["installs"]["fix_reason"] = reason
+        if auto_fix and ok and not skip_install_fix:
+            outcome = _uninstall_active(active, dry_run=dry_run)
+            results["installs"]["fix_outcome"] = outcome
+            # Only mark "fixed" on a real, successful uninstall — dry-run
+            # records intent but the broken state is still on disk.
+            if outcome["ok"] and not outcome.get("dry_run"):
+                results["fixed"].append("multi_install")
+                # Drop the multi_install issue so the report says "FIXED"
+                # cleanly rather than listing a now-resolved problem.
+                results["issues"] = [
+                    i for i in results["issues"]
+                    if i.get("type") != "multi_install"
+                ]
+                # Invalidate the PATH scan cache: a follow-up `memee doctor`
+                # in the same process would otherwise still see two installs.
+                global _MEMEE_INSTALL_CACHE
+                _MEMEE_INSTALL_CACHE = None
 
     # Check for issues
     for tool in results["tools"]:
@@ -827,10 +1009,23 @@ def print_installations_section(install_health: dict) -> None:
     # Multi-install — first PATH entry wins, the rest are shadowed.
     active = installs[0]
     shadowed = installs[1:]
-    print(
-        f"    {C.YELLOW}!{C.RESET} {len(installs)} memee binaries on PATH "
-        f"{C.DIM}(mismatch will cause command-not-found errors){C.RESET}"
-    )
+    outcome = install_health.get("fix_outcome")
+    fixed_ok = bool(outcome and outcome.get("ok") and not outcome.get("dry_run"))
+    would_fix = bool(outcome and outcome.get("dry_run"))
+
+    if fixed_ok:
+        banner = f"{C.GREEN}✓{C.RESET}"
+        note = (
+            f"{C.DIM}(removed the shadowing install — "
+            f"open a new shell or run `hash -r` to refresh PATH){C.RESET}"
+        )
+    elif would_fix:
+        banner = f"{C.CYAN}~{C.RESET}"
+        note = f"{C.DIM}(dry run — would remove the active install){C.RESET}"
+    else:
+        banner = f"{C.YELLOW}!{C.RESET}"
+        note = f"{C.DIM}(mismatch will cause command-not-found errors){C.RESET}"
+    print(f"    {banner} {len(installs)} memee binaries on PATH {note}")
 
     # Compute column widths so the table lines up — but keep it simple,
     # we only have at most a few binaries.
@@ -838,20 +1033,66 @@ def print_installations_section(install_health: dict) -> None:
     for i, inst in enumerate(installs):
         version = inst.get("version") or "?"
         kind = _install_kind_label(inst["install_kind"])
-        tag = "[active]" if i == 0 else "[shadowed]"
+        if i == 0:
+            if fixed_ok:
+                tag = "[removed]"
+            elif would_fix:
+                tag = "[would remove]"
+            else:
+                tag = "[active]"
+        else:
+            tag = "[promoted]" if (fixed_ok and i == 1) else "[shadowed]"
         rows.append((inst["path"], f"v{version}" if not version.startswith("v") else version, kind, tag))
 
     pad_path = max(len(r[0]) for r in rows)
     pad_ver = max(len(r[1]) for r in rows)
     pad_kind = max(len(r[2]) for r in rows)
     for path, ver, kind, tag in rows:
-        tag_color = C.GREEN if tag == "[active]" else C.DIM
+        if tag in ("[removed]", "[would remove]"):
+            tag_color = C.RED
+        elif tag in ("[active]", "[promoted]"):
+            tag_color = C.GREEN
+        else:
+            tag_color = C.DIM
         print(
             f"      {path:<{pad_path}}  {ver:<{pad_ver}}  "
             f"{kind:<{pad_kind}}  {tag_color}{tag}{C.RESET}"
         )
 
-    # Fix block — specific to the active install's kind.
+    if fixed_ok:
+        # Show what pip actually did. Not a wall of text — pip's "Successfully
+        # uninstalled memee-X" line is what users want to see. Stay quiet
+        # otherwise.
+        cmd = " ".join(outcome.get("command") or [])
+        print()
+        print(f"    {C.BOLD}Fixed:{C.RESET} {C.DIM}{cmd}{C.RESET}")
+        for line in (outcome.get("stdout") or "").splitlines():
+            line = line.strip()
+            if line.startswith("Successfully uninstalled") or line.startswith("Found existing"):
+                print(f"      {C.DIM}{line}{C.RESET}")
+        return
+
+    if would_fix:
+        cmd = " ".join(outcome.get("command") or [])
+        print()
+        print(f"    {C.BOLD}Would fix:{C.RESET} {C.DIM}{cmd}{C.RESET}")
+        return
+
+    # Failure path: outcome exists but ok=False — pip ran and rejected it.
+    if outcome and not outcome.get("ok"):
+        cmd = " ".join(outcome.get("command") or [])
+        print()
+        print(f"    {C.BOLD}{C.RED}Auto-fix failed:{C.RESET} {C.DIM}{cmd}{C.RESET}")
+        for line in (outcome.get("stderr") or "").splitlines()[-5:]:
+            print(f"      {C.DIM}{line}{C.RESET}")
+        # Fall through to the manual hint so the user has a path forward.
+
+    # No outcome → either auto-fix wasn't safe, or user declined. Show why,
+    # then the manual fix.
+    reason = install_health.get("fix_reason") or ""
+    if reason:
+        print()
+        print(f"    {C.DIM}Auto-fix not run: {reason}{C.RESET}")
     print()
     print(f"    {C.BOLD}Fix:{C.RESET}")
     for line in _fix_hint(active, shadowed[0]):
@@ -998,7 +1239,13 @@ def print_doctor_report(results: dict):
     if fixed:
         print(f"\n  {C.BGREEN}━━━ FIXED ━━━{C.RESET}")
         for name in fixed:
-            print(f"    {C.GREEN}✓{C.RESET} {name} configured. Restart to activate.")
+            if name == "multi_install":
+                print(
+                    f"    {C.GREEN}✓{C.RESET} Removed the shadowing memee "
+                    f"install. Open a new shell (or run `hash -r`) to refresh PATH."
+                )
+            else:
+                print(f"    {C.GREEN}✓{C.RESET} {name} configured. Restart to activate.")
 
     if issues:
         print(f"\n  {C.BYELLOW}━━━ ISSUES ({len(issues)}) ━━━{C.RESET}")
