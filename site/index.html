@@ -452,6 +452,161 @@ section { padding-block: clamp(72px, 9vw, 140px); }
 }
 
 /* ============================================================
+   FAQ — three fair questions, three blunt answers
+   ============================================================ */
+.faq { border-top: var(--rule); padding-block: clamp(64px, 8vw, 128px); }
+.faq-head {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 64px;
+  align-items: end;
+  margin-bottom: 48px;
+}
+.faq-head h2 {
+  font-size: clamp(40px, 6vw, 80px);
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.faq-head .lede {
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--ink-80);
+  margin: 0;
+  max-width: 36ch;
+}
+.faq-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+.faq-item {
+  border: 1px solid var(--ink-10);
+  border-radius: 14px;
+  padding: 32px 36px;
+  background: var(--bone-dim);
+  transition: border-color 200ms ease, transform 200ms ease;
+}
+.faq-item:hover { border-color: var(--ink-20); transform: translateY(-2px); }
+.faq-item .q {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--orange);
+  margin-bottom: 12px;
+}
+.faq-item h3 {
+  font-size: clamp(22px, 2.4vw, 28px);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin: 0 0 16px;
+  text-wrap: balance;
+}
+.faq-item p {
+  margin: 0 0 14px;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--ink-80);
+  max-width: 70ch;
+}
+.faq-item p strong { color: var(--ink); font-weight: 600; }
+.faq-item p em {
+  font-family: var(--serif);
+  font-style: italic;
+  color: var(--orange);
+}
+.faq-item .kicker-line {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--ink-10);
+  color: var(--ink);
+  font-weight: 500;
+}
+@media screen and (max-width: 800px) {
+  .faq-head { grid-template-columns: 1fr; gap: 16px; }
+  .faq-item { padding: 24px 22px; }
+}
+
+/* ============================================================
+   COMPARE — Memee against the memory landscape
+   ============================================================ */
+.compare { border-top: var(--rule); padding-block: clamp(64px, 8vw, 128px); }
+.compare-head {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 64px;
+  align-items: end;
+  margin-bottom: 40px;
+}
+.compare-head h2 {
+  font-size: clamp(40px, 6vw, 80px);
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.compare-head .lede {
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--ink-80);
+  margin: 0;
+  max-width: 40ch;
+}
+.ctable-wrap {
+  border: 1px solid var(--ink-10);
+  border-radius: 14px;
+  background: var(--bone-dim);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.ctable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  min-width: 720px;
+}
+.ctable thead th {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--ink-60);
+  text-transform: uppercase;
+  font-weight: 500;
+  padding: 18px 16px 14px;
+  border-bottom: 1px solid var(--ink-10);
+  white-space: nowrap;
+}
+.ctable tbody th[scope="row"] {
+  text-align: left;
+  font-weight: 500;
+  font-size: 15px;
+  color: var(--ink);
+  padding: 18px 16px;
+  white-space: nowrap;
+}
+.ctable tbody td {
+  padding: 18px 16px;
+  color: var(--ink-80);
+  vertical-align: top;
+  line-height: 1.45;
+}
+.ctable tr.crow { border-top: 1px solid var(--ink-10); }
+.ctable tr.crow:first-child { border-top: 0; }
+.ctable tr.crow.featured th, .ctable tr.crow.featured td {
+  background: var(--orange-soft);
+  color: var(--ink);
+}
+.ctable tr.crow.featured th { font-weight: 600; }
+.cfoot {
+  margin-top: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-60);
+  max-width: 80ch;
+}
+.cfoot a { color: var(--ink-80); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--ink-20); }
+.cfoot a:hover { color: var(--orange); text-decoration-color: var(--orange); }
+@media screen and (max-width: 800px) {
+  .compare-head { grid-template-columns: 1fr; gap: 16px; }
+}
+
+/* ============================================================
    SHARING DIAGRAM — how memory travels
    ============================================================ */
 .share { border-top: var(--rule); background: var(--slate); color: var(--ink); padding-block: 0; }
@@ -1258,6 +1413,8 @@ body::before { display: none; }
         <a href="#value">Why</a>
         <a href="#share">How it works</a>
         <a href="#math">Numbers</a>
+        <a href="#compare">Compare</a>
+        <a href="#faq">FAQ</a>
         <a href="#pricing">Pricing</a>
         <a href="#order" class="pill">Install →</a>
       </nav>
@@ -1579,6 +1736,131 @@ body::before { display: none; }
       </div>
     </section>
 
+    <!-- S6 COMPARE — Memee against the memory landscape -->
+    <section class="compare shell" id="compare">
+      <div class="compare-head">
+        <h2 class="display reveal">Memory, compared.</h2>
+        <p class="lede reveal">Per-user context. Per-agent state. Or per-organisation memory. Pick the shape that fits your team.</p>
+      </div>
+
+      <div class="ctable-wrap reveal">
+        <table class="ctable">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Cross-model</th>
+              <th>Cross-project</th>
+              <th>Cross-team</th>
+              <th>Auto-capture</th>
+              <th>Aging / lifecycle</th>
+              <th>Licence</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="crow featured">
+              <th scope="row">Memee</th>
+              <td>Claude, GPT, Gemini, Llama</td>
+              <td>Yes. Propagation engine</td>
+              <td>Yes. Team / org scope</td>
+              <td>Both. Quality gate</td>
+              <td>Confidence + 60-day archive</td>
+              <td>MIT (OSS) / EULA (Team)</td>
+            </tr>
+            <tr class="crow">
+              <th scope="row">Claude Skills</th>
+              <td>Open standard. Ported to GPT, Gemini</td>
+              <td>Per-folder. Manual reuse</td>
+              <td>No. Static files</td>
+              <td>No. Author-written</td>
+              <td>None. Files don&rsquo;t decay</td>
+              <td>Free with Claude</td>
+            </tr>
+            <tr class="crow">
+              <th scope="row">Mem0</th>
+              <td>Claude, GPT, Gemini, local</td>
+              <td>Not first-class</td>
+              <td>Cloud tier</td>
+              <td>Auto-extract from chat</td>
+              <td>Not documented</td>
+              <td>Apache 2.0 + cloud from $19</td>
+            </tr>
+            <tr class="crow">
+              <th scope="row">Letta</th>
+              <td>Multi-model</td>
+              <td>Per-agent state</td>
+              <td>Not advertised</td>
+              <td>Auto via agent loop</td>
+              <td>Three-tier virtual memory</td>
+              <td>Apache 2.0 + cloud from $20</td>
+            </tr>
+            <tr class="crow">
+              <th scope="row">Zep</th>
+              <td>Multi-model</td>
+              <td>Not a documented primitive</td>
+              <td>Roles via API</td>
+              <td>Auto from episodes</td>
+              <td>Temporal graph</td>
+              <td>Graphiti Apache 2.0. Cloud from $25</td>
+            </tr>
+            <tr class="crow">
+              <th scope="row">ChatGPT Memory</th>
+              <td>Vendor-locked to ChatGPT</td>
+              <td>Project containers. Isolated</td>
+              <td>No. Per-user only</td>
+              <td>Both</td>
+              <td>Not published</td>
+              <td>Bundled with Plus / Team</td>
+            </tr>
+            <tr class="crow">
+              <th scope="row">Hermes Agent</th>
+              <td>Provider routing. Multi-LLM</td>
+              <td>Single-server posture</td>
+              <td>No</td>
+              <td>Both. Agent-curated</td>
+              <td>Not documented</td>
+              <td>MIT</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="cfoot reveal">Sources, verified April 2026: <a href="https://www.anthropic.com/news/skills" rel="external">anthropic.com/news/skills</a>, <a href="https://mem0.ai/pricing" rel="external">mem0.ai/pricing</a>, <a href="https://letta.com/pricing" rel="external">letta.com/pricing</a>, <a href="https://www.getzep.com/" rel="external">getzep.com</a>, <a href="https://openai.com/index/memory-and-new-controls-for-chatgpt/" rel="external">openai.com/memory</a>, <a href="https://hermes-agent.nousresearch.com/" rel="external">hermes-agent.nousresearch.com</a>.</p>
+    </section>
+
+    <!-- S6b FAQ — three questions from the launch thread -->
+    <section class="faq shell" id="faq">
+      <div class="faq-head">
+        <h2 class="display reveal">Three fair questions.</h2>
+        <p class="lede reveal">From the replies. Answered without flinching.</p>
+      </div>
+
+      <div class="faq-grid">
+        <article class="faq-item reveal">
+          <div class="q">Q1</div>
+          <h3>Doesn&rsquo;t an MCP server just add to my context window?</h3>
+          <p>It would, if it dumped. Memee doesn&rsquo;t. The router has a hard 500-token cap and lands at <strong>~40 tokens</strong> on average per briefing. Measured, not aspirational.</p>
+          <p>Compare that to the file you already ship: a median <code>CLAUDE.md</code> / <code>AGENTS.md</code> across 27 popular OSS repos is <strong>~2,160 tokens</strong>, loaded in full on every session and ridden along on every turn. That file only grows.</p>
+          <p class="kicker-line">Memee is the cure for context bloat, not a new source of it.</p>
+        </article>
+
+        <article class="faq-item reveal">
+          <div class="q">Q2</div>
+          <h3>Don&rsquo;t Claude Skills already do this?</h3>
+          <p>Skills are good. They&rsquo;re also Claude-native, hand-authored, static, and per-folder. Memee is none of those things.</p>
+          <p>It writes from the conversation, not from your hand. It scores what it captures: cross-model &times;1.3, cross-project &times;1.5. It ages out what stops earning its keep on the lifecycle ladder, <em>hypothesis &rarr; tested &rarr; validated &rarr; canon &rarr; deprecated</em>. The same canon answers GPT in Cursor, Gemini in Continue, and Llama wherever you run it.</p>
+          <p class="kicker-line">Skills are a folder. Memee is a memory.</p>
+        </article>
+
+        <article class="faq-item reveal">
+          <div class="q">Q3</div>
+          <h3>How is this different from Mem0, Letta, Zep, ChatGPT memory?</h3>
+          <p>Most memory projects remember <em>conversations</em>: you talked about X last Tuesday, here it is again. That&rsquo;s chat history with a vector index.</p>
+          <p>Memee earns <em>canon</em>. A claim arrives at 0.5 confidence and goes nowhere until a second model family agrees and a second project re-uses it. On OrgMemEval v1.0 that capability gap shows up as <strong>92.2&nbsp;/&nbsp;100</strong> against a competitor baseline of <strong>2.3</strong>. Not because the others are bad. Because they aren&rsquo;t built for the job.</p>
+          <p class="kicker-line">Conversation memory remembers what was said. Institutional memory remembers what was learned.</p>
+        </article>
+      </div>
+    </section>
+
     <!-- S7 PROOF -->
     <section class="proof shell">
       <div class="proof-inner">
@@ -1625,7 +1907,7 @@ body::before { display: none; }
             <li>Personal scope, local SQLite</li>
             <li>GitHub issues support</li>
           </ul>
-          <a class="pbtn" href="#order">Install from GitHub</a>
+          <a class="pbtn" href="https://github.com/gizmax/memee" rel="external">Install from GitHub</a>
         </div>
         <div class="ptier featured reveal">
           <div class="tier-name">Team</div>
@@ -1718,6 +2000,8 @@ body::before { display: none; }
         <nav class="foot-nav" aria-label="Footer">
           <a href="#value">Why</a>
           <a href="#share">How it works</a>
+          <a href="#compare">Compare</a>
+          <a href="#faq">FAQ</a>
           <a href="#pricing">Pricing</a>
           <a href="https://github.com/gizmax/memee" rel="external">Docs</a>
           <a href="https://github.com/gizmax/memee" rel="external">GitHub</a>
@@ -1836,10 +2120,7 @@ body::before { display: none; }
 // ────────────────────────────────────────────────────────────────────
 // X (Twitter) conversion event tracking
 // Pixel base config 'rc3ll' is fired in <head>. Event IDs below are
-// placeholders — replace with actual tw-XXXXX-YYYYY IDs from
-// X Ads Manager → Tools → Events Manager → Create event.
-// While IDs are placeholders, twq() calls still build retargeting
-// audiences but do NOT optimize conversion bidding.
+// from X Ads Manager → Tools → Events Manager.
 // ────────────────────────────────────────────────────────────────────
 (function () {
   if (typeof window.twq !== 'function') return;
@@ -1852,42 +2133,38 @@ body::before { display: none; }
   }
 
   // 1. Install intent — click on the hero CLI command pre block.
-  // Replace 'tw-INSTALL_INTENT_PLACEHOLDER' with the X event tag id.
   const cli = document.getElementById('cli-install');
   if (cli) {
     cli.addEventListener('click', function () {
-      track('tw-INSTALL_INTENT_PLACEHOLDER', {
+      track('tw-rc3ll-rc3o6', {
         conversion_id: 'install-cli-' + Date.now(),
       });
     });
   }
 
   // 2. GitHub link clicks — repo, releases, changelog, docs.
-  // Replace 'tw-GITHUB_CLICK_PLACEHOLDER' with the X event tag id.
   document.querySelectorAll('a[href*="github.com/gizmax/memee"]').forEach(function (a) {
     a.addEventListener('click', function () {
-      track('tw-GITHUB_CLICK_PLACEHOLDER', {
+      track('tw-rc3ll-rc3o8', {
         conversion_id: 'github-click-' + Date.now(),
       });
     });
   });
 
   // 3. Hero CTA — "Install free" button click.
-  // Replace 'tw-HERO_CTA_PLACEHOLDER' with the X event tag id.
   const heroCta = document.querySelector('.hero-ctas a.btn:not(.btn--ghost)');
   if (heroCta) {
     heroCta.addEventListener('click', function () {
-      track('tw-HERO_CTA_PLACEHOLDER', {
+      track('tw-rc3ll-rc3o9', {
         conversion_id: 'hero-cta-' + Date.now(),
       });
     });
   }
 
   // 4. Pricing-tier signup — Team trial form submit + Enterprise mailto.
-  // Replace 'tw-PRICING_INTENT_PLACEHOLDER' with the X event tag id.
   document.querySelectorAll('form, a[href^="mailto:info@memee.eu"]').forEach(function (el) {
     el.addEventListener(el.tagName === 'FORM' ? 'submit' : 'click', function () {
-      track('tw-PRICING_INTENT_PLACEHOLDER', {
+      track('tw-rc3ll-rc3ob', {
         conversion_id: 'pricing-' + Date.now(),
       });
     });

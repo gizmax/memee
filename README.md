@@ -162,6 +162,50 @@ Memee is memory, not model. Value scales sublinearly with headcount — one cano
 
 ---
 
+## Memory, compared
+
+Memory products cluster around two shapes: per-user context (ChatGPT, Hermes) or per-agent state (Letta, Mem0, Zep). Memee is the only one built per-organisation, with confidence scoring, cross-project propagation, and a flat-fee team tier.
+
+| Product | Cross-model | Cross-project | Cross-team | Auto-capture | Aging / lifecycle | Licence |
+|---|---|---|---|---|---|---|
+| **Memee** | Claude, GPT, Gemini, Llama | Yes. Propagation engine | Yes. Team / org scope | Both. Quality gate | Confidence + 60-day archive | MIT (OSS) + EULA (Team) |
+| Claude Skills | Open standard. Ported to GPT, Gemini | Per-folder. Manual reuse | No. Static files | No. Author-written | None. Files don't decay | Free with Claude |
+| Mem0 | Claude, GPT, Gemini, local | Not first-class | Cloud tier | Auto-extract from chat | Not documented | Apache 2.0 + cloud from $19 |
+| Letta | Multi-model | Per-agent state | Not advertised | Auto via agent loop | Three-tier virtual memory | Apache 2.0 + cloud from $20 |
+| Zep | Multi-model | Not a documented primitive | Roles via API | Auto from episodes | Temporal graph | Graphiti Apache 2.0. Cloud from $25 |
+| ChatGPT Memory | Vendor-locked to ChatGPT | Project containers. Isolated | No. Per-user only | Both | Not published | Bundled with Plus / Team |
+| Hermes Agent | Provider routing. Multi-LLM | Single-server posture | No | Both. Agent-curated | Not documented | MIT |
+
+Sources, verified April 2026: [anthropic.com/news/skills](https://www.anthropic.com/news/skills), [mem0.ai/pricing](https://mem0.ai/pricing), [letta.com/pricing](https://letta.com/pricing), [getzep.com](https://www.getzep.com/), [openai.com/memory](https://openai.com/index/memory-and-new-controls-for-chatgpt/), [hermes-agent.nousresearch.com](https://hermes-agent.nousresearch.com/).
+
+---
+
+## Three fair questions
+
+From the launch thread. Answered without flinching.
+
+### Doesn't an MCP server just add to my context window?
+
+It would, if it dumped. Memee doesn't. The router has a hard 500-token cap and lands at **~40 tokens** on average per briefing. Measured, not aspirational.
+
+Compare that to the file you already ship: median `CLAUDE.md` / `AGENTS.md` across 27 popular OSS repos is **~2,160 tokens**, loaded in full on every session and ridden along on every turn. That file only grows. Memee is the cure for context bloat, not a new source of it.
+
+### Don't Claude Skills already do this?
+
+Skills are good. They're also Claude-native, hand-authored, static, and per-folder. Memee is none of those things.
+
+It writes from the conversation, not from your hand. It scores what it captures (cross-model ×1.3, cross-project ×1.5). It ages out what stops earning its keep on the lifecycle ladder, *hypothesis → tested → validated → canon → deprecated*. The same canon answers GPT in Cursor, Gemini in Continue, and Llama wherever you run it. Skills are a folder. Memee is a memory.
+
+### How is this different from Mem0, Letta, Zep, ChatGPT memory?
+
+Most memory projects remember *conversations*: you talked about X last Tuesday, here it is again. That's chat history with a vector index.
+
+Memee earns *canon*. A claim arrives at 0.5 confidence and goes nowhere until a second model family agrees and a second project re-uses it. On OrgMemEval v1.0 that capability gap shows up as **92.2 / 100** against a competitor baseline of **2.3**. Not because the others are bad. Because they aren't built for the job.
+
+Conversation memory remembers what was said. Institutional memory remembers what was learned.
+
+---
+
 ## Contributing
 
 PRs welcome. Before opening a large one, a short issue describing the direction saves everyone a round-trip.
