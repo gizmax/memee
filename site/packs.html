@@ -10,6 +10,11 @@
 <meta property="og:image" content="https://memee.eu/og-image.png" />
 <link rel="canonical" href="https://memee.eu/packs" />
 
+<!-- Same fonts and pixel as memee.eu/ — keep visual identity consistent -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
 <!-- Google Analytics — gizmax.cz convention -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZN1K4G2TCZ"></script>
 <script>
@@ -17,6 +22,12 @@
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
   gtag('config', 'G-ZN1K4G2TCZ');
+</script>
+
+<!-- X (Twitter) base pixel — same id as memee.eu -->
+<script>
+  !function(e,t,n,s,u,a){e.twq||(s=e.twq=function(){s.exe?s.exe.apply(s,arguments):s.queue.push(arguments)},s.version='1.1',s.queue=[],u=t.createElement(n),u.async=!0,u.src='https://static.ads-twitter.com/uwt.js',a=t.getElementsByTagName(n)[0],a.parentNode.insertBefore(u,a))}(window,document,'script');
+  twq('config','rc3ll');
 </script>
 
 <style>
@@ -30,6 +41,7 @@
     --bone-dim: #161A22;
     --orange: #00E5C7;
     --orange-soft: #00E5C71a;
+    --grotesk: "Inter Tight", "Söhne", "Neue Haas Grotesk", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     --serif: "Source Serif 4", "Tiempos", Georgia, serif;
     --mono: "JetBrains Mono", "Berkeley Mono", ui-monospace, SFMono-Regular, monospace;
     --pad-x: clamp(20px, 4vw, 80px);
@@ -39,7 +51,7 @@
   body {
     background: var(--bone);
     color: var(--ink);
-    font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+    font-family: var(--grotesk);
     font-size: 16px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
@@ -67,28 +79,38 @@
   header.top .row {
     display: flex; justify-content: space-between; align-items: center; gap: 24px;
   }
-  .brand {
-    font-family: var(--serif);
-    font-size: 22px;
-    font-weight: 600;
+  /* Wordmark — identical to memee.eu/. Cyan-mint dot + Inter Tight 700. */
+  .wordmark {
+    font-family: var(--grotesk);
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: -0.02em;
     color: var(--ink);
     text-decoration: none;
+    display: inline-flex; align-items: center; gap: 10px;
   }
-  .brand .dot { color: var(--orange); }
+  .wordmark .dot {
+    width: 8px; height: 8px;
+    background: var(--orange);
+    border-radius: 999px;
+    display: inline-block;
+  }
   nav.top-nav { display: flex; gap: 24px; font-family: var(--mono); font-size: 13px; }
   nav.top-nav a { text-decoration: none; color: var(--ink-80); }
   nav.top-nav a:hover { color: var(--orange); }
 
   .hero { padding-block: clamp(60px, 8vw, 120px); border-bottom: 1px solid var(--ink-10); }
   .hero h1 {
-    font-family: var(--serif);
+    font-family: var(--grotesk);
+    font-weight: 600;
     font-size: clamp(48px, 7vw, 96px);
     line-height: 0.95;
-    letter-spacing: -0.025em;
+    letter-spacing: -0.035em;
     margin: 0 0 24px;
     max-width: 18ch;
+    text-wrap: balance;
   }
-  .hero h1 .accent { color: var(--orange); font-style: italic; }
+  .hero h1 .accent { color: var(--orange); font-family: var(--serif); font-style: italic; font-weight: 400; }
   .hero p.lede {
     font-size: 20px;
     line-height: 1.5;
@@ -109,10 +131,13 @@
 
   .packs { padding-block: clamp(60px, 8vw, 120px); }
   .packs h2 {
-    font-family: var(--serif);
+    font-family: var(--grotesk);
+    font-weight: 600;
     font-size: clamp(36px, 5vw, 56px);
     line-height: 1;
+    letter-spacing: -0.035em;
     margin: 0 0 12px;
+    text-wrap: balance;
   }
   .packs p.lede {
     color: var(--ink-80);
@@ -142,11 +167,12 @@
     text-transform: uppercase;
   }
   .pack h3 {
-    font-family: var(--serif);
+    font-family: var(--grotesk);
+    font-weight: 600;
     font-size: 26px;
     line-height: 1.15;
     margin: 0;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.025em;
   }
   .pack p { margin: 0; color: var(--ink-80); font-size: 15px; line-height: 1.55; }
   .pack .stats {
@@ -166,10 +192,13 @@
 
   .how { padding-block: clamp(60px, 8vw, 120px); border-top: 1px solid var(--ink-10); }
   .how h2 {
-    font-family: var(--serif);
+    font-family: var(--grotesk);
+    font-weight: 600;
     font-size: clamp(36px, 5vw, 56px);
     line-height: 1;
+    letter-spacing: -0.035em;
     margin: 0 0 32px;
+    text-wrap: balance;
   }
   .how-grid {
     display: grid;
@@ -179,8 +208,10 @@
   }
   @media (max-width: 800px) { .how-grid { grid-template-columns: 1fr; } }
   .how-grid h3 {
-    font-family: var(--serif);
+    font-family: var(--grotesk);
+    font-weight: 600;
     font-size: 22px;
+    letter-spacing: -0.02em;
     margin: 0 0 12px;
     color: var(--ink);
   }
@@ -199,12 +230,12 @@
 
 <header class="top">
   <div class="shell row">
-    <a class="brand" href="/">memee<span class="dot">.</span></a>
+    <a class="wordmark" href="/"><span class="dot"></span>Memee</a>
     <nav class="top-nav">
       <a href="/#share">How it works</a>
       <a href="/#compare">Compare</a>
+      <a href="/packs/">Packs</a>
       <a href="/#faq">FAQ</a>
-      <a href="/packs">Packs</a>
       <a href="/#pricing">Pricing</a>
       <a href="https://github.com/gizmax/memee" rel="external">GitHub</a>
     </nav>
@@ -267,13 +298,17 @@
       <div class="install-cmd">memee pack install mcp-server-canon</div>
     </article>
 
-    <article class="pack" style="opacity:0.5">
-      <span class="meta">coming · http · MIT</span>
+    <article class="pack">
+      <span class="meta">v0.1.0 · http · MIT</span>
       <h3>http-api-canon</h3>
-      <p>RFC 9110 + 7807 + 8725 + 9700 + OAuth 2.1 distilled. Status code discipline, problem+json errors, JWT BCP, OAuth pitfalls, idempotency keys, ETag concurrency. The IETF index nobody has written.</p>
+      <p>RFC 9110 + 7807/9457 + 8725 + 9700 + OAuth 2.1 distilled. Status discipline, problem+json errors, conditional requests, JWT BCP (alg-none, key confusion), OAuth pitfalls (implicit flow, redirect-URI matching), idempotency keys, ETag concurrency. The IETF index nobody had written.</p>
       <div class="stats">
-        <span>Wanted: reviewers</span>
+        <span><strong>91</strong> memories</span>
+        <span><strong>61</strong> patterns</span>
+        <span><strong>23</strong> anti-patterns</span>
+        <span><strong>5</strong> decisions</span>
       </div>
+      <div class="install-cmd">memee pack install http-api-canon</div>
     </article>
 
     <article class="pack" style="opacity:0.5">

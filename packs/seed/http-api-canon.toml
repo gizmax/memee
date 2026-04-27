@@ -1,0 +1,44 @@
+# .memee pack manifest — http-api-canon v0.1.0
+# Format spec: see docs/pack-format.md
+
+name = "http-api-canon"
+version = "0.1.0"
+title = "HTTP API canon — RFC 9110 + 7807/9457 + 8725 + 9700 + OAuth 2.1"
+description = """
+Hand-curated patterns, anti-patterns, decisions, and lessons for designing
+HTTP APIs that survive contact with real clients, real CDNs, and real
+attackers. Distils the IETF specs nobody reads end-to-end (RFC 9110 HTTP
+semantics, RFC 9457 problem details, RFC 8725 JWT BCP, RFC 9700 OAuth
+security BCP, OAuth 2.1 draft) and the industry guidelines that fill the
+gaps (Zalando, Google AIPs, Microsoft) into a single Trigger / Consequence
+/ Alternative index.
+
+Covers method + status semantics, problem-details errors, conditional
+requests + caching, cursor pagination, OAuth + JWT (the hot zone),
+CORS, rate limiting, versioning, idempotency keys, content negotiation,
+and discoverability. Every auth entry cites the relevant RFC § inline.
+"""
+author = "Memee maintainers <info@memee.eu>"
+homepage = "https://memee.eu/packs/http-api-canon"
+license = "MIT"
+created = "2026-04-27"
+
+# Confidence cap: every memory in this pack starts at most this high.
+# User-validated memories will outrank pack defaults.
+confidence_cap = 0.6
+
+# Tags this pack expects to be relevant. Used by `memee pack search`.
+stack = ["http", "api", "rest", "oauth", "jwt"]
+
+# Counts (filled in after authoring).
+[counts]
+memories = 91
+patterns = 61
+anti_patterns = 23
+decisions = 5
+lessons = 2
+
+# Provenance — empty for v0.1 hand-authored seed packs.
+[[provenance]]
+kind = "seed"
+note = "Hand-curated by Memee maintainers as the v2.0.0 HTTP-API seed corpus."
