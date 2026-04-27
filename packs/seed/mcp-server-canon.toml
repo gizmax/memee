@@ -1,0 +1,40 @@
+# .memee pack manifest — mcp-server-canon v0.1.0
+# Format spec: see docs/pack-format.md
+
+name = "mcp-server-canon"
+version = "0.1.0"
+title = "MCP server design — security, transport, tool-craft"
+description = """
+Hand-curated patterns, anti-patterns, decisions, and lessons for building
+MCP (Model Context Protocol) servers that ship without getting CVE'd. Covers
+stdio + Streamable HTTP transports, tool-design ergonomics, the lethal-trifecta
+class of prompt-injection attacks, supply-chain hygiene for npm/uvx servers,
+OAuth 2.1 + scope discipline, and the lifecycle rules that keep a server
+running and trusted twelve months after publish.
+"""
+author = "Memee maintainers <info@memee.eu>"
+homepage = "https://memee.eu/packs/mcp-server-canon"
+license = "MIT"
+created = "2026-04-27"
+
+# Confidence cap: every memory in this pack starts at most this high.
+# User-validated memories will outrank pack defaults.
+confidence_cap = 0.6
+
+# Tags this pack expects to be relevant. Used by `memee pack search`.
+stack = ["mcp", "anthropic", "ai-tools", "security", "json-rpc"]
+
+# Counts (filled in by `memee pack export`).
+[counts]
+memories = 59
+patterns = 32
+anti_patterns = 21
+decisions = 3
+lessons = 3
+
+# Provenance — empty for v0.1 hand-authored seed packs. Future packs
+# exported from a real DB will fill this with [project, contributor]
+# attribution chains.
+[[provenance]]
+kind = "seed"
+note = "Hand-curated by Memee maintainers as the v2.0.0 MCP-server seed corpus."
