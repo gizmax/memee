@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.4] — 2026-04-27
+
+The "tests stop polluting the developer's ledger" patch.
+No behaviour change for end users.
+
+### Fixed
+
+- **Pack-test ledger isolation.** Pack-related tests already
+  ``monkeypatch.setattr("memee.engine.packs.LEDGER_PATH", ...)`` in
+  every test that needs it, but a forgotten patch — or an import path
+  that bypassed pytest entirely (REPL, IDE runner, ``python -c``) —
+  would silently append entries to the developer's real
+  ``~/.memee/packs.json``. Two layers of defence land in this release:
+  a session-wide autouse fixture that redirects ``LEDGER_PATH`` to a
+  per-test ``tmp_path`` for **every** test (existing per-test patches
+  are still honoured, just redundant), and a session-end leak guard
+  that fails the suite loud if the real ledger's size or mtime moved.
+
 ## [2.0.3] — 2026-04-27
 
 The "people install once and forget" patch. Three things that should
