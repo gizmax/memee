@@ -8,6 +8,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.1.0] — 2026-04-28
+
+**Receipts everywhere.** Memee starts telling you what it did, in your own
+conversation, where you already are. CLI is diagnostics; product surface
+is the briefing the agent already shows you. Three new receipts, all silent
+on no-op, all killable by env var, all best-effort.
+
+### Added
+
+- **Stop hook receipt is now a sentence.** ``memee learn --auto``
+  prints a single ≤120-char line that names the most-significant memory
+  touched in the just-completed task and cites it with an 8-char
+  ``[mem:xxxxxxxx]`` suffix runnable via ``memee cite``. Significance
+  order: ``mistake_made`` (warning ignored + task failed) →
+  ``warning_ineffective`` (ignored, got lucky) → ``canon`` (pattern
+  reused) → ``hypothesis`` (knowledge growth). Silent on no-op. The
+  pre-v2.1 structured line ``memee learn: ok
+  (warnings_violated=...)`` is removed; use ``memee learn --json`` for
+  raw structured output. ``engine.feedback.post_task_review`` now
+  returns ``most_significant_memory_id``,
+  ``most_significant_memory_title``, ``most_significant_kind``
+  alongside the existing counters.
+- **Citation eventing — last-session receipt in the next briefing.**
+  New ``memee.session_ledger`` snapshots every memory citation made
+  during a session into ``~/.memee/last_session_cites.json`` from
+  inside the existing Stop-hook flow, then prepends a one-liner to the
+  next SessionStart briefing: ``> Last session: applied N memories.
+  Confirmed: <title> [mem:xxxxxxxx].``. Highlighted memory picked
+  by confidence × maturity weight. Kill switch:
+  ``MEMEE_NO_SESSION_RECEIPT=1``.
+- **Weekly digest in the SessionStart briefing.** New
+  ``memee.digest`` prepends a multi-line markdown receipt on the first
+  session of every 7-day window: memories applied, warnings checked,
+  promoted to canon, hypotheses needing review. Two counters are
+  honest **proxies** documented in the module: *promoted to canon*
+  uses ``CANON`` maturity + ``updated_at`` in window (no separate
+  ``promoted_at`` column in OSS); *needs review* uses ``HYPOTHESIS``
+  maturity + ``confidence_score < 0.4``. All numbers stay local.
+  Cache at ``~/.memee/weekly_digest.json``. Kill switch:
+  ``MEMEE_NO_DIGEST=1``.
+
+### Changed
+
+- **``memee brief`` prepend stack.** The briefing now layers (top-down)
+  weekly digest → last-session summary → update-check notice → the
+  routed briefing body. Each piece is independently silent when it has
+  nothing to say; exceptions in any prepend are swallowed so a broken
+  receipt never breaks a briefing. Hook output stays in stdout for
+  Claude Code to surface.
+
+### Tests
+
+- 14 new under ``tests/test_stop_receipt.py`` (Stop receipt formatting +
+  silent no-op + truncation).
+- 9 new under ``tests/test_session_ledger.py`` (cache lifecycle, picking
+  heuristic, kill-switch, corrupt-cache resilience).
+- 19 new under ``tests/test_digest.py`` (per-metric paths, cache
+  freshness, kill-switch, empty-DB returns None).
+- Existing ``test_learn_auto`` updated for the renamed CLI field.
+
+### Migration
+
+Anything parsing the old ``memee learn: ok (warnings_violated=N, ...)``
+line needs to switch to ``memee learn --auto --json``. Otherwise no
+config change required — receipts default-on, all three kill switches
+are env-var opt-out.
+
+
 ## [2.0.5] — 2026-04-28
 
 The "honest numbers" patch. v2.0.4 had three correctness bugs hiding

@@ -112,17 +112,20 @@ def test_learn_auto_with_diff_emits_structured_line(tmp_path, monkeypatch):
         ["learn", "--auto", "--project", str(tmp_path), "--diff", diff],
     )
     assert result.exit_code == 0
-    # Either we get the structured line OR a silent return — depends on
-    # whether the review engine actually flagged something. The key
-    # behaviour for the hook is: exit 0, no traceback.
+    # Either we get the v2.1 sentence-style receipt OR a silent return —
+    # depends on whether the review engine actually flagged something.
+    # The key behaviour for the hook is: exit 0, no traceback.
+    #
+    # v2.1.0 replaced the structured ``memee learn: ok (warnings_violated=...)``
+    # line with a one-line English sentence naming a concrete memory.
+    # Use ``memee learn --json`` to recover the old structured payload.
     if result.output.strip():
-        assert "memee learn: ok" in result.output
-        # v2.0.5: renamed from ``warnings_avoided`` (which was dishonest —
-        # it actually counted warnings the agent VIOLATED). The structured
-        # field is now ``warnings_violated``, matching what it always was.
-        assert "warnings_violated=" in result.output
-        assert "patterns_followed=" in result.output
-        assert "new_patterns=" in result.output
+        assert "Memee:" in result.output
+        # The receipt names the memory by title and ends with a citation.
+        assert "[mem:" in result.output
+        # On a violated warning + success outcome we expect the
+        # ``warning_ineffective`` kind label.
+        assert "warning_ineffective" in result.output
 
 
 def test_learn_auto_resilient_to_db_errors(tmp_path, monkeypatch):

@@ -1079,18 +1079,44 @@ def brief(project, task, budget, full, fmt):
         click.echo(f"memee brief: {e}", err=True)
         return
 
-    # Passive update notice: when PyPI says a newer memee is out, prepend
-    # one line so the agent sees it and can pass it on. Cached for 24h,
-    # silent on network errors, killable via MEMEE_NO_UPDATE_CHECK=1.
-    # We never block the briefing on this — any failure is swallowed.
+    # Receipt chain: build the prepend stack so Memee tells the user what
+    # it did, in their own conversation, where they already are. Order
+    # matters — most "this week" first (reads like context), then "last
+    # session" (yesterday's evidence), then update notice (housekeeping),
+    # then the briefing body itself. Each piece is independently silent
+    # when it has nothing to say. All exceptions are swallowed: a broken
+    # receipt must never break a briefing.
+    prepends: list[str] = []
+    try:
+        from memee.digest import format_digest_notice
+
+        digest = format_digest_notice()
+        if digest:
+            prepends.append(digest)
+    except Exception:
+        pass
+
+    try:
+        from memee.session_ledger import format_session_summary
+
+        summary = format_session_summary()
+        if summary:
+            prepends.append(summary)
+    except Exception:
+        pass
+
     try:
         from memee.update_check import check, format_notice
 
         notice = format_notice(check(), prefix="> ")
         if notice:
-            result = f"{notice}\n\n{result}" if result else notice
+            prepends.append(notice)
     except Exception:
         pass
+
+    if prepends:
+        prefix = "\n\n".join(prepends)
+        result = f"{prefix}\n\n{result}" if result else prefix
 
     click.echo(result)
 
@@ -1232,7 +1258,13 @@ def embed():
 )
 @click.option("--agent", default="", help="Agent / developer name")
 @click.option("--model", default="", help="AI model used (claude-opus-4, gpt-4o, ...)")
-def learn(auto, project, diff_text, outcome, agent, model):
+@click.option(
+    "--json", "as_json", is_flag=True,
+    help="Print the full structured review payload as JSON instead of the "
+         "one-line English sentence. Useful for scripts and for debugging "
+         "the Stop hook receipt.",
+)
+def learn(auto, project, diff_text, outcome, agent, model, as_json):
     """Post-task review: scan the latest diff, validate patterns, log impact.
 
     The Stop hook fires this with ``--auto`` so the loop closes without the
@@ -1261,6 +1293,32 @@ def learn(auto, project, diff_text, outcome, agent, model):
             abs_path = str(Path(project).resolve(strict=False))
         except OSError:
             abs_path = project
+
+        # Snapshot the session's citations BEFORE anything else in the
+        # auto path. The Stop hook fires this command on every Stop —
+        # including chats with no diff — so this is the only reliable
+        # session-end boundary we have to advance ``last_ended_at``.
+        # The next SessionStart briefing reads the snapshot and prepends
+        # a one-line "Last session: applied N memories" receipt.
+        # Best-effort: every error is swallowed inside record_session_end;
+        # we wrap again here so a failure to even open the DB doesn't
+        # break the hook.
+        if auto:
+            try:
+                from memee.session_ledger import record_session_end
+                from memee.storage.database import (
+                    get_session as _get_session,
+                    init_db as _init_db,
+                )
+
+                _ledger_session = _get_session(_init_db())
+                try:
+                    record_session_end(_ledger_session)
+                finally:
+                    _ledger_session.close()
+            except Exception:
+                # Hook safety: never break the session.
+                pass
 
         # Source the diff. Caller-provided wins; otherwise, in a git repo,
         # take the working-tree diff. If the directory isn't a git repo the
@@ -1309,29 +1367,141 @@ def learn(auto, project, diff_text, outcome, agent, model):
 
     patterns_followed = result.get("patterns_followed", 0)
     warnings_violated = result.get("warnings_violated", 0)
-    # ``new_patterns`` placeholder for future expansion (when feedback also
-    # auto-records candidate patterns from the diff). For now report 0 so
-    # the structured-line shape is stable for parsers.
-    new_patterns = 0
+    new_patterns = result.get("new_patterns", 0)
+
+    # ``--json`` short-circuits all rendering. Useful for scripts and for
+    # debugging the Stop hook from a terminal.
+    if as_json:
+        import json as _json
+
+        click.echo(_json.dumps(result, default=str, sort_keys=True))
+        return
 
     if auto:
-        # Silent unless something was learned. A noisy hook gets disabled.
-        if patterns_followed == 0 and warnings_violated == 0:
+        sentence = _format_stop_receipt(result)
+        # Silent unless we built a sentence. A noisy hook gets disabled.
+        if not sentence:
             return
-        # Report what actually happened. ``warnings_violated`` is exactly
-        # that — counts of warnings the agent ignored. v2.0.4 and earlier
-        # surfaced this number as ``warnings_avoided``, which read like a
-        # win. It wasn't.
-        click.echo(
-            f"memee learn: ok (warnings_violated={warnings_violated}, "
-            f"patterns_followed={patterns_followed}, new_patterns={new_patterns})"
-        )
+        click.echo(sentence)
     else:
         click.echo(
             f"Patterns followed: {patterns_followed}\n"
             f"Warnings violated: {warnings_violated}\n"
+            f"New patterns: {new_patterns}\n"
             f"Outcome: {result.get('outcome', outcome)}"
         )
+
+
+# ── Stop hook receipt ────────────────────────────────────────────────────
+#
+# Render a single ≤120-char English sentence describing the most-significant
+# thing that happened in this Stop. Returns ``""`` when nothing notable
+# happened — the caller stays silent in that case.
+
+
+def _format_stop_receipt(result: dict) -> str:
+    """Build the one-line Stop receipt from a ``post_task_review`` result.
+
+    Significance order, highest first:
+
+      1. MISTAKE_MADE         (warning ignored AND task failed)
+      2. WARNING_INEFFECTIVE  (warning ignored, task succeeded — got lucky)
+      3. KNOWLEDGE_REUSED     (agent applied a known canon)
+      4. (future) NEW_PATTERN (Memee learned something)
+
+    Format:
+      ``Memee: warning ignored — "<title>" was hit (<kind>). [mem:xxxxxxxx]``
+      ``Memee: reused "<title>" (canon). [mem:xxxxxxxx]``
+      ``Memee: learned "<title>" as hypothesis. [mem:xxxxxxxx]``
+
+    The title is truncated to 60 chars + ``…`` if longer. The whole
+    sentence is capped at 120 chars; if a freak combination would push it
+    over we trim the title harder until it fits.
+    """
+    kind = result.get("most_significant_kind")
+    title = result.get("most_significant_memory_title") or ""
+    mem_id = result.get("most_significant_memory_id") or ""
+
+    if not kind or not mem_id:
+        # Nothing notable — silent no-op. Even if the structured counts
+        # are non-zero, without a concrete memory row we can't honestly
+        # name what happened, so we stay quiet rather than fabricate.
+        return ""
+
+    short_id = mem_id[:8]
+    truncated_title = _truncate_title(title, 60)
+
+    # Match against ImpactType *string values*. We import here so the CLI
+    # doesn't pay the engine import cost on commands that don't need it.
+    from memee.engine.impact import ImpactType
+
+    if kind == ImpactType.MISTAKE_MADE.value:
+        sentence = (
+            f'Memee: warning ignored — "{truncated_title}" was hit '
+            f"(mistake_made). [mem:{short_id}]"
+        )
+    elif kind == ImpactType.WARNING_INEFFECTIVE.value:
+        sentence = (
+            f'Memee: warning ignored — "{truncated_title}" was hit '
+            f"(warning_ineffective). [mem:{short_id}]"
+        )
+    elif kind == ImpactType.KNOWLEDGE_REUSED.value:
+        sentence = f'Memee: reused "{truncated_title}" (canon). [mem:{short_id}]'
+    else:
+        # Forward-compat: any other kind (incl. future NEW_PATTERN) reads
+        # as a learning event. Keeps the renderer total — never raises,
+        # never returns ``None`` for a known result shape.
+        sentence = (
+            f'Memee: learned "{truncated_title}" as hypothesis. '
+            f"[mem:{short_id}]"
+        )
+
+    # Hard cap — the receipt is read in a single terminal line. If a long
+    # title pushed us over 120 chars, shrink the title further until we fit.
+    while len(sentence) > 120 and len(truncated_title) > 8:
+        truncated_title = _truncate_title(truncated_title, len(truncated_title) - 8)
+        sentence = sentence.replace(
+            sentence.split('"', 2)[1], truncated_title
+        ) if '"' in sentence else sentence
+        # Defensive: rebuild from scratch in case the in-place replace
+        # didn't shorten it (e.g. title contained quotes).
+        if len(sentence) > 120:
+            if kind == ImpactType.MISTAKE_MADE.value:
+                sentence = (
+                    f'Memee: warning ignored — "{truncated_title}" '
+                    f"was hit (mistake_made). [mem:{short_id}]"
+                )
+            elif kind == ImpactType.WARNING_INEFFECTIVE.value:
+                sentence = (
+                    f'Memee: warning ignored — "{truncated_title}" '
+                    f"was hit (warning_ineffective). [mem:{short_id}]"
+                )
+            elif kind == ImpactType.KNOWLEDGE_REUSED.value:
+                sentence = (
+                    f'Memee: reused "{truncated_title}" (canon). '
+                    f"[mem:{short_id}]"
+                )
+            else:
+                sentence = (
+                    f'Memee: learned "{truncated_title}" as hypothesis. '
+                    f"[mem:{short_id}]"
+                )
+
+    return sentence
+
+
+def _truncate_title(title: str, max_chars: int) -> str:
+    """Truncate a memory title to ``max_chars`` characters.
+
+    Adds an ellipsis (``…``) when truncated. The ellipsis is one char so
+    the visible result is exactly ``max_chars`` characters long. Empty /
+    short titles pass through unchanged.
+    """
+    if len(title) <= max_chars:
+        return title
+    if max_chars <= 1:
+        return "…"
+    return title[: max_chars - 1] + "…"
 
 
 @cli.command()

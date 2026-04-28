@@ -149,9 +149,48 @@ def post_task_review(
         if total_taught > 0 else None
     )
 
+    # ── Pick the single most-significant memory for the Stop receipt ──
+    #
+    # The Stop hook surfaces *one* sentence — the highest-impact thing that
+    # happened. Significance order, highest first:
+    #
+    #   1. MISTAKE_MADE         (warning ignored AND task failed)
+    #   2. WARNING_INEFFECTIVE  (warning ignored, task succeeded — got lucky)
+    #   3. patterns_followed    (agent applied a known canon)
+    #   4. new_patterns         (Memee learned something — currently 0)
+    #
+    # We map the chosen memory back to a row + ImpactType string so the
+    # caller can render it without re-querying.
+    most_sig_id: str | None = None
+    most_sig_title: str | None = None
+    most_sig_kind: str | None = None
+
+    if warnings_violated:
+        # Highest-severity violation wins. ``warnings`` from review.py is
+        # already severity-sorted (critical → low), so element 0 is fine.
+        top = warnings_violated[0]
+        most_sig_id = top.get("memory_id") or None
+        most_sig_title = top.get("title") or None
+        most_sig_kind = (
+            ImpactType.MISTAKE_MADE.value
+            if outcome == "failure"
+            else ImpactType.WARNING_INEFFECTIVE.value
+        )
+    elif good_patterns_followed:
+        # No violations — surface the strongest pattern reuse instead.
+        # review.py orders confirmations by maturity already; take the
+        # first canon/validated entry.
+        top = good_patterns_followed[0]
+        most_sig_id = top.get("memory_id") or None
+        most_sig_title = top.get("title") or None
+        most_sig_kind = ImpactType.KNOWLEDGE_REUSED.value
+    # No ``new_patterns`` branch yet — placeholder. When feedback starts
+    # auto-recording candidate patterns from the diff we'll fill it in.
+
     return {
         "patterns_followed": len(good_patterns_followed),
         "warnings_violated": len(warnings_violated),
+        "new_patterns": 0,
         "patterns_details": [
             {"title": p.get("title", ""), "maturity": p.get("maturity", "")}
             for p in good_patterns_followed
@@ -160,6 +199,9 @@ def post_task_review(
             {"title": w.get("title", ""), "severity": w.get("severity", "")}
             for w in warnings_violated
         ],
+        "most_significant_memory_id": most_sig_id,
+        "most_significant_memory_title": most_sig_title,
+        "most_significant_kind": most_sig_kind,
         "outcome": outcome,
         "teaching_effectiveness": round(effectiveness, 2) if effectiveness is not None else None,
         "keywords_scanned": stats.get("keywords_extracted", 0),
