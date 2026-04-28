@@ -8,6 +8,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.2.0] — 2026-04-28
+
+**Receipts everywhere, but earned.** v2.1.0 added receipts to the
+briefing prepend; v2.2 makes them visible without becoming noise.
+The product surface stays the agent's transcript — no dashboard, no
+new app to check. Five strategic moves, with ~earned silence~ as the
+through-line.
+
+Built by three parallel subagents (M1, M2, M4) in worktree isolation,
+plus M3 (digest compression) and M6 (orchestration) integrated by hand.
+Architecture and UX research conducted by two expert subagents before
+implementation; their findings are summarised in
+``docs/v2.2-plan.md`` if you want the audit trail.
+
+### Added
+
+- **Aggregate session receipt with voice flag (M1).** New
+  `src/memee/receipts.py` exposes `format_session_receipt(session, *,
+  since, until, voice=None)`. Wired between digest and last-session
+  summary, plus into `learn --auto` so the Stop hook ships **two**
+  lines: one aggregate ("Memee reused 2 memories, prevented 1 known
+  mistake, saved ~8 min") plus the v2.1 single-memory receipt naming
+  the headline memory. Default voice is **`agent`**, which reframes
+  receipts as the agent's footnote (`"Pulling from 'React Query keys
+  must include tenant id' — settled in this canon last March."`)
+  rather than Memee's brag — a deliberate positioning choice from
+  the UX expert's contrarian take. Legacy `tool` voice is opt-in via
+  `MEMEE_RECEIPT_VOICE=tool`. Kill switch: `MEMEE_NO_RECEIPT=1`.
+  Silent on no-signal; `saved_min` rounds to nearest 5, suppressed
+  under 3.
+- **First-week onboarding 3-receipt arc (M2).** Right after `memee
+  setup`, new users get a visible signal instead of silence:
+  (1) `Memee is listening. No memories yet.` on day-1 SessionStart,
+  (2) `Memee learned "<title>" from this session.` when the first
+  memory is recorded, (3) `Memee reused "<title>" — first time it
+  saved you a re-explain.` when the first KNOWLEDGE_REUSED event
+  lands. Then the arc ends. Marker flips to `completed` after
+  stage 3 OR after 7 days, whichever first. **Per-project keys**
+  (consultants in N repos see the arc N times); LRU-capped at 50.
+  Killable via `MEMEE_NO_ONBOARDING=1`. Local-only at
+  `~/.memee/onboarding.json`.
+- **Weekly digest compressed to one line (M3).** Default output is
+  now `> Memee — last 7 days: 18 applied, 5 warnings checked, 3
+  promoted, 2 needs review.` — Linear-style compression that answers
+  "did it work, did it learn, did it conflict" in one pass. Multi-line
+  v2.1 layout lives behind `MEMEE_DIGEST_VERBOSE=1`; `memee pulse
+  --full` is the always-rich drill-down.
+- **`memee pulse` retrospective drill-down (M4).** Diachronic
+  complement to `memee status` (synchronic) and `memee why`
+  (per-snippet). Surfaces top reuses (≤3), prevented mistakes (≤3),
+  recently promoted-to-canon (≤5), and hypotheses needing review
+  (≤10), each bullet citing `[mem:xxxxxxxx]` so a follow-up
+  `memee cite <hash>` is one keystroke. ROI footer reports time
+  saved against the 5-min-per-memory investment proxy. `--format
+  json` for tooling. Reuses `format_session_receipt` for the headline
+  when M1 is loaded; falls back gracefully otherwise.
+
+### Changed
+
+- **`_gather_prepends` orchestration (M6).** The architecture's #1
+  risk was receipt fatigue — six potential prepend channels firing
+  at once would turn ambient into noisy. v2.2 enforces two hard
+  rules: (1) onboarding suppresses digest while the arc is active
+  (a new user should not see "0 applied this week" stacked under
+  their stage-1 line); (2) **max 2 channels per call** — the list is
+  computed in priority order (onboarding → digest → aggregate
+  receipt → last-session → update notice) and truncated to the top
+  two. The citation footer is appended later by the briefing engine
+  and is NOT subject to this cap.
+
+### Migration
+
+- **No breaking API changes.** All five env-var kill switches default
+  to off; old behaviour available behind opt-in flags.
+- The receipt voice flag defaults to `agent` for new installs. Set
+  `MEMEE_RECEIPT_VOICE=tool` if you prefer the v2.1 phrasing.
+- Output of `memee learn --auto` is now two lines (aggregate +
+  single-memory) when there's a real signal. Anything parsing the
+  Stop output should handle both lines or use `memee learn --auto
+  --json`.
+
+### Tests
+
+- 17 new in `tests/test_session_receipt.py` (M1)
+- 15 new in `tests/test_onboarding.py` (M2)
+- 12 new in `tests/test_pulse.py` (M4)
+- 2 new in `tests/test_digest.py` (M3 verbose mode)
+- 5 new in `tests/test_prepend_orchestration.py` (M6 hard cap, digest
+  suppression during onboarding, broken-receipt resilience)
+
 ## [2.1.1] — 2026-04-28
 
 Audit-driven patch — eight mechanical fixes against the v2.1.0 receipt

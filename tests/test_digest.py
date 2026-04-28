@@ -207,7 +207,7 @@ def test_stale_cache_regenerates(isolated_home):
 
     result = digest.format_digest_notice()
     assert result is not None
-    assert "1 memory applied" in result  # singular form
+    assert "1 applied" in result  # singular form
 
 
 def test_corrupt_cache_regenerates(isolated_home):
@@ -290,7 +290,7 @@ def test_memories_applied_counter(isolated_home):
     assert result is not None
     # 3 applied (KR + MA + DI). MISTAKE_AVOIDED also counts as a warning,
     # so the warnings counter is 1.
-    assert "3 memories applied" in result
+    assert "3 applied" in result
     assert "1 warning checked" in result
 
 
@@ -343,7 +343,7 @@ def test_promoted_to_canon_counter(isolated_home):
 
     result = digest.format_digest_notice()
     assert result is not None
-    assert "1 promoted to canon" in result
+    assert "1 promoted" in result
 
 
 def test_needs_review_counter(isolated_home):
@@ -391,7 +391,7 @@ def test_needs_review_counter(isolated_home):
 
     result = digest.format_digest_notice()
     assert result is not None
-    assert "Needs review: 1 hypothesis" in result
+    assert "1 needs review" in result
 
 
 def test_old_impact_events_excluded(isolated_home):
@@ -440,8 +440,8 @@ def test_singular_plural_forms(isolated_home):
 
     result = digest.format_digest_notice()
     assert result is not None
-    assert "2 memories applied" in result
-    assert "memory applied" not in result  # not the singular form
+    assert "2 applied" in result
+    assert "1 applied" not in result  # not singular
 
 
 def test_render_only_includes_nonzero_metrics(isolated_home):
@@ -458,7 +458,7 @@ def test_render_only_includes_nonzero_metrics(isolated_home):
 
     result = digest.format_digest_notice()
     assert result is not None
-    assert "memories applied" in result or "memory applied" in result
+    assert " applied" in result
     assert "warning" not in result
     assert "canon" not in result
     assert "Needs review" not in result
@@ -509,3 +509,41 @@ def test_init_db_failure_returns_none(isolated_home, monkeypatch):
 
     monkeypatch.setattr(db_module, "get_engine", boom)
     assert digest.format_digest_notice() is None
+
+
+# ── v2.2.0: one-line default + verbose mode ─────────────────────────────────
+
+
+def test_render_default_is_single_line(isolated_home):
+    """v2.2.0 default: one-line digest. Multi-line lives behind the
+    MEMEE_DIGEST_VERBOSE flag."""
+    digest = isolated_home["digest_module"]
+
+    session = get_session(get_engine(isolated_home["db_path"]))
+    org = _seed_org(session)
+    mem = _seed_memory(session, org, title="A pattern")
+    _seed_impact_event(session, mem.id, ImpactType.KNOWLEDGE_REUSED.value)
+    session.close()
+
+    result = digest.format_digest_notice()
+    assert result is not None
+    assert result.count("\n") == 0, f"expected one line, got: {result!r}"
+    assert "> Memee — last 7 days:" in result
+
+
+def test_render_verbose_is_multi_line(isolated_home, monkeypatch):
+    """MEMEE_DIGEST_VERBOSE=1 restores the v2.1 multi-line layout."""
+    digest = isolated_home["digest_module"]
+
+    session = get_session(get_engine(isolated_home["db_path"]))
+    org = _seed_org(session)
+    mem = _seed_memory(session, org, title="A pattern")
+    _seed_impact_event(session, mem.id, ImpactType.KNOWLEDGE_REUSED.value)
+    session.close()
+
+    monkeypatch.setenv("MEMEE_DIGEST_VERBOSE", "1")
+    result = digest.format_digest_notice()
+    assert result is not None
+    assert result.count("\n") >= 1
+    # Verbose phrasing uses the legacy "memories applied" form.
+    assert "memory applied" in result or "memories applied" in result

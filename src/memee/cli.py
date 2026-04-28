@@ -660,6 +660,53 @@ def status():
         click.echo(f"  {t:15s} {count:4d}")
 
 
+# ── Pulse — retrospective drill-down (v2.2.0, M4) ──
+#
+# ``memee status`` is synchronic (totals, maturity histogram), ``memee why``
+# is targeted (single-snippet → canon hit). ``memee pulse`` answers the
+# diachronic question receipts in the agent transcript invite: "what did
+# Memee actually do recently?". Each bullet ends with a ``[mem:xxxxxxxx]``
+# token so a follow-up ``memee cite <hash>`` is one keystroke away.
+
+
+@cli.command()
+@click.option(
+    "--days", "-d", default=7, type=int,
+    help="Lookback window in days (default: 7).",
+)
+@click.option(
+    "--format", "fmt",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Output format. JSON is for tooling; text is the screenshotable view.",
+)
+def pulse(days, fmt):
+    """Retrospective: what Memee actually did recently.
+
+    Complements ``memee status`` (synchronic dashboard) and ``memee why``
+    (single-snippet drill-down). Prints top reuses, prevented mistakes,
+    fresh canon, hypotheses needing review, and a small ROI footer —
+    each bullet ending with a ``[mem:xxxxxxxx]`` cite token.
+    """
+    import json as _json
+
+    from memee.pulse import compute_pulse, format_pulse
+    from memee.storage.database import get_session, init_db
+
+    engine = init_db()
+    session = get_session(engine)
+    try:
+        payload = compute_pulse(session, days=days)
+    finally:
+        session.close()
+
+    if fmt == "json":
+        click.echo(_json.dumps(payload, indent=2))
+        return
+
+    click.echo(format_pulse(payload))
+
+
 # ── Research Commands — REMOVED in v2.0.0 ──
 # The autoresearch engine (create/log/run/status/meta/complete) was an
 # orthogonal Karpathy-style harness, not institutional memory. It bloated
@@ -1064,7 +1111,7 @@ def brief(project, task, budget, full, fmt):
         # whatever the hook layer asked for. Now: prepends compete for
         # budget alongside the bullets, and (in compact mode) prepends
         # are pinned through the trim — bullets get popped first.
-        prepends = _gather_prepends()
+        prepends = _gather_prepends(project_path=abs_path)
 
         if fmt == "compact":
             # Compact is the hook format: render via smart_briefing then
@@ -1102,21 +1149,88 @@ def brief(project, task, budget, full, fmt):
     click.echo(result)
 
 
-def _gather_prepends() -> list[str]:
-    """Compute the receipt prepends (digest / session-summary / update).
+def _gather_prepends(project_path: str | None = None) -> list[str]:
+    """Compute the receipt prepends in display order.
+
+    The full chain (top-to-bottom): onboarding arc → weekly digest →
+    aggregate session receipt → last-session summary → update notice.
 
     Each receipt is independently silent when it has nothing to say; each
     is wrapped in a try/except so a broken receipt cannot break the
-    briefing. Order: weekly digest → last-session summary → update notice.
-    Returns the list of non-empty receipt strings in display order.
+    briefing. Returns the list of non-empty receipt strings in display
+    order.
+
+    Layering rationale:
+    - **onboarding** (v2.2.0 M2) outranks everything — a new user with
+      an empty DB wants the arc, not a digest about zero activity.
+    - **weekly digest** (M3) gives last-week context.
+    - **aggregate session receipt** (v2.2.0 M1) is the *current*
+      session's footnote — older context flanks it on either side.
+    - **last-session summary** speaks to the previous session.
+    - **update notice** (housekeeping) lands last so it never crowds
+      the actual receipt.
+
+    M6 orchestration enforces a hard cap of 2 channels per SessionStart;
+    the priority order matches the layering above.
     """
     out: list[str] = []
     try:
-        from memee.digest import format_digest_notice
+        from memee.onboarding import format_onboarding_notice
 
-        digest = format_digest_notice()
-        if digest:
-            out.append(digest)
+        onboarding = format_onboarding_notice(project_path=project_path)
+        if onboarding:
+            out.append(onboarding)
+    except Exception:
+        pass
+
+    # M6 orchestration: when the onboarding arc is active, suppress the
+    # digest. New users with ~empty DBs would otherwise see "0 applied,
+    # 0 promoted" stacked under their stage-1 onboarding line — exactly
+    # the noise CEO and UX expert wanted earned silence to prevent.
+    onboarding_active = False
+    try:
+        from memee.onboarding import is_onboarding_active
+
+        onboarding_active = is_onboarding_active(project_path=project_path)
+    except Exception:
+        pass
+
+    if not onboarding_active:
+        try:
+            from memee.digest import format_digest_notice
+
+            digest = format_digest_notice()
+            if digest:
+                out.append(digest)
+        except Exception:
+            pass
+
+    # Aggregate session receipt (M1 / v2.2.0). Window: the last hour up
+    # to now — the brief is mid-session, so "session so far" is the
+    # natural framing. Wrapped in its own try/except for hook safety;
+    # opens a private DB session so the prepend can't leak the engine's
+    # own state into another receipt.
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        from memee.receipts import format_session_receipt
+        from memee.storage.database import (
+            get_session as _gs,
+            init_db as _idb,
+        )
+
+        _now = datetime.now(timezone.utc)
+        _ledger_session = _gs(_idb())
+        try:
+            line = format_session_receipt(
+                _ledger_session,
+                since=_now - timedelta(hours=1),
+                until=_now,
+            )
+        finally:
+            _ledger_session.close()
+        if line:
+            out.append(line)
     except Exception:
         pass
 
@@ -1137,7 +1251,15 @@ def _gather_prepends() -> list[str]:
             out.append(notice)
     except Exception:
         pass
-    return out
+
+    # M6 orchestration: hard cap of 2 prepend channels per briefing.
+    # Otherwise a fresh setup could land 5+ blocks of prelude before the
+    # actual briefing body — exactly the receipt fatigue UX expert flagged
+    # as the #1 risk. The list is already in priority order (top-most
+    # most important), so we just truncate to 2. The citation footer is
+    # appended later by the briefing engine and isn't subject to this
+    # cap — it's load-bearing instruction, not optional receipt.
+    return out[:2]
 
 
 def _to_compact(
@@ -1319,6 +1441,16 @@ def learn(auto, project, diff_text, outcome, agent, model, as_json):
     import os as _os
     import subprocess as _sub
 
+    # Track the previous session-end marker so the aggregate receipt
+    # (M1) can use ``[last_ended_at, now)`` as its window. We read the
+    # marker BEFORE calling record_session_end (which advances it to
+    # ``now``) — otherwise the window would always be empty. ``None``
+    # is the safe default; the receipt module handles a fallback window
+    # gracefully but here we just skip the aggregate line if we have no
+    # prior marker (first session ever — there's no "previous boundary"
+    # to aggregate against).
+    prev_session_end = None
+
     try:
         # Resolve the project path. In --auto mode the hook is fired from
         # whatever CWD Claude Code launched in; that's almost always the
@@ -1341,11 +1473,26 @@ def learn(auto, project, diff_text, outcome, agent, model, as_json):
         # break the hook.
         if auto:
             try:
-                from memee.session_ledger import record_session_end
+                # Read the previous session-end marker BEFORE we advance
+                # it. The aggregate receipt (M1) uses
+                # (prev_session_end, now) as its window so it covers the
+                # whole task, not just the last hour.
+                from memee.session_ledger import (
+                    _parse_iso,
+                    _read_cache,
+                    record_session_end,
+                )
                 from memee.storage.database import (
                     get_session as _get_session,
                     init_db as _init_db,
                 )
+
+                try:
+                    _cached = _read_cache()
+                    if isinstance(_cached, dict):
+                        prev_session_end = _parse_iso(_cached.get("ended_at"))
+                except Exception:
+                    prev_session_end = None
 
                 _ledger_session = _get_session(_init_db())
                 try:
@@ -1415,10 +1562,45 @@ def learn(auto, project, diff_text, outcome, agent, model, as_json):
 
     if auto:
         sentence = _format_stop_receipt(result)
-        # Silent unless we built a sentence. A noisy hook gets disabled.
-        if not sentence:
+        # Aggregate session receipt (M1 / v2.2.0). Two-line Stop output:
+        # the aggregate line covers the whole task in counters /
+        # agent-voice citation, and the single-memory line names the
+        # headline memory. Together: a paragraph in two sentences.
+        # The aggregate is silent when there's no signal (silence rule
+        # inside ``format_session_receipt``), so a quiet task still gets
+        # at most one line — never a blank "Memee: ..." prefix.
+        aggregate = ""
+        if prev_session_end is not None:
+            try:
+                from datetime import datetime, timezone
+
+                from memee.receipts import format_session_receipt
+                from memee.storage.database import (
+                    get_session as _get_session2,
+                    init_db as _init_db2,
+                )
+
+                _agg_session = _get_session2(_init_db2())
+                try:
+                    aggregate = format_session_receipt(
+                        _agg_session,
+                        since=prev_session_end,
+                        until=datetime.now(timezone.utc),
+                    ) or ""
+                finally:
+                    _agg_session.close()
+            except Exception:
+                aggregate = ""
+
+        # Silent unless we built at least one of the two lines.
+        if not (aggregate or sentence):
             return
-        click.echo(sentence)
+        if aggregate and sentence:
+            click.echo(f"{aggregate}\n{sentence}")
+        elif aggregate:
+            click.echo(aggregate)
+        else:
+            click.echo(sentence)
     else:
         click.echo(
             f"Patterns followed: {patterns_followed}\n"

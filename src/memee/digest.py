@@ -200,13 +200,22 @@ def _compute_metrics(session, since: datetime) -> dict:
 
 
 def _render(payload: dict) -> str | None:
-    """Render the digest payload as a multi-line markdown header, or
-    return None if every counter is zero (no receipt to show).
+    """Render the digest payload, or return None when there's no story.
 
-    Output is one quoted markdown block. Lines are pre-wrapped with
-    ``> `` so they survive being concatenated to the smart-briefing,
-    which is *also* a quoted block — two quoted blocks back-to-back
-    read as one continuous quote.
+    v2.2.0: defaults to ONE line. Multi-line is opt-in via
+    ``MEMEE_DIGEST_VERBOSE=1`` (any non-empty value). The rationale is
+    Linear-style compression: "did it work / did it learn / did it
+    conflict" — answered by counters in display order. Multi-line lives
+    behind a flag for users who want the v2.1 layout, and ``memee
+    pulse --full`` is the always-rich drill-down.
+
+    Single-line shape:
+      > Memee — last 7 days: 18 applied, 5 warnings checked, 3 promoted, 2 needs review.
+
+    Multi-line shape (verbose):
+      > Memee — last 7 days:
+      > 18 memories applied, 5 warnings checked, 3 promoted to canon.
+      > Needs review: 2 hypotheses needing review.
 
     No trailing newline. The integrator (``cli.brief``) adds the
     ``\\n\\n`` separator between this block and the rest of the
@@ -222,38 +231,49 @@ def _render(payload: dict) -> str | None:
     if not (applied or warnings or promoted or review):
         return None
 
-    # Build the activity line from non-zero counters only — the spec is
-    # explicit about this: small honest numbers, not vanity metrics, and
-    # zero counters get dropped instead of dressed up.
-    activity_parts: list[str] = []
+    verbose = bool(os.environ.get("MEMEE_DIGEST_VERBOSE"))
+
+    if verbose:
+        # Legacy v2.1 layout for users who explicitly opt in.
+        activity_parts: list[str] = []
+        if applied:
+            activity_parts.append(
+                f"{applied} {'memory' if applied == 1 else 'memories'} applied"
+            )
+        if warnings:
+            activity_parts.append(
+                f"{warnings} warning{'s' if warnings != 1 else ''} checked"
+            )
+        if promoted:
+            activity_parts.append(f"{promoted} promoted to canon")
+
+        lines = ["> Memee — last 7 days:"]
+        if activity_parts:
+            lines.append(f"> {', '.join(activity_parts)}.")
+        if review:
+            lines.append(
+                f"> Needs review: {review} "
+                f"hypothes{'is' if review == 1 else 'es'} needing review."
+            )
+        return "\n".join(lines)
+
+    # Default: one line, terse, zero counters dropped. Order answers
+    # "did it work, did it learn, did it conflict" — applied + warnings
+    # checked first (work), then promoted (learn), then needs review
+    # (conflict / needs attention).
+    parts: list[str] = []
     if applied:
-        activity_parts.append(
-            f"{applied} {'memory' if applied == 1 else 'memories'} applied"
-        )
+        parts.append(f"{applied} applied")
     if warnings:
-        activity_parts.append(
+        parts.append(
             f"{warnings} warning{'s' if warnings != 1 else ''} checked"
         )
     if promoted:
-        activity_parts.append(
-            f"{promoted} promoted to canon"
-        )
-
-    lines = ["> Memee — last 7 days:"]
-    if activity_parts:
-        lines.append(f"> {', '.join(activity_parts)}.")
+        parts.append(f"{promoted} promoted")
     if review:
-        # The query is "low confidence + has validation activity", which
-        # is a needs-attention signal — not necessarily bipolar
-        # validation conflict. Prior wording ("conflicting validations")
-        # over-promised; "needing review" is honest about what the proxy
-        # actually represents.
-        lines.append(
-            f"> Needs review: {review} "
-            f"hypothes{'is' if review == 1 else 'es'} needing review."
-        )
+        parts.append(f"{review} needs review")
 
-    return "\n".join(lines)
+    return f"> Memee — last 7 days: {', '.join(parts)}."
 
 
 # ── Public API ──────────────────────────────────────────────────────────────

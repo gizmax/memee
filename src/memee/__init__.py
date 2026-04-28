@@ -1,3 +1,3 @@
 """Memee — Institutional memory for AI agent companies."""
 
-__version__ = "2.1.1"
+__version__ = "2.2.0"

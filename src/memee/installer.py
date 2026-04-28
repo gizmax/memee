@@ -339,6 +339,22 @@ def _setup_solo():
                     )
                     hooked_tools.append(tool["name"])
 
+    # ── v2.2.0 M2: first-week-no-silence onboarding marker ──
+    # Drop a per-project marker so the next ``memee brief`` (the
+    # SessionStart hook) renders stage 1 of the onboarding arc instead
+    # of dead silence. Gated on hooks actually being wired AND not a
+    # dry run — if neither condition holds, the briefing layer won't
+    # fire automatically anyway, so the marker would just sit unused.
+    # Best-effort: any error swallowed inside ``mark_setup_complete``;
+    # the wizard never fails on an onboarding marker IO error.
+    if hooked_tools and not dry_run:
+        try:
+            from memee.onboarding import mark_setup_complete
+
+            mark_setup_complete(str(Path.cwd()))
+        except Exception:
+            pass
+
     tools_str = ", ".join(configured_tools) if configured_tools else "none (run memee doctor later)"
 
     # ── Success ──
