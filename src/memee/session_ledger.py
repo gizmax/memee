@@ -55,7 +55,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Cache file path. Lives next to the existing update-check cache under
@@ -103,9 +103,19 @@ def record_session_end(session) -> None:
             previous.get("ended_at") if isinstance(previous, dict) else None
         )
         now = datetime.now(timezone.utc)
-        citations: list[dict] = []
-        if last_ended_at is not None:
-            citations = _collect_citations_since(session, last_ended_at)
+        # First-ever call (no cache yet) deserves a real snapshot, not a
+        # silent baseline. The original implementation stamped ``ended_at``
+        # without collecting citations, so the user's first ever "Memee
+        # helped me" moment got dropped — exactly the receipt we most want
+        # them to see. Fall back to "the last 24 hours of citations" as a
+        # reasonable session-window approximation when there's no prior
+        # bound. Subsequent calls keep the precise (last_ended_at, now)
+        # window.
+        if last_ended_at is None:
+            since = now - timedelta(hours=24)
+        else:
+            since = last_ended_at
+        citations = _collect_citations_since(session, since)
         _write_cache(
             {
                 "ended_at": now.isoformat(),
@@ -154,6 +164,12 @@ def format_session_summary() -> str | None:
 
     n = len(citations)
     title = (pick.get("title") or "").strip() or "(untitled)"
+    # Match the Stop receipt's truncation policy (cli._truncate_title) so
+    # long memory titles don't blow out the briefing prepend. 60 chars
+    # leaves headroom for the rest of the line under the 110-120 char
+    # informal cap we hit elsewhere.
+    if len(title) > 60:
+        title = title[:59].rstrip() + "…"
     short = _short_hash(pick.get("mem_id") or "")
     cite_token = f"[mem:{short}]" if short else "[mem:?]"
 

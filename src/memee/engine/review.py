@@ -374,6 +374,23 @@ def _check_good_patterns(
                 "matched_keywords": list(overlap),
             })
 
+    # Strict ordering by maturity × confidence so the caller can take
+    # ``[0]`` and trust it's the strongest pattern reuse, not just the
+    # first row the DB returned. Canon outranks validated; among equal
+    # maturities, higher confidence wins.
+    _MATURITY_RANK = {
+        MaturityLevel.CANON.value: 4,
+        MaturityLevel.VALIDATED.value: 3,
+        MaturityLevel.TESTED.value: 2,
+        MaturityLevel.HYPOTHESIS.value: 1,
+    }
+    confirmations.sort(
+        key=lambda c: (
+            _MATURITY_RANK.get(c.get("maturity", ""), 0),
+            c.get("confidence") or 0.0,
+        ),
+        reverse=True,
+    )
     return confirmations
 
 

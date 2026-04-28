@@ -164,6 +164,7 @@ def post_task_review(
     most_sig_id: str | None = None
     most_sig_title: str | None = None
     most_sig_kind: str | None = None
+    most_sig_maturity: str | None = None
 
     if warnings_violated:
         # Highest-severity violation wins. ``warnings`` from review.py is
@@ -176,14 +177,17 @@ def post_task_review(
             if outcome == "failure"
             else ImpactType.WARNING_INEFFECTIVE.value
         )
+        most_sig_maturity = top.get("maturity") or None
     elif good_patterns_followed:
-        # No violations — surface the strongest pattern reuse instead.
-        # review.py orders confirmations by maturity already; take the
-        # first canon/validated entry.
+        # No violations — surface the strongest pattern reuse. v2.1.1
+        # added a strict maturity × confidence sort in review.py so
+        # ``[0]`` is the canon-est, most-confident reuse — not just the
+        # first DB row.
         top = good_patterns_followed[0]
         most_sig_id = top.get("memory_id") or None
         most_sig_title = top.get("title") or None
         most_sig_kind = ImpactType.KNOWLEDGE_REUSED.value
+        most_sig_maturity = top.get("maturity") or None
     # No ``new_patterns`` branch yet — placeholder. When feedback starts
     # auto-recording candidate patterns from the diff we'll fill it in.
 
@@ -202,6 +206,7 @@ def post_task_review(
         "most_significant_memory_id": most_sig_id,
         "most_significant_memory_title": most_sig_title,
         "most_significant_kind": most_sig_kind,
+        "most_significant_memory_maturity": most_sig_maturity,
         "outcome": outcome,
         "teaching_effectiveness": round(effectiveness, 2) if effectiveness is not None else None,
         "keywords_scanned": stats.get("keywords_extracted", 0),

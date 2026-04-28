@@ -7,25 +7,27 @@ Cross-project, cross-model organizational memory. Patterns learned in one projec
 ## Architecture
 
 ```
-┌─────────────── AGENTS (Codex, GPT, Gemini, Llama) ───────────────┐
+┌─────────────── AGENTS (Claude, GPT, Gemini, Llama) ───────────────┐
 │  Session hook / MCP tools / CLI / REST API                         │
 ├───────────────────────────────────────────────────────────────────┤
 │                         MEMEE ENGINE                               │
 │                                                                    │
 │  PUSH (knowledge → agent):          PULL (agent → knowledge):     │
 │    router.py    — smart briefing      search.py  — hybrid BM25+vec│
-│    briefing.py  — AGENTS.md inject    review.py  — git diff check │
+│    briefing.py  — AGENTS.md / CLAUDE.md inject    review.py  — git diff check │
 │    feedback.py  — post-task loop      predictive — AP scan        │
+│    hooks_config — settings.json wire  citations  — memee why/cite │
 │                                                                    │
 │  QUALITY:                           LEARNING:                     │
 │    quality_gate — validate+dedup      confidence — adaptive scoring│
-│    scoping.py   — personal/team/org   lifecycle  — aging+promote  │
+│    plugins.py   — memee-team hooks    lifecycle  — aging+promote  │
 │    models.py    — model family detect dream.py   — nightly process│
+│    reranker.py  — cross-encoder       impact.py  — real ROI track │
 │                                                                    │
-│  GROWTH:                            MEASUREMENT:                  │
-│    propagation  — cross-project push  impact.py  — real ROI track │
-│    inheritance  — onboard from similar tokens.py  — savings calc  │
-│    research.py  — autoresearch engine benchmarks  — OrgMemEval    │
+│  GROWTH:                            DELIVERY:                     │
+│    propagation  — cross-project push  packs.py   — .memee export  │
+│    inheritance  — onboard from similar adapters/cmam — CMAM bridge│
+│    benchmarks   — OrgMemEval scoring  packs_format — file helpers │
 │                                                                    │
 ├───────────────────────────────────────────────────────────────────┤
 │  SQLite + FTS5 + Embeddings (384-dim) | ~/.memee/memee.db          │
@@ -44,7 +46,7 @@ memee doctor                      # Health check + auto-configure AI tools
 
 # Smart briefing (PUSH — tells agent what it needs)
 memee brief --task "write tests"  # Token-budgeted, task-routed
-memee inject --project .          # Write org knowledge into AGENTS.md
+memee inject --project .          # Write org knowledge into CLAUDE.md
 
 # Record knowledge
 memee record pattern "title" --tags python,api -c "content with WHY and WHEN"
@@ -60,43 +62,66 @@ memee suggest --context "my current task"
 memee propagate                   # Push patterns cross-project
 memee dream                       # Nightly: connect, find contradictions, promote
 memee review -                    # Pipe git diff for institutional review
+memee why "<code>"                # Canon that would have prevented or explained it
+memee cite <hash> [--confirm]     # Resolve a [mem:abc12345] to lineage
 memee embed                       # Generate vector embeddings
 
-# Autoresearch
-memee research start "goal" --metric acc --verify "pytest ..."
-memee research run <id>           # Execute one iteration
-memee research status             # Trajectory + keep rate
-memee research meta               # Meta-learning insights
+# Memory packs (new in v2.0.0)
+memee pack export --canon-only > my-team.memee
+memee pack install python-web    # Seed pack from packs/seed/
+memee pack install <FILE|--from-url URL>
+memee pack list
 
 # Analytics
-memee status                      # Learning dashboard
+memee status                      # Terminal dashboard (web dashboard removed in v2)
 memee benchmark                   # OrgMemEval: 92.2/100
-memee dashboard                   # Web UI at http://127.0.0.1:7878
 memee demo --weeks 52             # Generate demo data
+
+# CMAM bridge — push canon to Claude Managed Agents Memory
+memee cmam sync                   # Canon + critical APs → /mnt/memory/ layout
+memee cmam sync --dry-run         # Preview without writing
+memee cmam status                 # Store size, count, headroom
 ```
 
-## Engine Modules (16)
+## Engine Modules (15) + Adapters
 
 | Module | Purpose | Impact |
 |--------|---------|--------|
 | `confidence.py` | Adaptive scoring + maturity lifecycle | Core |
-| `search.py` | Hybrid BM25 + vector (sentence-transformers) | Core |
+| `search.py` | Hybrid BM25 + vector + tag-graph + reranker | Core |
 | `lifecycle.py` | Aging, auto-archive 60d, invalidation ratio deprecation | Core |
 | `quality_gate.py` | Validate + dedup + source classify + quality score | Core |
 | `router.py` | Smart task-aware briefing, 500 token budget, query expansion | Core |
-| `briefing.py` | AGENTS.md injection, pre-task briefing generation | PUSH |
+| `briefing.py` | CLAUDE.md injection, pre-task briefing generation | PUSH |
 | `feedback.py` | Post-task review, teaching effectiveness tracking | PUSH |
+| `citations.py` | `memee why` + `memee cite` + briefing footer | PUSH (v2.0) |
 | `propagation.py` | Cross-project auto-push + expanded tag inference | +68.8% IQ |
 | `predictive.py` | Anti-pattern push (critical → ALL projects) | +36.6% IQ |
 | `dream.py` | Nightly: propagate + connect + contradictions + promote | +24.8% IQ |
 | `review.py` | Git diff scan vs anti-pattern + pattern DB | +11.4% IQ |
 | `inheritance.py` | Stack+tag similarity, new project onboarding | +9.5% IQ |
-| `research.py` | Autoresearch: create/run/track/meta-learn | Autoresearch |
 | `embeddings.py` | sentence-transformers all-MiniLM-L6-v2 (384-dim) | Search |
+| `reranker.py` | Cross-encoder rerank, default-on when HF cache warm | +0.0355 nDCG |
 | `models.py` | Model family detection (8 families), diversity bonus | Multi-model |
 | `impact.py` | Measurable ROI: time saved, iterations saved, mistakes avoided | Measurement |
-| `tokens.py` | Token savings calculator per model pricing | Measurement |
-| `scoping.py` | personal → team → org, promotion rules, onboarding | Business |
+| `plugins.py` | Hook registry for `memee-team` plugin | Extension point |
+| `telemetry.py` | Retrieval event log (hit@1, hit@3, acceptance rate) | Quality metrics |
+| `packs.py` | `.memee` pack export/install/verify | Distribution (v2.0) |
+| `hooks_config.py` (root) | settings.json hook installation | DX (v2.0) |
+| `packs_format.py` (root) | `.memee` file-level helpers (TOML/JSONL/sign) | Distribution (v2.0) |
+| `adapters/cmam.py` | Claude Managed Agents Memory bridge (canon → CMAM) | Delivery |
+
+**Removed in v2.0.0:** `research.py` (autoresearch engine, 641 LOC),
+`canon_ledger.py` (418 LOC), `evidence.py` (133 LOC), `tokens.py`
+(279 LOC) — three substrate modules with zero production callers.
+The web dashboard at port 7878 (`api/routes/dashboard.py`, 556 LOC)
+went too. ~2,400 LOC fewer; the OSS pitch ends with "no dashboards,
+no copilots, no magic" and the codebase agrees now.
+
+*Note:* `scoping.py` (personal → team → org, promotion rules, onboarding) used
+to live here. It has been extracted to the proprietary `memee-team` package
+alongside `User`/`Team` models, SSO, audit log, and licence verification. OSS
+`memee` is a single-user product; multi-user features live in `memee-team`.
 
 ## Confidence Scoring
 
@@ -121,7 +146,7 @@ Source multiplier: human ×1.2, llm ×0.8, import ×0.6
 ## Smart Router (PUSH)
 
 ```
-NOT: dump 500 patterns into AGENTS.md (14,550 tokens, $27K/year)
+NOT: dump 500 patterns into CLAUDE.md (14,550 tokens, $27K/year)
 BUT: route 5-7 relevant ones per task (500 tokens, $1.1K/year = 96% savings)
 
 Layer 0: CRITICAL anti-patterns (always, ~100 tokens)
@@ -150,39 +175,86 @@ Quality:   heuristic 1-5 (title, content depth, WHY/WHEN context, tags, actionab
            team/org scope: quality < 2.5 = flagged
 ```
 
-## Scoping (Business Model)
+## Packages — OSS ↔ paid split
+
+Memee ships as two packages, with clear licence separation:
+
+| Package | Licence | What it adds |
+|---|---|---|
+| **`memee`** (this repo) | MIT | Full single-user product: every engine module, MCP server, CLI, CMAM adapter. No users, no teams, no scope enforcement. |
+| **`memee-team`** (private repo, licence-gated) | Proprietary (EULA) | `User` + `Team` SQLAlchemy models, `scoping.py` engine (personal → team → org promotion), SSO (SAML/OIDC), audit log export, RBAC, licence key verification. |
+
+`memee-team` plugs into OSS via `memee.plugins` hooks
+(`current_user_id`, `visible_memories`, `promote`, `can_promote`, `on_record`).
+Without it installed, OSS runs as single-user and promotion raises
+`LicenseRequiredError` with an upgrade message.
+
+Pricing (honoured on memee.eu):
 
 ```
-Free / OSS (MIT):    solo developer, single-user, every AI feature
-Team ($49/mo flat):  up to 15 seats; team + org scope, SSO, audit, Postgres
-Enterprise (from    unlimited seats; SOC 2 Type II, SCIM, air-gap, dedicated
- $12k / year):       CSM, 4h SLA, custom MSA
-
-Promotion: personal → team (anyone) → org (lead/admin + VALIDATED + 2 projects)
+Free / OSS (MIT):       $0 forever, single user, every AI feature
+Team (EULA):            $49 / month flat, up to 15 seats, annual
+                         + multi-user scope + SSO + audit + Postgres
+Enterprise:             from $12k / year, unlimited seats, SOC 2,
+                         air-gap, SLA, custom MSA
 ```
 
-Flat-per-team pricing, not per-seat. Memee is shared infrastructure
-(memory layer), not a per-developer productivity tool. Value scales
-sublinearly with headcount — one canon serves the whole team.
+Pricing model reflects "Memee is memory, not model" — flat per-team
+(like Supabase, Vercel, Plausible), not per-seat (like Copilot, Cursor).
+Value scales sublinearly with headcount: one canon serves the whole team.
 
-## MCP Tools (24)
+## MCP Tools (19)
 
-Core: memory_record, memory_search, memory_suggest, memory_validate,
-memory_invalidate, decision_record, antipattern_record, antipattern_check
+Core: memory_record, memory_search, search_feedback, memory_suggest,
+memory_validate, memory_invalidate, decision_record, antipattern_record,
+antipattern_check
 
 Intelligence: propagate_patterns, predict_warnings, inherit_knowledge,
 run_dream, review_code, get_briefing, post_task_feedback
 
-Research: research_create, research_log, research_status, research_meta,
-research_complete
-
 Analytics: learning_status, canon_list
+
+Delivery: sync_to_cmam (push canon to Claude Managed Agents Memory)
+
+(The five ``research_*`` tools that lived here through v1.x were removed
+in v2.0.0 along with the autoresearch engine.)
+
+## CMAM Bridge (Claude Managed Agents Memory)
+
+Anthropic's managed memory is a filesystem-style store at `/mnt/memory/` inside
+a Claude agent container. It's a dumb store — Memee stays the brain.
+
+```
+Memee (multi-model intelligence):        CMAM (Claude-native delivery):
+  confidence + maturity                    /canon/patterns/<slug>.md
+  quality gate + dedup                     /canon/lessons/<slug>.md
+  cross-project propagation         ──→    /warnings/critical/<slug>.md
+  token-budgeted routing                   /warnings/high/<slug>.md
+  multi-model validation                   /decisions/<slug>.md
+                                           /_index.md
+```
+
+Sync triggers: CANON maturity OR critical anti-pattern (severity=critical
+propagates regardless of maturity). Secrets auto-redacted. Content >100 KB
+auto-chunked into `.part-N.md`. Store caps enforced (80 MB soft, 95 MB hard,
+1600/1900 count thresholds).
+
+```bash
+memee cmam sync --backend fs --local-root ~/.memee/cmam/my-store
+memee cmam sync --backend api --store-id my-org          # needs ANTHROPIC_API_KEY
+memee cmam sync --dry-run
+memee cmam status
+```
+
+MCP tool `sync_to_cmam` lets agents trigger the push themselves.
 
 ## Benchmarks
 
-**OrgMemEval v1.0:** 92.2/100 (competitors: 2.3/100)
-- Propagation 100% | Avoidance 100% | Maturity 58% | Onboarding 100% (capped)
-- Recovery 100% | Calibration 83% | Synthesis 100% | Research 92%
+**OrgMemEval v1.0:** 81.2 / 88 = **92.3 %** (competitors: ~2 %)
+- Propagation 100% | Avoidance 100% | Maturity 89% | Onboarding 100%
+- Recovery 100% | Calibration 83% | Synthesis 82%
+- (Research scenario removed in v2.0.0 with the autoresearch engine;
+  ceiling moved 100 → 88, headline pct unchanged)
 
 **Competitive:** Memee 6.5 | Mem0 3.5 | Zep 2.3 | Letta 1.3 | MemPalace 0.9
 
@@ -204,15 +276,13 @@ Analytics: learning_status, canon_list
 
 | File | Purpose |
 |------|---------|
-| `src/memee/cli.py` | 25+ Click commands (incl. `cmam`, `feedback`) |
-| `src/memee/mcp_server.py` | 24 MCP tools (incl. `sync_to_cmam`, `search_feedback`) |
+| `src/memee/cli.py` | 25+ Click commands (incl. `cmam sync`/`cmam status`) |
+| `src/memee/mcp_server.py` | 19 MCP tools |
 | `src/memee/adapters/cmam.py` | Claude Managed Agents Memory bridge |
-| `src/memee/plugins.py` | Hook registry for `memee-team` plugin |
-| `src/memee/engine/telemetry.py` | SearchEvent recording (hit@k, acceptance) |
-| `src/memee/storage/models.py` | 14 SQLAlchemy models (OSS; memee-team adds User + Team) |
+| `src/memee/storage/models.py` | 15 SQLAlchemy models |
 | `src/memee/storage/database.py` | DB init, FTS5, WAL mode |
-| `src/memee/api/routes/dashboard.py` | Chart.js dashboard |
-| `src/memee/api/routes/api_v1.py` | REST API (12+ endpoints incl. `/retrieval`, `/impact`) |
+
+| `src/memee/api/routes/api_v1.py` | REST API (12+ endpoints) |
 | `src/memee/installer.py` | Interactive setup wizard |
 | `src/memee/doctor.py` | Health check + auto-configure AI tools |
 | `src/memee/demo.py` | Enterprise demo data generator |
@@ -222,19 +292,18 @@ Analytics: learning_status, canon_list
 ## Tests
 
 ```bash
-pytest tests/ -v   # 201 tests, ~58s (offline mode — TRANSFORMERS_OFFLINE=1 in conftest)
+pytest tests/ -v   # 201 tests, ~67s
 ```
 
 Simulation tests: test_company_simulation (NovaTech 6mo), test_enterprise (TechCorp 52wk),
 test_megacorp (100 proj, hallucination defense), test_gigacorp (200 proj, 18 months),
 test_benchmarks (competitive), test_blind_spots (14 failure modes),
-test_real_impact (A/B with/without), test_perf_simulation (9 scenarios),
-test_perf_stress, test_search_ranking (hit@1/hit@3 gate), test_predictive_budget,
-test_retrieval_telemetry.
+test_real_impact (A/B with/without), test_perf_simulation (9 scenarios)
 
 ## Project Stats
 
-- 201 tests passing, ~58s
-- 16 engine modules + CMAM adapter + plugin interface + telemetry
-- 24 MCP tools, 12+ API endpoints (GET-only dashboard API)
-- MIT licence (OSS `memee`), proprietary EULA for paid `memee-team`
+- 33 commits on feat/initial-setup
+- 63 Python files, 18,899 lines of code
+- 201 tests passing
+- 16 engine modules + CMAM adapter, 19 MCP tools, 12+ API endpoints (GET-only dashboard API)
+- MIT licence (OSS `memee`), proprietary EULA for `memee-team`

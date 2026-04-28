@@ -243,9 +243,14 @@ def _render(payload: dict) -> str | None:
     if activity_parts:
         lines.append(f"> {', '.join(activity_parts)}.")
     if review:
+        # The query is "low confidence + has validation activity", which
+        # is a needs-attention signal — not necessarily bipolar
+        # validation conflict. Prior wording ("conflicting validations")
+        # over-promised; "needing review" is honest about what the proxy
+        # actually represents.
         lines.append(
             f"> Needs review: {review} "
-            f"hypothes{'is' if review == 1 else 'es'} with conflicting validations."
+            f"hypothes{'is' if review == 1 else 'es'} needing review."
         )
 
     return "\n".join(lines)
@@ -306,16 +311,21 @@ def format_digest_notice() -> str | None:
 
     now = datetime.now(timezone.utc)
 
-    # Cache hit AND fresh → suppress (one digest per 7-day window).
+    # Cache hit AND fresh → suppress. Freshness depends on whether the
+    # last cached render was empty: a populated digest sits out the full
+    # 7-day window; an empty cache (fresh install, no data yet) re-checks
+    # daily so the user doesn't wait a week to see their first digest
+    # the moment they actually start using Memee.
     cached = _read_cache()
     if cached is not None:
         gen = _parse_iso(cached.get("generated_at"))
         if gen is not None:
             age = now - gen
+            ttl_days = 1 if cached.get("empty") else DIGEST_INTERVAL_DAYS
             # ``age >= timedelta(0)`` guards against clock-skew (a future
             # cache shouldn't lock us out forever; treat negative ages as
-            # "regenerate"). Within the interval → suppress.
-            if timedelta(0) <= age < timedelta(days=DIGEST_INTERVAL_DAYS):
+            # "regenerate"). Within the TTL → suppress.
+            if timedelta(0) <= age < timedelta(days=ttl_days):
                 return None
 
     # Otherwise: regenerate. The whole regen path is wrapped in a
@@ -336,11 +346,19 @@ def format_digest_notice() -> str | None:
 
     rendered = _render(payload)
 
-    # Stamp the cache regardless of whether we rendered anything. If
-    # every counter was zero, we still don't want to re-query the DB on
-    # every prompt for the next 7 days — the answer won't change without
-    # at least one new memory or impact event landing first, and even
-    # then a 7-day re-check is the right cadence by spec.
-    _write_cache({"generated_at": now.isoformat(), "payload": payload})
+    # Cache TTL depends on whether we have anything to show. A populated
+    # render → 7 days (full interval; the next digest fires on the first
+    # session of the next week). An empty render → 1 day (the user just
+    # set up Memee or seeded a fresh DB; we want the digest to appear as
+    # soon as there's actually data, not silently sit out the whole week
+    # because the first call hit empty tables). The freshness check at
+    # the top of this function reads ``generated_at`` and the new
+    # ``empty`` marker to decide which TTL to apply.
+    is_empty = rendered is None
+    _write_cache({
+        "generated_at": now.isoformat(),
+        "payload": payload,
+        "empty": is_empty,
+    })
 
     return rendered

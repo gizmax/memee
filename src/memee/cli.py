@@ -1056,7 +1056,17 @@ def brief(project, task, budget, full, fmt):
                 task_description=task,
                 compact=(fmt == "compact"),
             )
-        elif fmt == "compact":
+        # Build prepends FIRST so the compact path can subtract their
+        # tokens from the budget — otherwise the prepend chain pushes
+        # the final output over the user's budget. v2.1.0 had this bug:
+        # _to_compact trimmed to budget, then we appended digest +
+        # session-summary + update notice, and the result exceeded
+        # whatever the hook layer asked for. Now: prepends compete for
+        # budget alongside the bullets, and (in compact mode) prepends
+        # are pinned through the trim — bullets get popped first.
+        prepends = _gather_prepends()
+
+        if fmt == "compact":
             # Compact is the hook format: render via smart_briefing then
             # post-trim to 5-7 short lines (no decoration, no footer noise)
             # and re-check the budget. The router already enforces the
@@ -1065,7 +1075,10 @@ def brief(project, task, budget, full, fmt):
             raw = smart_briefing(
                 session, abs_path, task=task, token_budget=budget
             )
-            result = _to_compact(raw, budget=budget, count_tokens=_count_tokens)
+            result = _to_compact(
+                raw, budget=budget, count_tokens=_count_tokens,
+                pinned_prefix=("\n\n".join(prepends) if prepends else ""),
+            )
         else:
             from memee.engine.router import smart_briefing
             result = smart_briefing(
@@ -1079,20 +1092,31 @@ def brief(project, task, budget, full, fmt):
         click.echo(f"memee brief: {e}", err=True)
         return
 
-    # Receipt chain: build the prepend stack so Memee tells the user what
-    # it did, in their own conversation, where they already are. Order
-    # matters — most "this week" first (reads like context), then "last
-    # session" (yesterday's evidence), then update notice (housekeeping),
-    # then the briefing body itself. Each piece is independently silent
-    # when it has nothing to say. All exceptions are swallowed: a broken
-    # receipt must never break a briefing.
-    prepends: list[str] = []
+    if fmt != "compact" and prepends:
+        # Default (non-compact) format: just stitch prepends onto the
+        # routed briefing as before. Compact mode handles its own pinning
+        # in _to_compact above.
+        prefix = "\n\n".join(prepends)
+        result = f"{prefix}\n\n{result}" if result else prefix
+
+    click.echo(result)
+
+
+def _gather_prepends() -> list[str]:
+    """Compute the receipt prepends (digest / session-summary / update).
+
+    Each receipt is independently silent when it has nothing to say; each
+    is wrapped in a try/except so a broken receipt cannot break the
+    briefing. Order: weekly digest → last-session summary → update notice.
+    Returns the list of non-empty receipt strings in display order.
+    """
+    out: list[str] = []
     try:
         from memee.digest import format_digest_notice
 
         digest = format_digest_notice()
         if digest:
-            prepends.append(digest)
+            out.append(digest)
     except Exception:
         pass
 
@@ -1101,7 +1125,7 @@ def brief(project, task, budget, full, fmt):
 
         summary = format_session_summary()
         if summary:
-            prepends.append(summary)
+            out.append(summary)
     except Exception:
         pass
 
@@ -1110,18 +1134,15 @@ def brief(project, task, budget, full, fmt):
 
         notice = format_notice(check(), prefix="> ")
         if notice:
-            prepends.append(notice)
+            out.append(notice)
     except Exception:
         pass
-
-    if prepends:
-        prefix = "\n\n".join(prepends)
-        result = f"{prefix}\n\n{result}" if result else prefix
-
-    click.echo(result)
+    return out
 
 
-def _to_compact(raw: str, budget: int, count_tokens) -> str:
+def _to_compact(
+    raw: str, budget: int, count_tokens, *, pinned_prefix: str = "",
+) -> str:
     """Trim a smart-briefing into a compact 5-7 line bullet list.
 
     Drops the verbose footer (the ``[N memories — memee search ...]`` and
@@ -1139,7 +1160,7 @@ def _to_compact(raw: str, budget: int, count_tokens) -> str:
     is preserved at the cost of bullets — it's the load-bearing
     instruction; bullets without a cite contract are decoration.
     """
-    if not raw:
+    if not raw and not pinned_prefix:
         return ""
     from memee.engine.citations import get_citation_footer
 
@@ -1159,25 +1180,40 @@ def _to_compact(raw: str, budget: int, count_tokens) -> str:
 
     footer = get_citation_footer()
     footer_tokens = count_tokens(footer)
+    # Pinned receipts (digest / session-summary / update notice) burn
+    # budget too. Subtract their token cost from the bullet budget so the
+    # final output respects whatever the hook layer asked for. Receipts
+    # are PINNED through the trim — bullets pop first, footer second,
+    # receipts last (they're the load-bearing "Memee did something"
+    # signal, the user came back to the conversation for them).
+    prefix_tokens = count_tokens(pinned_prefix) if pinned_prefix else 0
     # The hook layer ships at budget=200..300 where the footer is well
     # under the ceiling. If the caller passed a budget so small the
     # footer alone would blow it, drop the footer rather than the bullets
     # (callers running at budget≪footer aren't shipping to a session
     # hook — they're tests or ad-hoc trims).
-    include_footer = budget >= footer_tokens
-    if include_footer:
-        while bullets and count_tokens("\n".join(bullets)) + footer_tokens > budget:
-            if len(bullets) == 1:
+    include_footer = (budget - prefix_tokens) >= footer_tokens
+    bullet_budget = budget - prefix_tokens - (footer_tokens if include_footer else 0)
+    if bullet_budget < 0:
+        # Receipts alone overrun the budget — the user asked for something
+        # tiny and we have a lot to say. Keep the receipts (they're the
+        # signal), drop the bullets entirely. Footer pinned only if any
+        # headroom remains after receipts.
+        bullets = []
+        include_footer = (budget - prefix_tokens) >= footer_tokens
+    else:
+        while bullets and count_tokens("\n".join(bullets)) > bullet_budget:
+            if len(bullets) == 1 and not pinned_prefix:
                 break
             bullets.pop()
-    else:
-        while len(bullets) > 1 and count_tokens("\n".join(bullets)) > budget:
-            bullets.pop()
 
-    pieces = bullets[:]
+    pieces: list[str] = []
+    if pinned_prefix:
+        pieces.append(pinned_prefix)
+    pieces.extend(bullets)
     if include_footer:
         pieces.append(footer)
-    return "\n".join(pieces)
+    return "\n\n".join(pieces) if pinned_prefix else "\n".join(pieces)
 
 
 @cli.command()
@@ -1421,6 +1457,10 @@ def _format_stop_receipt(result: dict) -> str:
     kind = result.get("most_significant_kind")
     title = result.get("most_significant_memory_title") or ""
     mem_id = result.get("most_significant_memory_id") or ""
+    # v2.1.1: read the actual maturity from the result so we don't tag
+    # a freshly-validated memory as "(canon)". Falls back to "canon" only
+    # when the engine didn't supply one (older callers; also safe).
+    maturity = (result.get("most_significant_memory_maturity") or "canon").lower()
 
     if not kind or not mem_id:
         # Nothing notable — silent no-op. Even if the structured counts
@@ -1446,7 +1486,10 @@ def _format_stop_receipt(result: dict) -> str:
             f"(warning_ineffective). [mem:{short_id}]"
         )
     elif kind == ImpactType.KNOWLEDGE_REUSED.value:
-        sentence = f'Memee: reused "{truncated_title}" (canon). [mem:{short_id}]'
+        sentence = (
+            f'Memee: reused "{truncated_title}" ({maturity}). '
+            f"[mem:{short_id}]"
+        )
     else:
         # Forward-compat: any other kind (incl. future NEW_PATTERN) reads
         # as a learning event. Keeps the renderer total — never raises,
@@ -1478,7 +1521,7 @@ def _format_stop_receipt(result: dict) -> str:
                 )
             elif kind == ImpactType.KNOWLEDGE_REUSED.value:
                 sentence = (
-                    f'Memee: reused "{truncated_title}" (canon). '
+                    f'Memee: reused "{truncated_title}" ({maturity}). '
                     f"[mem:{short_id}]"
                 )
             else:

@@ -8,6 +8,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.1.1] — 2026-04-28
+
+Audit-driven patch — eight mechanical fixes against the v2.1.0 receipt
+surfaces. No new features, no API breakage.
+
+### Fixed
+
+- **`memee brief --format compact` honours its token budget again.**
+  v2.1.0 layered weekly digest + last-session summary + update notice
+  on top of `_to_compact`'s output, blowing past whatever `--budget`
+  the caller asked for. v2.1.1 computes prepends BEFORE the trim,
+  passes them as a pinned prefix into `_to_compact`, and subtracts
+  their token cost from the bullet budget. Receipts are pinned
+  through the trim — bullets pop first, footer second, receipts last.
+- **Empty-DB digest no longer locks itself out of the week.** A brand
+  new install with no impact data wrote `weekly_digest.json` with a
+  7-day TTL even when there was nothing to render — silence for the
+  entire first week. v2.1.1 stamps the cache with `empty: True` and
+  re-checks daily until a populated render lands.
+- **First Stop hook captures real citations.** v2.1.0's first-ever
+  `record_session_end()` only stamped a baseline; citations made
+  during onboarding were dropped. v2.1.1 falls back to a 24-hour
+  window when no prior end-marker exists.
+- **Stop receipt prints the actual maturity, not hard-coded `(canon)`.**
+  Renderer now reads `most_significant_memory_maturity` from
+  `post_task_review`. Pattern selection in `engine/review.py` got a
+  strict `maturity × confidence` sort so feedback's `[0]` is the
+  strongest reuse, not the first DB row.
+- **Session summary truncates long titles.** Same 60-char + `…`
+  policy the Stop receipt enforces, applied in
+  `session_ledger.format_session_summary`.
+- **Digest copy is honest about what the proxy measures.**
+  "hypotheses with conflicting validations" → "hypotheses needing
+  review". Query was always low-confidence + activity, never bipolar
+  validation conflict.
+- **`test_techcorp_annual_journey` passes on a clean run.** The
+  deterministic seed lands at 29 entries; v2.0's `> 30` was a magic
+  number. v2.1.1 lowers it to `>= 25` and adds an explicit canon-
+  emerged invariant — what the test was actually guarding.
+- **`AGENTS.md` synced from CLAUDE.md.** Still claimed 24 MCP tools,
+  autoresearch + dashboard commands removed in v2.0.0. Agents that
+  read AGENTS.md as truth were being pointed at deleted features.
+
 ## [2.1.0] — 2026-04-28
 
 **Receipts everywhere.** Memee starts telling you what it did, in your own
