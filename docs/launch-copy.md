@@ -99,7 +99,7 @@ Char count: 271. Hook in 4 words. One verb (writes). One outcome (every model re
 > memee setup
 > memee doctor
 >
-> MCP server with 24 tools ships in the box. Drop it into Claude Code, Cursor, Continue, anything MCP-shaped. Memory lives in ~/.memee/memee.db.
+> MCP server with 19 tools ships in the box. Drop it into Claude Code, Cursor, Continue, anything MCP-shaped. Memory lives in ~/.memee/memee.db.
 >
 > MIT. github.com/gizmax/memee
 

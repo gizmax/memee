@@ -51,15 +51,17 @@ def memee_hook_definitions() -> dict[str, list[dict]]:
 
     Each value is a list of ``{type, command, _memee}`` entries — the inner
     ``hooks`` array of one matcher block. Commands reference ``$CLAUDE_*``
-    env vars Claude Code provides at hook execution time. The Stop hook
-    redirects everything to /dev/null so a slow or noisy `learn --auto`
-    can't pollute the agent's terminal — `learn --auto` is also designed
-    to be silent on no-op, but defence in depth.
+    env vars Claude Code provides at hook execution time.
 
-    The ``UserPromptSubmit`` brief writes to stderr with ``--format compact``
-    so it's small and inert; Claude Code surfaces it in the context. If the
-    client doesn't render hook stdout we still pay nothing — the briefing
-    runs against the local DB and exits.
+    The ``Stop`` hook is ``memee learn --auto``, which is itself silent on
+    no-op (and prints a single structured line otherwise). Claude Code
+    surfaces hook stdout in the conversation, which is exactly where we
+    want a "patterns followed / warnings violated" summary to land.
+
+    The ``UserPromptSubmit`` brief is ``memee brief --format compact``,
+    also written to stdout — Claude Code shows the briefing to the agent
+    on the next turn. If the client doesn't render hook stdout we still
+    pay nothing: the briefing runs against the local DB and exits.
     """
     return {
         "SessionStart": [

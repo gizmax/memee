@@ -23,6 +23,7 @@ from memee.storage.models import Base, Memory, new_id, utcnow
 class ImpactType(str, Enum):
     MISTAKE_AVOIDED = "mistake_avoided"       # Agent got warning, changed approach
     MISTAKE_MADE = "mistake_made"             # Agent ignored warning, repeated mistake
+    WARNING_INEFFECTIVE = "warning_ineffective"  # Agent ignored warning but task succeeded anyway — warning didn't help, didn't hurt
     TIME_SAVED = "time_saved"                 # Pattern reuse saved iteration time
     DECISION_INFORMED = "decision_informed"   # Decision made with historical context
     CODE_CHANGED = "code_changed"             # Code diff proves behavior change
@@ -235,18 +236,11 @@ def get_impact_summary(session: Session) -> dict:
     investment_minutes = total_memories * 5
     roi = total_time_saved / investment_minutes if investment_minutes > 0 else 0
 
-    if not events and warnings_shown == 0:
-        return {
-            "total_events": 0,
-            "warnings_shown": 0,
-            "warnings_shown_unique": 0,
-            "warnings_acknowledged": 0,
-            "warnings_acknowledged_unique": 0,
-            "mistakes_avoided": 0,
-            "mistakes_avoided_unique": 0,
-            "mistakes_made": 0,
-        }
-
+    # Single shape for both empty and populated cases. v2.0.4 and earlier
+    # returned a subset of keys when there was nothing to report; that
+    # forced every consumer (CLI, dashboard, tests) into defensive
+    # branching. Now: same key set, zeros / empty containers when no
+    # data — callers can read the shape without ``.get(key, 0)``.
     return {
         "total_events": len(events),
         "total_time_saved_minutes": round(total_time_saved, 1),

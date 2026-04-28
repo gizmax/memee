@@ -2,6 +2,13 @@
 
 A thorough internal review (2026-04-24) measured Memee on impact tests, token calculations, OrgMemEval, large simulations, and a handcrafted 12-memory retrieval benchmark. The numbers confirmed the headline claims (71 % less time, 65 % fewer iterations, 96 % token reduction) but surfaced seven concrete problems. All seven were addressed in a single session using parallel fix-agents. This document records what changed, with before/after numbers, so future reviewers can see our work.
 
+> **Historical note (v2.0.5):** the dashboard panels referenced below
+> (`Retrieval health`, the impact-panel three-card layout) describe the
+> v1.x web dashboard. That dashboard was removed in v2.0.0 along with the
+> autoresearch engine. The same metrics still live in the underlying
+> tables and are surfaced in `memee status` and the JSON API; the panels
+> themselves do not exist any more.
+
 ## Summary
 
 | # | Problem | Before | After | Where |

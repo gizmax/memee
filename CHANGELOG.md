@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [2.0.5] — 2026-04-28
+
+The "honest numbers" patch. v2.0.4 had three correctness bugs hiding
+behind quiet metrics. v2.0.5 makes the numbers say what actually
+happened.
+
+### Fixed
+
+- **`/api/v1/impact` worked on populated DBs and crashed on fresh
+  ones.** ``ImpactEvent`` is defined in ``engine/impact.py`` (so
+  ``record_impact`` lives next to the metric logic), but ``init_db``
+  only imports ``storage.models`` before calling ``Base.metadata.
+  create_all``. On a fresh DB the ``impact_events`` table never got
+  created and any code path that hit ``record_impact`` died on
+  ``no such table``. v2.0.5 force-imports ``memee.engine.impact``
+  inside ``init_db`` before ``create_all`` so the table is present
+  on every fresh DB. Regression test seeds a brand-new DB and
+  asserts ``inspect(engine).get_table_names()`` contains it.
+
+- **`MISTAKE_AVOIDED` lied when the agent ignored the warning.**
+  ``post_task_review`` recorded ``MISTAKE_AVOIDED`` for any warning
+  the agent *violated* as long as the task ended in ``outcome="success"``.
+  The metric read like a win for behaviour the agent had ignored.
+  v2.0.5 introduces a new ``ImpactType.WARNING_INEFFECTIVE`` for that
+  exact case and reserves ``MISTAKE_AVOIDED`` for evidence-backed
+  behaviour change. ``MISTAKE_MADE`` (violation + failure) is
+  unchanged. The CLI hook line that surfaced this as
+  ``warnings_avoided=N`` now reads ``warnings_violated=N``, which is
+  what the underlying number always was.
+
+- **`get_impact_summary` returned a different key set when empty.**
+  Eight keys on empty, eighteen otherwise — every consumer was
+  forced into defensive ``.get(key, 0)`` branching. v2.0.5 returns
+  the same key set in both cases, with zeros / ``{}`` / ``[]``
+  instead of missing keys.
+
+- **Docs claimed 24 MCP tools; the real count is 19.** README,
+  CLAUDE.md, launch copy and the historical review-fixes doc all
+  carried the v1.x number through the v2.0.0 deletion. The
+  ``research_*`` MCP tools that lived under "Research:" were
+  removed in v2.0.0 with the autoresearch engine; v2.0.5 lists
+  the 19 tools that actually ship.
+
+- **`hooks_config.py` comments described behaviour the commands
+  did not have** — Stop "redirects to /dev/null" (it does not),
+  UserPromptSubmit "writes to stderr" (it writes to stdout, which is
+  what Claude Code surfaces). Comments were rewritten to match the
+  commands; commands themselves were not changed because the current
+  behaviour is the one we want.
+
+### Tests
+
+- ``tests/test_v2_0_5_fixes.py`` — six new cases covering the four
+  fixes above. Plus the autouse ``_isolate_pack_ledger`` fixture
+  from v2.0.4 means none of these tests can pollute the developer
+  ledger.
+
 ## [2.0.4] — 2026-04-27
 
 The "tests stop polluting the developer's ledger" patch.

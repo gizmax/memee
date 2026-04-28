@@ -181,8 +181,8 @@ Memee ships as two packages, with clear licence separation:
 
 | Package | Licence | What it adds |
 |---|---|---|
-| **`memee`** (this repo) | MIT | Full single-user product: every engine module, MCP server, CLI, CMAM adapter, dashboard. No users, no teams, no scope enforcement. |
-| **`memee-team`** (private repo, licence-gated) | Proprietary (EULA) | `User` + `Team` SQLAlchemy models, `scoping.py` engine (personal → team → org promotion), SSO (SAML/OIDC), audit log export, RBAC, multi-user dashboard auth, licence key verification. |
+| **`memee`** (this repo) | MIT | Full single-user product: every engine module, MCP server, CLI, CMAM adapter. No users, no teams, no scope enforcement. |
+| **`memee-team`** (private repo, licence-gated) | Proprietary (EULA) | `User` + `Team` SQLAlchemy models, `scoping.py` engine (personal → team → org promotion), SSO (SAML/OIDC), audit log export, RBAC, licence key verification. |
 
 `memee-team` plugs into OSS via `memee.plugins` hooks
 (`current_user_id`, `visible_memories`, `promote`, `can_promote`, `on_record`).
@@ -203,20 +203,21 @@ Pricing model reflects "Memee is memory, not model" — flat per-team
 (like Supabase, Vercel, Plausible), not per-seat (like Copilot, Cursor).
 Value scales sublinearly with headcount: one canon serves the whole team.
 
-## MCP Tools (23)
+## MCP Tools (19)
 
-Core: memory_record, memory_search, memory_suggest, memory_validate,
-memory_invalidate, decision_record, antipattern_record, antipattern_check
+Core: memory_record, memory_search, search_feedback, memory_suggest,
+memory_validate, memory_invalidate, decision_record, antipattern_record,
+antipattern_check
 
 Intelligence: propagate_patterns, predict_warnings, inherit_knowledge,
 run_dream, review_code, get_briefing, post_task_feedback
 
-Research: research_create, research_log, research_status, research_meta,
-research_complete
-
 Analytics: learning_status, canon_list
 
 Delivery: sync_to_cmam (push canon to Claude Managed Agents Memory)
+
+(The five ``research_*`` tools that lived here through v1.x were removed
+in v2.0.0 along with the autoresearch engine.)
 
 ## CMAM Bridge (Claude Managed Agents Memory)
 
@@ -276,11 +277,11 @@ MCP tool `sync_to_cmam` lets agents trigger the push themselves.
 | File | Purpose |
 |------|---------|
 | `src/memee/cli.py` | 25+ Click commands (incl. `cmam sync`/`cmam status`) |
-| `src/memee/mcp_server.py` | 24 MCP tools |
+| `src/memee/mcp_server.py` | 19 MCP tools |
 | `src/memee/adapters/cmam.py` | Claude Managed Agents Memory bridge |
 | `src/memee/storage/models.py` | 15 SQLAlchemy models |
 | `src/memee/storage/database.py` | DB init, FTS5, WAL mode |
-| `src/memee/api/routes/dashboard.py` | Chart.js dashboard |
+
 | `src/memee/api/routes/api_v1.py` | REST API (12+ endpoints) |
 | `src/memee/installer.py` | Interactive setup wizard |
 | `src/memee/doctor.py` | Health check + auto-configure AI tools |
@@ -304,5 +305,5 @@ test_real_impact (A/B with/without), test_perf_simulation (9 scenarios)
 - 33 commits on feat/initial-setup
 - 63 Python files, 18,899 lines of code
 - 201 tests passing
-- 16 engine modules + CMAM adapter, 24 MCP tools, 12+ API endpoints (GET-only dashboard API)
+- 16 engine modules + CMAM adapter, 19 MCP tools, 12+ API endpoints (GET-only dashboard API)
 - MIT licence (OSS `memee`), proprietary EULA for `memee-team`

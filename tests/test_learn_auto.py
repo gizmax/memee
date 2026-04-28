@@ -117,7 +117,10 @@ def test_learn_auto_with_diff_emits_structured_line(tmp_path, monkeypatch):
     # behaviour for the hook is: exit 0, no traceback.
     if result.output.strip():
         assert "memee learn: ok" in result.output
-        assert "warnings_avoided=" in result.output
+        # v2.0.5: renamed from ``warnings_avoided`` (which was dishonest —
+        # it actually counted warnings the agent VIOLATED). The structured
+        # field is now ``warnings_violated``, matching what it always was.
+        assert "warnings_violated=" in result.output
         assert "patterns_followed=" in result.output
         assert "new_patterns=" in result.output
 

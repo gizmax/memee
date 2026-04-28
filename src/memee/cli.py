@@ -1318,8 +1318,12 @@ def learn(auto, project, diff_text, outcome, agent, model):
         # Silent unless something was learned. A noisy hook gets disabled.
         if patterns_followed == 0 and warnings_violated == 0:
             return
+        # Report what actually happened. ``warnings_violated`` is exactly
+        # that — counts of warnings the agent ignored. v2.0.4 and earlier
+        # surfaced this number as ``warnings_avoided``, which read like a
+        # win. It wasn't.
         click.echo(
-            f"memee learn: ok (warnings_avoided={warnings_violated}, "
+            f"memee learn: ok (warnings_violated={warnings_violated}, "
             f"patterns_followed={patterns_followed}, new_patterns={new_patterns})"
         )
     else:

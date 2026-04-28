@@ -125,7 +125,7 @@ Full methodology + per-repo file sizes: [docs/benchmarks.md](docs/benchmarks.md)
 
 ## Using it with Claude, GPT, Gemini
 
-An MCP server with 24 tools ships with the install. Drop this into `~/.claude/settings.json` — or the Cursor / Continue / any MCP-capable client equivalent:
+An MCP server with 19 tools ships with the install. Drop this into `~/.claude/settings.json` — or the Cursor / Continue / any MCP-capable client equivalent:
 
 ```json
 {

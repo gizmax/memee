@@ -310,6 +310,15 @@ def _bootstrap_memory_connection_expiry(engine) -> None:
 def init_db(engine=None):
     """Create all tables + FTS5 virtual table with sync triggers."""
     engine = engine or get_engine()
+
+    # Engine modules that define their own SQLAlchemy models must be
+    # imported before ``create_all`` so they register with ``Base.metadata``.
+    # Without this, a fresh DB never gets ``impact_events`` and any code
+    # path that reaches ``record_impact`` (the API, the feedback loop, the
+    # CLI ``learn`` command) trips ``no such table: impact_events``.
+    # Add new engine-side models here when the codebase grows.
+    from memee.engine import impact  # noqa: F401  (registers ImpactEvent)
+
     Base.metadata.create_all(engine)
 
     with engine.connect() as conn:

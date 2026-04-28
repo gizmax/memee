@@ -99,15 +99,24 @@ def post_task_review(
                 continue
 
             # A violation means the agent wrote code that matches a known
-            # anti-pattern. If the task succeeded anyway we still credit
-            # MISTAKE_AVOIDED (the warning surfaced in review was visible and
-            # the agent's work passed). If the task failed — the warning was
-            # ignored AND there's a real negative outcome — it's a MISTAKE_MADE.
-            impact_kind = (
-                ImpactType.MISTAKE_AVOIDED.value
-                if outcome == "success"
-                else ImpactType.MISTAKE_MADE.value
-            )
+            # anti-pattern. We map outcome to one of three honest states:
+            #   - failure → MISTAKE_MADE     (warning ignored, real damage)
+            #   - success → WARNING_INEFFECTIVE (warning ignored, got lucky)
+            # We deliberately do NOT credit MISTAKE_AVOIDED here — that
+            # would be a metric that lies about what happened, and bad
+            # numbers ruin the trust users have to put in this dashboard
+            # for it to be worth running.
+            if outcome == "success":
+                impact_kind = ImpactType.WARNING_INEFFECTIVE.value
+                outcome_text = (
+                    "Warning ignored; task succeeded anyway. The warning "
+                    "did not change the agent's behaviour."
+                )
+            else:
+                impact_kind = ImpactType.MISTAKE_MADE.value
+                outcome_text = (
+                    f"Warning ignored. Task outcome: {outcome}"
+                )
             record_impact(
                 session, mem.id,
                 impact_kind,
@@ -115,7 +124,7 @@ def post_task_review(
                 trigger="Post-task review detected anti-pattern violation",
                 memory_shown=mem.title,
                 agent_action=f"Violated warning: {warning.get('title', '')}",
-                outcome=f"Warning ignored. Task outcome: {outcome}",
+                outcome=outcome_text,
                 severity_avoided=warning.get("severity", "medium"),
             )
 
