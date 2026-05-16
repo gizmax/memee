@@ -1,9 +1,10 @@
 """Session ledger — citation eventing for the next briefing.
 
-Memee's citation footer instructs agents to cite memories they apply with
-``[mem:<8-char-id>]``. Today, the round-trip is silent: the cite goes into
-the evidence chain, but the user never sees Memee acknowledge it. This
-module closes that loop.
+Memee tracks citations the user records via ``memee cite --confirm`` so
+the next briefing can summarise what landed. v2.2.1 stripped the inline
+citation-token directive from the footer and from the receipt sentence;
+the user inspects lineage via the ``memee cite`` CLI and the receipt
+just describes state.
 
 How it works
 ------------
@@ -17,9 +18,9 @@ Two pure functions, no globals:
 
   * ``format_session_summary()`` — at the start of the next session, the
     SessionStart briefing reads the snapshot and prepends a one-line
-    receipt: "Last session: applied N memories. Confirmed: '<title>'
-    [mem:xxxxxxxx]." Returns ``None`` when there's nothing to say so the
-    caller can prepend unconditionally.
+    receipt: "Last session: applied N memories. Confirmed: '<title>'."
+    Returns ``None`` when there's nothing to say so the caller can
+    prepend unconditionally.
 
 The "session" boundary is intentionally simple: there's no robust per-
 session marker on the harness side, so we use "since the last
@@ -146,7 +147,7 @@ def format_session_summary() -> str | None:
     is to surface the strongest piece of organisational knowledge the
     agent actually applied — so the user sees Memee earn its keep.
     """
-    if os.environ.get("MEMEE_NO_SESSION_RECEIPT"):
+    if os.environ.get("MEMEE_QUIET") or os.environ.get("MEMEE_NO_SESSION_RECEIPT"):
         return None
     try:
         cache = _read_cache()
@@ -170,15 +171,13 @@ def format_session_summary() -> str | None:
     # informal cap we hit elsewhere.
     if len(title) > 60:
         title = title[:59].rstrip() + "…"
-    short = _short_hash(pick.get("mem_id") or "")
-    cite_token = f"[mem:{short}]" if short else "[mem:?]"
 
+    # v2.2.1: stripped trailing ``[mem:xxxxxxxx]`` token. The summary is a
+    # state description for the next briefing; the user inspects lineage
+    # via ``memee cite``, the receipt doesn't have to advertise an ID.
     if n == 1:
-        return f"> Last session: applied 1 memory: '{title}' {cite_token}."
-    return (
-        f"> Last session: applied {n} memories. "
-        f"Confirmed: '{title}' {cite_token}."
-    )
+        return f"> Last session: applied 1 memory: '{title}'."
+    return f"> Last session: applied {n} memories. Confirmed: '{title}'."
 
 
 # ── Internals ──────────────────────────────────────────────────────────

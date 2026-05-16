@@ -19,7 +19,6 @@ Covers:
 from __future__ import annotations
 
 import json
-import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -460,27 +459,24 @@ def test_cli_pulse_days_flag(tmp_path, monkeypatch):
     assert payload30["top_reused"][0]["title"] == "Old but relevant"
 
 
-def test_cli_pulse_works_when_receipts_module_missing(
+def test_cli_pulse_works_when_receipts_api_missing(
     tmp_path, monkeypatch, isolated_db,
 ):
-    """``memee.receipts`` (M1) may not have merged yet — the pulse must
-    still produce a valid headline by falling back to the hand-rolled
-    formatter inside ``pulse._fallback_headline``."""
+    """If ``format_session_receipt`` is not available (older Memee, or
+    a future refactor), the pulse must still produce a valid headline
+    via ``pulse._fallback_headline``.
+
+    v2.2.2: pinned ``format_session_receipt(session, *, since, until)``
+    so the caller no longer probes signatures. The "missing API" branch
+    is exercised by making the attribute missing on the receipts module
+    — the previous implementation simulated it via a fragile __import__
+    monkeypatch that didn't catch importlib's submodule path."""
+    import memee.receipts
     from memee.pulse import compute_pulse
 
-    # Pretend the receipts module simply isn't importable. Two layers of
-    # protection: clear it from sys.modules so a real import re-resolves,
-    # and stub the import to raise. Belt-and-suspenders.
-    monkeypatch.delitem(sys.modules, "memee.receipts", raising=False)
-
-    real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "memee.receipts" or name.startswith("memee.receipts."):
-            raise ImportError("simulated: memee.receipts not available")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr("builtins.__import__", fake_import)
+    monkeypatch.delattr(
+        memee.receipts, "format_session_receipt", raising=False
+    )
 
     session = isolated_db["session"]
     org = isolated_db["org"]
@@ -491,7 +487,6 @@ def test_cli_pulse_works_when_receipts_module_missing(
     # Fallback headline mentions "last 7 days" + "memory applied".
     assert "last 7 days" in out["headline"]
     assert "applied" in out["headline"]
-    # And the bucket data still came through (the import error must not
-    # have torpedoed the rest of the function).
-    assert out["top_reused"], "bucket query must still run when receipts is absent"
+    # And the bucket data still came through.
+    assert out["top_reused"], "bucket query must still run when receipts API is absent"
     assert out["top_reused"][0]["title"] == "No receipts module here"

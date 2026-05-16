@@ -204,12 +204,20 @@ def _query_version(path: str) -> str | None:
             _re.IGNORECASE,
         )
 
+    # Recursion guard (v2.4.7): pass MEMEE_SKIP_INSTALL_SCAN=1 so the child
+    # binary's --version callback short-circuits to the bare version line
+    # instead of recursively scanning PATH and spawning grandchildren.
+    # Without this, three memees on PATH × N depth = 3^N processes — the
+    # v2.4.6 live-install fork-bomb. The env is structural: even a future
+    # caller of _query_version is safe.
+    child_env = {**os.environ, "MEMEE_SKIP_INSTALL_SCAN": "1"}
     try:
         result = subprocess.run(
             [path, "--version"],
             capture_output=True,
             timeout=5,
             text=True,
+            env=child_env,
         )
     except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
         return None
@@ -745,6 +753,70 @@ def uninstall_hooks_for(tool_id: str, *, dry_run: bool = False) -> dict | None:
     return uninstall_hooks_for_tool(tool_def["config_path"], dry_run=dry_run)
 
 
+def detect_duplicate_memee_hooks() -> list[dict]:
+    """Find tools whose settings.json has duplicate Memee hook entries.
+
+    v2.4.7: users who installed Memee before the ``_memee: true`` marker
+    existed (pre-v2.0.1) have *unmarked* Memee hook commands sitting in
+    their settings.json. Every subsequent ``memee setup`` added a fresh
+    marker'd entry alongside the unmarked one, so each hook event fired
+    the Memee command twice. The strengthened ``_is_memee_entry``
+    heuristic (which now matches by command shape, not just marker) makes
+    the cleanup itself a no-op merge — but we still want to surface the
+    condition in ``memee doctor`` output so the user knows their two
+    "UserPromptSubmit hook success" lines per turn aren't normal.
+
+    Returns a list of ``{tool, tool_id, path, events, total_extra}``
+    dicts, one per affected tool. Empty list = no duplicates anywhere.
+    """
+    from memee.hooks_config import _is_memee_entry, read_settings
+
+    findings: list[dict] = []
+    for tool in AI_TOOLS:
+        if not tool.get("supports_hooks"):
+            continue
+        config_path = tool["config_path"]
+        if not config_path.exists():
+            continue
+        try:
+            cfg, _ = read_settings(config_path)
+        except ValueError:
+            # Bad JSON — install_hooks_for_tool already handles the
+            # backup; not our job to double-warn here.
+            continue
+        hooks_root = cfg.get("hooks")
+        if not isinstance(hooks_root, dict):
+            continue
+
+        events_with_dupes: dict[str, int] = {}
+        for event, blocks in hooks_root.items():
+            if not isinstance(blocks, list):
+                continue
+            count = 0
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                inner = block.get("hooks", [])
+                if not isinstance(inner, list):
+                    continue
+                for entry in inner:
+                    if _is_memee_entry(entry):
+                        count += 1
+            if count > 1:
+                events_with_dupes[event] = count
+
+        if events_with_dupes:
+            total_extra = sum(c - 1 for c in events_with_dupes.values())
+            findings.append({
+                "tool": tool["name"],
+                "tool_id": tool["id"],
+                "path": str(config_path),
+                "events": events_with_dupes,
+                "total_extra": total_extra,
+            })
+    return findings
+
+
 def install_hooks_all(*, dry_run: bool = False) -> list[dict]:
     """Install hooks for every detected tool that supports them.
 
@@ -777,6 +849,244 @@ def uninstall_hooks_all(*, dry_run: bool = False) -> list[dict]:
         res["tool_id"] = tool["id"]
         results.append(res)
     return results
+
+
+def run_smoke_probe() -> dict:
+    """End-to-end probe: record → search → brief → delete.
+
+    v2.2.5 addition. The autoresearch on adoption friction showed four
+    competitor tools (Mem0, Letta, Cognee) ship with "command not found"
+    / "config not where expected" / FTS5-missing failures that only
+    surface on first real use. ``memee doctor`` previously checked
+    config files and tool detection but never *exercised* the pipeline.
+    This probe writes one temp memory tagged ``__smoke__``, searches for
+    it via the hybrid retriever, asks the router for a briefing, and
+    deletes the trace. Each step is fenced; a failure returns the
+    failing step's name and error so a new user sees the real problem
+    instead of a green report that lies.
+
+    Returns a dict with::
+
+        {
+          "ok": bool,
+          "steps": [{"name": str, "ok": bool, "ms": float, "error": str|None}],
+          "elapsed_ms": float,
+        }
+
+    Side effects: writes one Memory row and removes it. On failure mid-
+    pipeline the row is best-effort cleaned up; if cleanup itself fails
+    the row is tagged ``__smoke__`` so a follow-up
+    ``memee dedup --semantic`` or manual delete is straightforward.
+    """
+    import time
+    from datetime import datetime, timezone
+
+    started = time.perf_counter()
+    steps: list[dict] = []
+    mem_id: str | None = None
+    session = None
+    # Unique smoke tag so concurrent doctors / test runs don't collide.
+    tag = f"__smoke__{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}"
+
+    def _ms_since(t0: float) -> float:
+        return round((time.perf_counter() - t0) * 1000, 1)
+
+    # ── Step 1: open session ──
+    t0 = time.perf_counter()
+    try:
+        from memee.storage.database import get_session, init_db
+        session = get_session(init_db())
+        steps.append({"name": "open_db", "ok": True, "ms": _ms_since(t0), "error": None})
+    except Exception as e:
+        steps.append({"name": "open_db", "ok": False, "ms": _ms_since(t0), "error": str(e)})
+        return {"ok": False, "steps": steps, "elapsed_ms": _ms_since(started)}
+
+    try:
+        # ── Step 2: record a temp memory ──
+        t0 = time.perf_counter()
+        try:
+            from memee.storage.models import Memory, MemoryType, MaturityLevel
+            mem = Memory(
+                type=MemoryType.PATTERN.value,
+                title=f"doctor smoke probe ({tag})",
+                content=(
+                    "Synthetic memory inserted by `memee doctor --smoke` to "
+                    "exercise the write → search → brief pipeline end to end. "
+                    "Deleted immediately after the probe completes."
+                ),
+                tags=[tag, "__smoke__"],
+                maturity=MaturityLevel.HYPOTHESIS.value,
+                confidence_score=0.5,
+                source_type="human",
+            )
+            session.add(mem)
+            session.commit()
+            mem_id = mem.id
+            steps.append({"name": "record", "ok": True, "ms": _ms_since(t0), "error": None})
+        except Exception as e:
+            steps.append({"name": "record", "ok": False, "ms": _ms_since(t0), "error": str(e)})
+            return {"ok": False, "steps": steps, "elapsed_ms": _ms_since(started)}
+
+        # ── Step 3: search for it via the hybrid retriever ──
+        t0 = time.perf_counter()
+        try:
+            from memee.engine.search import search_memories
+            hits = search_memories(session, "doctor smoke probe", limit=5)
+            found = any(r["memory"].id == mem_id for r in hits)
+            if not found:
+                # FTS5 / embeddings could be broken even when the row exists.
+                steps.append({
+                    "name": "search",
+                    "ok": False,
+                    "ms": _ms_since(t0),
+                    "error": "probe row written but not returned by search_memories",
+                })
+                return {"ok": False, "steps": steps, "elapsed_ms": _ms_since(started)}
+            steps.append({"name": "search", "ok": True, "ms": _ms_since(t0), "error": None})
+        except Exception as e:
+            steps.append({"name": "search", "ok": False, "ms": _ms_since(t0), "error": str(e)})
+            return {"ok": False, "steps": steps, "elapsed_ms": _ms_since(started)}
+
+        # ── Step 4: ask the router for a briefing ──
+        t0 = time.perf_counter()
+        try:
+            from memee.engine.router import smart_briefing
+            brief = smart_briefing(session, task="doctor smoke probe", token_budget=200)
+            if not brief or not isinstance(brief, str):
+                steps.append({
+                    "name": "brief",
+                    "ok": False,
+                    "ms": _ms_since(t0),
+                    "error": "smart_briefing returned empty result",
+                })
+                return {"ok": False, "steps": steps, "elapsed_ms": _ms_since(started)}
+            steps.append({"name": "brief", "ok": True, "ms": _ms_since(t0), "error": None})
+        except Exception as e:
+            steps.append({"name": "brief", "ok": False, "ms": _ms_since(t0), "error": str(e)})
+            return {"ok": False, "steps": steps, "elapsed_ms": _ms_since(started)}
+
+        return {"ok": True, "steps": steps, "elapsed_ms": _ms_since(started)}
+
+    finally:
+        # ── Always-run: clean up the probe row ──
+        if session is not None and mem_id is not None:
+            try:
+                from memee.storage.models import Memory
+                probe = session.get(Memory, mem_id)
+                if probe is not None:
+                    session.delete(probe)
+                    session.commit()
+            except Exception:
+                # Best-effort: tag stays as __smoke__ so an operator can
+                # spot the leak via `memee search __smoke__` if it ever
+                # happens. We do NOT raise here — the probe result is what
+                # the user actually wants to see.
+                pass
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+
+def get_dep_manifest() -> dict:
+    """Snapshot the runtime dependencies Memee actually uses (v2.2.5).
+
+    Competitor memory tools require Neo4j / Postgres / Chroma / external
+    LLM with structured output (see autoresearch — Graphiti's Neo4j
+    requirement, Letta's Chroma DuplicateIDError class, Mem0's
+    OpenAI-structured-output dependency). Memee runs on stdlib SQLite +
+    FTS5 + an optional local embedding model. The manifest is a one-shot
+    state describer so the doctor report can show the contrast — not a
+    runtime check that gates anything.
+
+    Returns::
+
+        {
+          "sqlite":       {"present": True, "version": "3.45.0"},
+          "fts5":         {"present": True, "note": "stdlib"},
+          "numpy":        {"present": True, "version": "...", "optional": True},
+          "embeddings":   {"present": True, "version": "...", "optional": True, "note": "all-MiniLM-L6-v2 local"},
+          "reranker":     {"present": False, "optional": True, "note": "cross-encoder, opt-in"},
+        }
+
+    Anything optional that's missing is fine — Memee degrades gracefully.
+    The manifest only marks ``present: False`` for *required* deps that
+    couldn't load, which is the case doctor wants to surface loudly.
+    """
+    manifest: dict[str, dict] = {}
+
+    # ── SQLite (required) ──
+    try:
+        import sqlite3
+        manifest["sqlite"] = {
+            "present": True,
+            "version": sqlite3.sqlite_version,
+            "optional": False,
+        }
+    except Exception as e:
+        manifest["sqlite"] = {
+            "present": False,
+            "error": str(e),
+            "optional": False,
+        }
+
+    # ── FTS5 (required, stdlib but a build-time choice) ──
+    try:
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.execute("CREATE VIRTUAL TABLE _t USING fts5(x)")
+            manifest["fts5"] = {"present": True, "note": "stdlib", "optional": False}
+        finally:
+            conn.close()
+    except Exception as e:
+        manifest["fts5"] = {"present": False, "error": str(e), "optional": False}
+
+    # ── numpy (used by semantic-dedup pass and cosine paths) ──
+    try:
+        import numpy as _np
+        manifest["numpy"] = {
+            "present": True,
+            "version": _np.__version__,
+            "optional": True,
+        }
+    except Exception:
+        manifest["numpy"] = {"present": False, "optional": True}
+
+    # ── sentence-transformers (optional; gives vector search) ──
+    try:
+        import sentence_transformers as _st
+        manifest["embeddings"] = {
+            "present": True,
+            "version": getattr(_st, "__version__", "unknown"),
+            "optional": True,
+            "note": "all-MiniLM-L6-v2 local, no API keys",
+        }
+    except Exception:
+        manifest["embeddings"] = {
+            "present": False,
+            "optional": True,
+            "note": "vector search falls back to BM25",
+        }
+
+    # ── Reranker (cross-encoder, opt-in) ──
+    try:
+        from memee.engine.reranker import rerank_status
+        rs = rerank_status()
+        manifest["reranker"] = {
+            "present": bool(rs.get("enabled")),
+            "optional": True,
+            "note": rs.get("status") or "cross-encoder, opt-in",
+        }
+    except Exception:
+        manifest["reranker"] = {
+            "present": False,
+            "optional": True,
+            "note": "cross-encoder, opt-in",
+        }
+
+    return manifest
 
 
 def get_rerank_health() -> dict:
@@ -998,6 +1308,28 @@ def run_doctor(
         # Zombie research-experiment sweep was removed with the research
         # engine (v2.0.0). The whole experiment tracker is gone, no zombies.
 
+    # Duplicate Memee hooks (v2.4.7): scan settings.json across detected
+    # hook-supporting tools. If we find more than one Memee-shaped command
+    # under any event, the user's hooks fire 2x per event. The fix is
+    # ``memee setup`` (or ``memee doctor --fix-hooks``) — both run
+    # merge_hooks, which now recognises the unmarked pre-v2.0.1 entries
+    # and collapses them.
+    dup_hooks = detect_duplicate_memee_hooks()
+    if dup_hooks:
+        results["dup_hooks"] = dup_hooks
+        for finding in dup_hooks:
+            results["issues"].append({
+                "type": "duplicate_hooks",
+                "tool": finding["tool"],
+                "tool_id": finding["tool_id"],
+                "message": (
+                    f"{finding['tool']}: {finding['total_extra']} "
+                    f"unmarked Memee hook entries shadow marked ones "
+                    f"(fires 2x per event). "
+                    f"Fix: memee doctor --fix-hooks"
+                ),
+            })
+
     # Hook layer: this is what makes Memee fully automatic. We only act on
     # tools that report ``supports_hooks=True`` AND are detected. The
     # uninstall path runs first so a "doctor --uninstall-hooks" doesn't
@@ -1136,6 +1468,39 @@ def print_doctor_report(results: dict):
     """Print formatted doctor report."""
     print(f"\n  {C.BCYAN}━━━ MEMEE HEALTH CHECK ━━━{C.RESET}\n")
 
+    # ── Dependencies (v2.2.5) ──
+    #
+    # Print this first because for new users it's the most reassuring
+    # screen: one line per dep, contrasted against the Neo4j / Postgres /
+    # Chroma / OpenAI-structured-output stacks competitors require. The
+    # autoresearch flagged this as a top-4 friction in competitor issues.
+    manifest = results.get("dep_manifest") or {}
+    if manifest:
+        print(f"  {C.BOLD}Dependencies:{C.RESET}")
+        for name, info in manifest.items():
+            present = info.get("present", False)
+            optional = info.get("optional", False)
+            if present:
+                icon = f"{C.GREEN}✓{C.RESET}"
+            elif optional:
+                # Missing-and-optional is not a failure — Memee degrades.
+                icon = f"{C.DIM}-{C.RESET}"
+            else:
+                icon = f"{C.RED}✗{C.RESET}"
+            version = info.get("version")
+            note = info.get("note")
+            label = name
+            details = []
+            if version:
+                details.append(version)
+            if optional:
+                details.append("optional")
+            if note:
+                details.append(note)
+            suffix = f" {C.DIM}({', '.join(details)}){C.RESET}" if details else ""
+            print(f"    {icon} {label:<12s}{suffix}")
+        print()
+
     # Database
     db = results["database"]
     print(f"  {C.BOLD}Database:{C.RESET}")
@@ -1190,6 +1555,29 @@ def print_doctor_report(results: dict):
             config_hint = f"  {C.DIM}{tool['config_path']}{C.RESET}"
 
         print(f"    {icon} {tool['name']:<18s} {status}{config_hint}")
+
+    # Duplicate Memee hooks warning (v2.4.7). Prints whenever the scan
+    # found at least one unmarked Memee entry shadowing a marked one.
+    # The fix is `memee doctor --fix-hooks` (or `memee setup --no-mcp`),
+    # both of which call merge_hooks() and collapse them.
+    dup_hooks = results.get("dup_hooks") or []
+    if dup_hooks:
+        print(f"\n  {C.BOLD}Hooks duplication:{C.RESET}")
+        for finding in dup_hooks:
+            events = finding.get("events", {})
+            event_summary = ", ".join(
+                f"{ev}×{count}" for ev, count in events.items()
+            )
+            print(
+                f"    {C.YELLOW}!{C.RESET} {finding['tool']}: "
+                f"{finding['total_extra']} unmarked Memee entries "
+                f"shadowing marked ones (fires 2x per event)"
+            )
+            print(f"      {C.DIM}{finding['path']}{C.RESET}")
+            if event_summary:
+                print(f"      {C.DIM}events: {event_summary}{C.RESET}")
+            print(f"      {C.BOLD}Fix:{C.RESET} memee doctor --fix-hooks")
+            print(f"           {C.DIM}Or: memee setup --no-mcp{C.RESET}")
 
     # Hook installation report — what was just written (or would be in
     # dry-run). Only print this section if doctor actually touched hooks.
@@ -1287,6 +1675,35 @@ def print_doctor_report(results: dict):
             print(f"    {C.YELLOW}!{C.RESET} {stale} unvalidated hypotheses (run: memee dream)")
         else:
             print(f"    {C.GREEN}✓{C.RESET} Stale hypotheses: {stale}")
+
+    # End-to-end smoke probe (v2.2.5, opt-in via --smoke)
+    smoke = results.get("smoke")
+    if smoke is not None:
+        print(f"\n  {C.BOLD}End-to-end probe:{C.RESET}")
+        for step in smoke.get("steps", []):
+            label = step.get("name", "?")
+            ms = step.get("ms", 0.0)
+            if step.get("ok"):
+                print(f"    {C.GREEN}✓{C.RESET} {label:<10s} {C.DIM}{ms} ms{C.RESET}")
+            else:
+                err = step.get("error", "")
+                print(
+                    f"    {C.RED}✗{C.RESET} {label:<10s} {C.DIM}{ms} ms{C.RESET}"
+                    + (f"  {C.RED}{err}{C.RESET}" if err else "")
+                )
+        total = smoke.get("elapsed_ms", 0.0)
+        if smoke.get("ok"):
+            print(
+                f"    {C.BGREEN}✓ pipeline healthy{C.RESET} "
+                f"{C.DIM}({total} ms total){C.RESET}"
+            )
+        else:
+            # Loud failure — exit code is set elsewhere if we add one;
+            # for now the message is the signal.
+            print(
+                f"    {C.BRED}✗ pipeline broken{C.RESET} "
+                f"{C.DIM}({total} ms before failure){C.RESET}"
+            )
 
     # Issues + Fixes
     issues = [i for i in results["issues"] if i.get("tool", "") not in results.get("fixed", [])]

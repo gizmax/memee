@@ -60,6 +60,8 @@ memee why "eval(user_input)"
 
 # Health check (rerank state, hooks, cache).
 memee doctor
+memee doctor --smoke              # opt-in end-to-end probe
+memee bar install                 # macOS menubar, optional
 ```
 
 That's it. Memory lives in `~/.memee/memee.db`. No account. Core read/write is fully local. Vector embeddings are optional — on by default via `sentence-transformers`, which fetches a ~80 MB model on first use. Set `TRANSFORMERS_OFFLINE=1` to skip.
@@ -82,6 +84,9 @@ Small engines on SQLite + FTS5 + a 384-dim embedding space.
 | **Propagation** | A validated pattern auto-pushes to projects with matching stack or tags. Fix once. Benefit everywhere. |
 | **Review** | `git diff \| memee review -` scans a changeset against known anti-patterns. Institutional memory enters code review. |
 | **CMAM bridge** | Push canon to Anthropic's Managed Agents Memory at `/mnt/memory/`. Claude sees canon on turn one — no MCP round-trip. |
+| **Pinned policies** | Authoritative memories surface in every relevant briefing, ahead of search. Layer 0.5 of the router. |
+| **Canon re-checking** | FSRS-light per-memory decay + SPRT promotion. Old rules earn their place again or quietly retire. |
+| **Menubar** | macOS bar app. Read-only. Tells you what Memee did this week. No notifications. |
 
 Deeper notes: [CLAUDE.md](CLAUDE.md). CMAM spec: [docs/cmam.md](docs/cmam.md). Review engine: [docs/review-fixes.md](docs/review-fixes.md).
 
@@ -111,7 +116,7 @@ Full methodology + per-repo file sizes: [docs/benchmarks.md](docs/benchmarks.md)
 
 ## Benchmarks
 
-- **OrgMemEval v1.0**: 92.3 % across propagation, avoidance, maturity, onboarding, recovery, calibration, synthesis. Competitors on the same scenarios: MemPalace 0.9, Letta 1.3, Zep 2.3, Mem0 3.5 (the closest). v2.0.0 retired the autoresearch scenario alongside the engine.
+- **OrgMemEval v1.0**: 96.3 % across propagation, avoidance, maturity, onboarding, recovery, calibration, synthesis. Competitors on the same scenarios: MemPalace 0.9, Letta 1.3, Zep 2.3, Mem0 3.5 (the closest). v2.0.0 retired the autoresearch scenario alongside the engine.
 - **7-task A/B (with / without Memee):** time −71 %, iterations −65 %, quality 56 % → 93 %, ROI ≈ 10.7× at the $49 / month Team tier.
 - **GigaCorp simulation**, 100 projects, 100 agents, 18 months: incidents 12/mo → 3/mo, annual ROI ≈ 3× at the same flat Team tier.
 - **Retrieval**: 207-query × 255-memory eval harness with 7 difficulty
@@ -203,7 +208,7 @@ It writes from the conversation, not from your hand. It scores what it captures 
 
 Most memory projects remember *conversations*: you talked about X last Tuesday, here it is again. That's chat history with a vector index.
 
-Memee earns *canon*. A claim arrives at 0.5 confidence and goes nowhere until a second model family agrees and a second project re-uses it. On OrgMemEval v1.0 that capability gap shows up as **92.3 %** against a competitor baseline of **~2 %**. Not because the others are bad. Because they aren't built for the job.
+Memee earns *canon*. A claim arrives at 0.5 confidence and goes nowhere until a second model family agrees and a second project re-uses it. On OrgMemEval v1.0 that capability gap shows up as **96.3 %** against a competitor baseline of **~2 %**. Not because the others are bad. Because they aren't built for the job.
 
 Conversation memory remembers what was said. Institutional memory remembers what was learned.
 

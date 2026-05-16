@@ -99,7 +99,8 @@ class TestSmartBriefing:
         """Critical anti-patterns always appear regardless of task."""
         session, proj, org = router_env
         result = smart_briefing(session, "/tmp/api-project", task="write docs")
-        assert "CRITICAL" in result
+        # v2.2.3: header is the declarative section label, bullets use •.
+        assert "Critical anti-patterns in scope:" in result
         assert "API keys" in result or "eval" in result
 
     def test_testing_task_routes_to_testing(self, router_env):
@@ -123,7 +124,8 @@ class TestSmartBriefing:
         result = smart_briefing(session, "/tmp/api-project", task="")
         # Should show some patterns (not just critical)
         assert "✓" in result  # At least one pattern shown
-        assert "CRITICAL" in result  # Plus critical warnings
+        # v2.2.3 header (declarative). Layer 0 still always fires.
+        assert "Critical anti-patterns in scope:" in result
 
     def test_token_budget_respected(self, router_env):
         """Briefing stays within token budget (real chars/4 accounting)."""
@@ -172,7 +174,7 @@ class TestSmartBriefing:
         database = smart_briefing(session, "/tmp/api-project",
                                    task="optimize PostgreSQL database indexes and pooling")
         # Different tasks should surface different memories
-        # (both have CRITICAL section same, but search results differ)
-        # At minimum, they should both be valid briefings
-        assert "CRITICAL" in testing
-        assert "CRITICAL" in database
+        # (Layer 0 section same, but search results differ).
+        # At minimum, they should both be valid briefings.
+        assert "Critical anti-patterns in scope:" in testing
+        assert "Critical anti-patterns in scope:" in database

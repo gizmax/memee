@@ -111,16 +111,27 @@ def test_to_compact_caps_at_seven_bullets():
 
 
 def test_to_compact_respects_token_budget():
-    """A tight budget forces a shorter result regardless of bullet count."""
+    """A tight budget forces a shorter result regardless of bullet count.
+
+    v2.2.1 shrunk the citation footer to declarative state ('Memee
+    context above. Inspect any memory with `memee cite <id-prefix>`.'),
+    so the budget needs to be smaller than the new footer to actually
+    pressure trimming. The old hard-coded ``budget=20`` happened to be
+    just under the v2.1 footer size; we now derive a budget that's
+    smaller than whatever footer the production code emits.
+    """
+    from memee.engine.citations import CITATION_FOOTER
+
     raw = "\n".join(
         f"  ✓ Pattern {i} with a fairly long descriptive title to inflate tokens"
         for i in range(7)
     )
-    out = _to_compact(raw, budget=20, count_tokens=_count_tokens)
-    # Must fit under (approximately) the budget. Token count is a 4-char
-    # heuristic so we allow a small slack but verify the trimmer kicked in
-    # (i.e. fewer than the original 7 lines).
-    assert _count_tokens(out) <= 20 + 5
+    footer_tokens = _count_tokens(CITATION_FOOTER)
+    # Pick a budget tight enough that the trimmer must drop several
+    # bullets and still under the footer's own size.
+    tight_budget = max(footer_tokens - 1, 8)
+    out = _to_compact(raw, budget=tight_budget, count_tokens=_count_tokens)
+    assert _count_tokens(out) <= tight_budget + 5
     assert len(out.splitlines()) < 7
 
 

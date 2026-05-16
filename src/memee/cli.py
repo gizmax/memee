@@ -12,59 +12,61 @@ from memee.config import settings
 
 
 def _print_version_and_exit(ctx, param, value):
-    """Click ``--version`` callback that prints version + install location +
-    multi-install warning when applicable.
+    """Click ``--version`` callback.
 
-    Replaces ``click.version_option`` so we can also surface the path of the
-    binary the shell resolves and any *other* memee installs that are
-    shadowing or being shadowed by this one — the v2.0.1 patch fix for the
-    pipx-vs-Homebrew shadowing bug.
+    Prints version + install path + (when relevant) a generic "run memee
+    doctor" hint. Deliberately does NOT scan PATH for shadowed installs:
+    when 2+ memee binaries are on PATH, the PATH scan subprocess-calls
+    every one of them with ``--version``, which itself re-entered this
+    callback and re-scanned PATH → recursive fork-bomb (v2.4.6 live-
+    install bug, "dozens of stuck memee --version processes").
+
+    The PATH-scan + shadow-install diagnosis now lives exclusively in
+    ``memee doctor`` (a single, intentional invocation). A short hint
+    here points users at it when this binary looks like it isn't running
+    out of a pipx venv.
+
+    Layer B safety: if a future caller still wants to use
+    ``_query_version`` from the doctor (it does, when the user actually
+    runs ``memee doctor``), the subprocess is invoked with the env var
+    ``MEMEE_SKIP_INSTALL_SCAN=1``. We honour that here too: if we're
+    running as a probe from another memee, we ONLY print the version line
+    and bail before any I/O.
     """
     if not value or ctx.resilient_parsing:
         return
 
     from memee import __version__
-    from memee.doctor import (
-        _install_kind_label,
-        detect_memee_installs,
-    )
 
-    # Resolve where THIS python imported memee from + which binary on PATH
-    # is the active one.
+    # Recursion guard — if we're being invoked from _query_version (or any
+    # other context that doesn't want a full version block), print just
+    # the parseable version line and exit. This is the structural fix for
+    # the fork-bomb: regardless of how many memees are on PATH, none of
+    # them recurse when the env var is set.
+    if os.environ.get("MEMEE_SKIP_INSTALL_SCAN") == "1":
+        click.echo(f"memee {__version__}")
+        ctx.exit()
+
+    # Resolve where THIS python imported memee from. No PATH walk — that
+    # was the fork-bomb.
     try:
         import memee as _memee_pkg
         installed = os.path.dirname(os.path.abspath(_memee_pkg.__file__))
     except Exception:
         installed = "<unknown>"
 
-    # The binary on PATH may not be the one running RIGHT NOW (e.g. when
-    # invoked via ``python -m memee.cli``), so we report it separately and
-    # mark which one matches sys.executable.
-    installs = detect_memee_installs()
-
     click.echo(f"memee {__version__}")
     click.echo(f"  installed: {installed}")
+    click.echo(f"  binary:    {sys.executable}")
 
-    if not installs:
-        # Running from source / no shim on PATH. Honest about it.
-        click.echo("  binary:    <not on PATH>")
-    else:
-        active = installs[0]
-        kind = _install_kind_label(active["install_kind"])
-        click.echo(
-            f"  binary:    {active['path']}  ({kind} — active)"
-        )
-        for alt in installs[1:]:
-            alt_ver = alt.get("version") or "?"
-            alt_kind = _install_kind_label(alt["install_kind"])
-            click.echo(
-                f"  alt:       {alt['path']}  v{alt_ver}  "
-                f"({alt_kind} — shadowed by the one above)"
-            )
-
-        if len(installs) > 1:
+    # Generic hint: if this isn't a pipx install AND there's no user-pip
+    # shim on PATH pointing at the current site-packages, point at the
+    # doctor for a real PATH scan. We never scan PATH from here.
+    if "pipx" not in sys.executable:
+        local_shim = Path.home() / ".local" / "bin" / "memee"
+        if not local_shim.exists():
             click.echo("")
-            click.echo("  Run: memee doctor   for cleanup guidance")
+            click.echo("  Run: memee doctor   for install diagnostics")
 
     # Update notice — same passive channel as the hook briefing. Cached for
     # 24h, silent on failure, killable via MEMEE_NO_UPDATE_CHECK=1. Lives
@@ -209,8 +211,21 @@ def setup(mode, no_hooks, dry_run, ignore_multi_install):
          "(currently: removing a shadowing memee install). Implied in "
          "non-interactive shells.",
 )
+@click.option(
+    "--smoke", is_flag=True,
+    help="Run an end-to-end probe (record → search → brief → delete) "
+         "that exercises the pipeline a real session uses. Surfaces "
+         "FTS5/embedding/DB failures that config-only checks miss.",
+)
+@click.option(
+    "--fix-hooks", is_flag=True,
+    help="Rewrite the Claude Code (and compatible) hooks block, "
+         "collapsing duplicate Memee entries left by pre-v2.0.1 installs. "
+         "Equivalent to `memee setup --no-mcp` for the hooks layer.",
+)
 def doctor(
-    no_fix, no_hooks, uninstall_hooks, dry_run, ignore_multi_install, assume_yes
+    no_fix, no_hooks, uninstall_hooks, dry_run, ignore_multi_install,
+    assume_yes, smoke, fix_hooks,
 ):
     """Health check: scan system, detect AI tools, fix configuration."""
     from memee.doctor import (
@@ -250,10 +265,14 @@ def doctor(
                 if not click.confirm("  Proceed?", default=False):
                     skip_install_fix = True
 
+    # --fix-hooks forces the hooks install path even when --no-hooks is set.
+    # The install path runs merge_hooks(), which v2.4.7 now recognises and
+    # collapses unmarked pre-v2.0.1 Memee entries.
+    install_hooks_flag = (not no_hooks and not uninstall_hooks) or fix_hooks
     results = run_doctor(
         auto_fix=auto_fix,
-        install_hooks=not no_hooks and not uninstall_hooks,
-        uninstall_hooks=uninstall_hooks,
+        install_hooks=install_hooks_flag,
+        uninstall_hooks=uninstall_hooks and not fix_hooks,
         dry_run=dry_run,
         skip_install_fix=skip_install_fix,
     )
@@ -262,6 +281,15 @@ def doctor(
             i for i in results.get("issues", [])
             if i.get("type") != "multi_install"
         ]
+    # v2.2.5: dependency manifest + optional end-to-end smoke probe.
+    # Manifest always runs (cheap); smoke is opt-in to keep doctor fast
+    # by default. Both bolt onto the existing results dict so the report
+    # layer stays the one place that handles formatting.
+    from memee.doctor import get_dep_manifest
+    results["dep_manifest"] = get_dep_manifest()
+    if smoke:
+        from memee.doctor import run_smoke_probe
+        results["smoke"] = run_smoke_probe()
     print_doctor_report(results)
 
 
@@ -299,7 +327,15 @@ def init(ctx):
 @click.option("--content", "-c", default="", help="Full content of the memory")
 @click.option("--tags", "-t", default="", help="Comma-separated tags")
 @click.option("--project", "-p", default="", help="Project path to link")
-def record(type, title, content, tags, project):
+@click.option(
+    "--authoritative", "--pin", "is_authoritative", is_flag=True,
+    help=(
+        "Mark as authoritative (v2.3.1): the router's Layer 0.5 always "
+        "surfaces matching authoritative memories in briefings regardless "
+        "of similarity score. Use for policies, personas, hard org rules."
+    ),
+)
+def record(type, title, content, tags, project, is_authoritative):
     """Record a new memory to organizational knowledge base."""
     from memee.engine.quality_gate import merge_duplicate, run_quality_gate
     from memee.storage.database import get_session, init_db
@@ -345,6 +381,7 @@ def record(type, title, content, tags, project):
         confidence_score=gate.initial_confidence,
         source_type=gate.source_type,
         quality_score=gate.quality_score,
+        is_authoritative=bool(is_authoritative),
     )
     session.add(memory)
 
@@ -352,7 +389,8 @@ def record(type, title, content, tags, project):
         _link_memory_to_project(session, memory, project)
 
     session.commit()
-    click.echo(f"Recorded [{type}] {title} (id: {memory.id[:8]}...)")
+    pin_tag = " [pinned]" if is_authoritative else ""
+    click.echo(f"Recorded [{type}] {title}{pin_tag} (id: {memory.id[:8]}...)")
     if tag_list:
         click.echo(f"  Tags: {', '.join(tag_list)}")
     click.echo(f"  Confidence: {gate.initial_confidence:.0%} | Quality: {gate.quality_score:.1f}/5")
@@ -1084,7 +1122,19 @@ def brief(project, task, budget, full, fmt):
     Wraps the smart router (default) or the full briefing engine (``--full``).
     The hook layer calls this on SessionStart and UserPromptSubmit with
     ``--format compact --budget 200..300``; humans usually want the default.
+
+    Honours ``MEMEE_QUIET=1`` (master kill switch, v2.2.1): when set we
+    print nothing and exit cleanly. Hooks fire on every prompt regardless
+    of whether the conversation has anything to do with the user's
+    knowledge base; ``MEMEE_QUIET`` is the user's "not now" channel.
     """
+    import os
+    if os.environ.get("MEMEE_QUIET"):
+        # Cross-context shield: stay silent. Hook output is empty so the
+        # agent's context isn't contaminated with Memee directives in
+        # conversations that have nothing to do with Memee.
+        return
+
     from memee.storage.database import get_session, init_db
 
     session = get_session(init_db())
@@ -1097,12 +1147,20 @@ def brief(project, task, budget, full, fmt):
 
     try:
         if full:
+            # Full briefing: no token budget, no prepends, no footer.
+            # This is the human-facing path (`memee brief --full`); the
+            # hook layer always uses compact format. v2.2.2 fixed F1: the
+            # full branch's result was being overwritten by the smart
+            # router output below. Return the full briefing immediately.
             from memee.engine.briefing import briefing
             result = briefing(
                 session, abs_path,
                 task_description=task,
                 compact=(fmt == "compact"),
             )
+            click.echo(result)
+            return
+
         # Build prepends FIRST so the compact path can subtract their
         # tokens from the budget — otherwise the prepend chain pushes
         # the final output over the user's budget. v2.1.0 had this bug:
@@ -1147,6 +1205,134 @@ def brief(project, task, budget, full, fmt):
         result = f"{prefix}\n\n{result}" if result else prefix
 
     click.echo(result)
+
+    # v2.4.1: persist the briefing to the archive
+    # (~/.memee/briefs/<ts>.md) so the menubar miniapp's
+    # "Open last brief" action shows real content and an operator can
+    # `cat` recent briefings. Best-effort: failure is silent —
+    # archiving is decorative.
+    try:
+        from memee.bar.briefs import write_brief
+
+        write_brief(task=task, body=result or "", project=abs_path)
+    except Exception:
+        pass
+
+    # v2.3.0: stamp the bar state file so the menubar miniapp (when
+    # running) reflects the brief that just fired. Best-effort: any
+    # failure here is silently swallowed inside `record_brief` — the
+    # briefing already landed and the state stamp is decorative.
+    try:
+        from memee.bar.state import record_brief
+        # Conservative tallies. Bullet/token counts are coarse — the
+        # popover shows "what just happened" magnitude, not precise stats.
+        bullets = sum(
+            1 for line in (result or "").splitlines() if line.strip()
+        )
+        tokens = max(0, len(result or "") // 4)
+        # Lightweight totals so the popover can show canon-size without
+        # the miniapp opening its own SQLAlchemy session. Avoid an extra
+        # query path here: reuse the open session.
+        from memee.storage.models import (
+            AntiPattern, MaturityLevel, Memory,
+        )
+        from sqlalchemy import func
+        totals: dict[str, int] = {}
+        try:
+            totals["memories"] = (
+                session.query(func.count(Memory.id)).scalar() or 0
+            )
+            totals["canon"] = (
+                session.query(func.count(Memory.id))
+                .filter(Memory.maturity == MaturityLevel.CANON.value)
+                .scalar() or 0
+            )
+            totals["validated"] = (
+                session.query(func.count(Memory.id))
+                .filter(Memory.maturity == MaturityLevel.VALIDATED.value)
+                .scalar() or 0
+            )
+            totals["critical_warnings"] = (
+                session.query(func.count(Memory.id))
+                .join(AntiPattern, AntiPattern.memory_id == Memory.id)
+                .filter(
+                    AntiPattern.severity == "critical",
+                    Memory.maturity != MaturityLevel.DEPRECATED.value,
+                ).scalar() or 0
+            )
+        except Exception:
+            totals = {}
+
+        # v2.4.4: 7-day rolling impact + update notice for the bar.
+        # Both are best-effort — broken impact summary or PyPI fetch
+        # failure must NEVER affect the brief output the agent saw.
+        impact_summary: dict[str, int] = {}
+        try:
+            from datetime import datetime, timedelta, timezone
+            from memee.engine.impact import get_impact_summary
+            from memee.storage.models import (
+                ImpactEvent, ProjectMemory,
+            )
+            full = get_impact_summary(session)
+            # The whole-history aggregates over-report on long-running
+            # DBs (5-year-old org saying "147 mistakes avoided" feels
+            # wrong on a Tuesday). Roll forward 7 days for the bar.
+            since = datetime.now(timezone.utc) - timedelta(days=7)
+            recent_impacts = (
+                session.query(func.count(ImpactEvent.id))
+                .filter(ImpactEvent.recorded_at >= since)
+                .scalar() or 0
+            )
+            recent_avoidances = (
+                session.query(func.count(ProjectMemory.memory_id))
+                .filter(ProjectMemory.applied.is_(True))
+                .filter(ProjectMemory.outcome == "avoided")
+                .filter(ProjectMemory.outcome_evidence_type.isnot(None))
+                .filter(ProjectMemory.applied_at >= since)
+                .scalar() or 0
+            )
+            impact_summary = {
+                "mistakes_avoided": int(recent_avoidances),
+                "patterns_applied": int(recent_impacts),
+                # canon_growth_7d: count of canon-tier memories whose
+                # last_validated_at is within the window. Approximates
+                # "canon that matured this week".
+                "canon_growth_7d": int(
+                    session.query(func.count(Memory.id))
+                    .filter(Memory.maturity == MaturityLevel.CANON.value)
+                    .filter(Memory.last_validated_at >= since)
+                    .scalar() or 0
+                ),
+                "totals_all_time": {
+                    "mistakes_avoided": int(full.get("mistakes_avoided") or 0),
+                    "time_saved_minutes": int(full.get("total_time_saved") or 0),
+                },
+            }
+        except Exception:
+            impact_summary = {}
+
+        update_status: dict = {}
+        try:
+            from memee.update_check import check as _check_update
+            us = _check_update()
+            update_status = {
+                "available": bool(us.available),
+                "current": us.current or "",
+                "latest": us.latest or "",
+                "checked_at": us.checked_at.isoformat() if us.checked_at else "",
+            }
+        except Exception:
+            update_status = {}
+
+        record_brief(
+            project=abs_path, task=task,
+            bullets=bullets, tokens=tokens,
+            totals=totals or None,
+            impact=impact_summary or None,
+            update=update_status or None,
+        )
+    except Exception:
+        pass
 
 
 def _gather_prepends(project_path: str | None = None) -> list[str]:
@@ -1273,14 +1459,15 @@ def _to_compact(
     from the router (``⚠``, ``✓``, ``[SEV]``) survive — they're already
     short and signal severity at a glance.
 
-    Citation footer (``---\\nCite Memee canon …``) is appended after
-    trimming so the agent always sees the cite contract; the footer is
-    capped to ≤200 tokens by spec, well under any realistic budget.
+    Citation footer (``---\\nMemee context above. Inspect any memory with
+    `memee cite <id-prefix>`.``) is appended after trimming when bullets
+    actually fired and ``MEMEE_QUIET`` / ``MEMEE_NO_FOOTER`` are unset.
+    Without bullets the footer has nothing to point at and is suppressed.
 
     If the trimmed output still exceeds the budget, lines are dropped from
-    the tail until it fits or only one line remains. The citation footer
-    is preserved at the cost of bullets — it's the load-bearing
-    instruction; bullets without a cite contract are decoration.
+    the tail until it fits or only one line remains. The footer is
+    appended last and dropped before bullets if even the footer would
+    overrun the budget.
     """
     if not raw and not pinned_prefix:
         return ""
@@ -1300,8 +1487,13 @@ def _to_compact(
         if len(bullets) >= 7:
             break
 
+    # v2.2.1: footer is now optional — None when MEMEE_QUIET / MEMEE_NO_FOOTER
+    # is set, or when no bullets fired. The footer's job is to point at the
+    # context above; without bullets it has nothing to point at.
     footer = get_citation_footer()
-    footer_tokens = count_tokens(footer)
+    if not bullets and not pinned_prefix:
+        footer = None
+    footer_tokens = count_tokens(footer) if footer else 0
     # Pinned receipts (digest / session-summary / update notice) burn
     # budget too. Subtract their token cost from the bullet budget so the
     # final output respects whatever the hook layer asked for. Receipts
@@ -1309,12 +1501,11 @@ def _to_compact(
     # receipts last (they're the load-bearing "Memee did something"
     # signal, the user came back to the conversation for them).
     prefix_tokens = count_tokens(pinned_prefix) if pinned_prefix else 0
-    # The hook layer ships at budget=200..300 where the footer is well
-    # under the ceiling. If the caller passed a budget so small the
-    # footer alone would blow it, drop the footer rather than the bullets
-    # (callers running at budget≪footer aren't shipping to a session
-    # hook — they're tests or ad-hoc trims).
-    include_footer = (budget - prefix_tokens) >= footer_tokens
+    # If the caller passed a budget so small the footer alone would blow
+    # it, drop the footer rather than the bullets (callers running at
+    # budget≪footer aren't shipping to a session hook — they're tests or
+    # ad-hoc trims).
+    include_footer = footer is not None and (budget - prefix_tokens) >= footer_tokens
     bullet_budget = budget - prefix_tokens - (footer_tokens if include_footer else 0)
     if bullet_budget < 0:
         # Receipts alone overrun the budget — the user asked for something
@@ -1322,7 +1513,7 @@ def _to_compact(
         # signal), drop the bullets entirely. Footer pinned only if any
         # headroom remains after receipts.
         bullets = []
-        include_footer = (budget - prefix_tokens) >= footer_tokens
+        include_footer = footer is not None and (budget - prefix_tokens) >= footer_tokens
     else:
         while bullets and count_tokens("\n".join(bullets)) > bullet_budget:
             if len(bullets) == 1 and not pinned_prefix:
@@ -1437,9 +1628,16 @@ def learn(auto, project, diff_text, outcome, agent, model, as_json):
 
     Manual mode (without ``--auto``) is for humans / scripts that want to
     explicitly drive the review against a chosen diff.
+
+    Honours ``MEMEE_QUIET=1`` in --auto mode: prints nothing, exits 0.
+    The Stop hook fires regardless of whether the conversation involved
+    Memee at all; ``MEMEE_QUIET`` is the cross-context shield.
     """
     import os as _os
     import subprocess as _sub
+
+    if auto and _os.environ.get("MEMEE_QUIET"):
+        return
 
     # Track the previous session-end marker so the aggregate receipt
     # (M1) can use ``[last_ended_at, now)`` as its window. We read the
@@ -1594,6 +1792,14 @@ def learn(auto, project, diff_text, outcome, agent, model, as_json):
 
         # Silent unless we built at least one of the two lines.
         if not (aggregate or sentence):
+            # v2.3.0: even on a no-op Stop we want the menubar miniapp
+            # to know the hook fired — proves the loop is wired. Best-
+            # effort; never raises out of the hook path.
+            try:
+                from memee.bar.state import record_learn
+                record_learn(auto=True, outcome=result.get("outcome", outcome))
+            except Exception:
+                pass
             return
         if aggregate and sentence:
             click.echo(f"{aggregate}\n{sentence}")
@@ -1601,6 +1807,13 @@ def learn(auto, project, diff_text, outcome, agent, model, as_json):
             click.echo(aggregate)
         else:
             click.echo(sentence)
+        # State stamp on every learn fire (auto or not) so the miniapp's
+        # "last activity" line reflects reality.
+        try:
+            from memee.bar.state import record_learn
+            record_learn(auto=auto, outcome=result.get("outcome", outcome))
+        except Exception:
+            pass
     else:
         click.echo(
             f"Patterns followed: {patterns_followed}\n"
@@ -1608,6 +1821,11 @@ def learn(auto, project, diff_text, outcome, agent, model, as_json):
             f"New patterns: {new_patterns}\n"
             f"Outcome: {result.get('outcome', outcome)}"
         )
+        try:
+            from memee.bar.state import record_learn
+            record_learn(auto=False, outcome=result.get("outcome", outcome))
+        except Exception:
+            pass
 
 
 # ── Stop hook receipt ────────────────────────────────────────────────────
@@ -2471,6 +2689,84 @@ def cite_cmd(hash_or_id, confirm, note, fmt):
             f"{confirm_result['application_count']}."
         )
 
+
+
+# ── v2.3.0: menubar miniapp ─────────────────────────────────────────────
+
+
+@cli.group()
+def bar():
+    """Run the menubar miniapp (macOS-first, opt-in via ``[bar]`` extras).
+
+    The miniapp is a *watching* surface: a small menubar item showing
+    recent activity (last brief, recall counts, canon size) and a few
+    click-actions (open state file, run dream, quit). All writes still
+    go through the CLI / MCP / hooks — the menubar never edits state.
+
+    Install GUI deps with ``pipx install --force 'memee[bar]'`` first.
+    """
+
+
+@bar.command("start")
+def bar_start():
+    """Run the menubar miniapp in the foreground.
+
+    Quit via the menu item or Ctrl-C. For permanent install at login,
+    use ``memee bar install`` which writes a macOS LaunchAgent.
+    """
+    from memee.bar.app import run
+
+    sys.exit(run())
+
+
+@bar.command("install")
+def bar_install():
+    """Install a macOS LaunchAgent so the miniapp autostarts on login.
+
+    Writes ``~/Library/LaunchAgents/cz.memee.bar.plist`` and loads it
+    with ``launchctl bootstrap`` (fall-back to ``launchctl load`` on
+    older systems). Idempotent — re-running overwrites the plist and
+    reloads it.
+    """
+    from memee.bar.launcher import install_launch_agent
+
+    result = install_launch_agent()
+    if result.ok:
+        click.echo(
+            f"  \033[32m✓\033[0m {result.message}\n"
+            f"    \033[2m{result.plist_path}\033[0m"
+        )
+    else:
+        click.echo(f"  \033[31m✗\033[0m {result.message}", err=True)
+        sys.exit(1)
+
+
+@bar.command("uninstall")
+def bar_uninstall():
+    """Remove the LaunchAgent and unload the bar miniapp."""
+    from memee.bar.launcher import uninstall_launch_agent
+
+    result = uninstall_launch_agent()
+    if result.ok:
+        click.echo(f"  \033[32m✓\033[0m {result.message}")
+    else:
+        click.echo(f"  \033[33m!\033[0m {result.message}", err=True)
+
+
+@bar.command("doctor")
+def bar_doctor():
+    """Diagnose the menubar miniapp.
+
+    Checks: platform support, ``rumps`` import, ``watchdog`` import,
+    state file presence / freshness, LaunchAgent install status. Prints
+    one line per check with green/yellow/red glyph.
+    """
+    from memee.bar.doctor import diagnose
+
+    report = diagnose()
+    for line in report["lines"]:
+        click.echo(line)
+    sys.exit(0 if report["ok"] else 1)
 
 
 def main() -> None:

@@ -77,8 +77,14 @@ def memee_hook_definitions() -> dict[str, list[dict]]:
         "UserPromptSubmit": [
             {
                 "type": "command",
+                # v2.2.2: pass --project so per-prompt briefs route against
+                # the right project. SessionStart already passes it; the
+                # asymmetry meant UserPromptSubmit briefs picked whatever
+                # CWD the hook ran in, which is unreliable in nested or
+                # multi-root workflows.
                 "command": (
-                    'memee brief --task "$CLAUDE_USER_PROMPT" '
+                    'memee brief --project "$CLAUDE_PROJECT_DIR" '
+                    '--task "$CLAUDE_USER_PROMPT" '
                     "--budget 200 --format compact"
                 ),
                 MEMEE_MARK: True,
@@ -94,9 +100,43 @@ def memee_hook_definitions() -> dict[str, list[dict]]:
     }
 
 
+# Subcommands Memee writes into hook commands. Used by the pre-marker
+# heuristic in _is_memee_entry so an unmarked pre-v2.0.1 install is still
+# recognised (and replaced) on re-run rather than duplicated alongside the
+# new marked entry. Keep this in sync with memee_hook_definitions() above.
+_MEMEE_KNOWN_HOOK_SUBCOMMANDS = frozenset({"brief", "learn", "pulse", "doctor"})
+
+
 def _is_memee_entry(entry: dict) -> bool:
-    """True if this command dict was written by Memee (has the marker)."""
-    return isinstance(entry, dict) and entry.get(MEMEE_MARK) is True
+    """True if this command dict was written by Memee.
+
+    Two paths:
+
+    1. The explicit marker (``_memee: true``) we've shipped since v2.0.1.
+    2. A pre-v2.0.1 heuristic: the command string starts with ``memee ``
+       (literal, with a trailing space) and the next token is one of our
+       known subcommands (``brief``, ``learn``, ``pulse``, ``doctor``).
+
+    Path 2 is what fixes the v2.4.6 live-install duplicate-hook bug:
+    users who first installed Memee before the marker existed had
+    *unmarked* entries that ``merge_hooks`` couldn't see, so every
+    subsequent ``memee setup`` added a *second* marker'd entry alongside
+    them. Result: each hook event fired the Memee command twice. Catching
+    the unmarked entries here means the next ``setup`` (or
+    ``doctor --fix-hooks``) collapses them into a single marker'd entry.
+    """
+    if not isinstance(entry, dict):
+        return False
+    if entry.get(MEMEE_MARK) is True:
+        return True
+    cmd = entry.get("command")
+    if not isinstance(cmd, str):
+        return False
+    cmd = cmd.strip()
+    if not cmd.startswith("memee "):
+        return False
+    parts = cmd.split(maxsplit=2)
+    return len(parts) >= 2 and parts[1] in _MEMEE_KNOWN_HOOK_SUBCOMMANDS
 
 
 def merge_hooks(
@@ -140,8 +180,13 @@ def merge_hooks(
             hooks_root[f"_{event}_legacy"] = blocks
             blocks = hooks_root[event] = []
 
-        # Try to find an existing Memee block to replace.
-        replaced = False
+        # v2.4.7: scan ALL blocks (not just the first match) and strip
+        # every Memee-shaped entry from every block. Pre-v2.4.7 stopped at
+        # the first hit, which left a *second* unmarked Memee entry — in
+        # a different matcher block — untouched. That second entry is the
+        # exact pre-v2.0.1 duplicate-hook bug the live install hit. After
+        # stripping everywhere, place ONE fresh marker'd block at the end.
+        had_any_memee = False
         for block in blocks:
             if not isinstance(block, dict):
                 continue
@@ -149,20 +194,36 @@ def merge_hooks(
             if not isinstance(inner, list):
                 continue
             if any(_is_memee_entry(e) for e in inner):
-                # Replace just the Memee-marked entries; preserve any
-                # foreign entries the user manually added inside the same
-                # block (rare but possible).
-                block["hooks"] = [e for e in inner if not _is_memee_entry(e)] + list(
-                    mem_entries
-                )
-                # Normalise matcher to "" if absent so Claude Code sees a
-                # well-formed block.
+                had_any_memee = True
+                # Keep foreign entries the user manually added inside the
+                # same block; drop everything we recognise as ours.
+                block["hooks"] = [
+                    e for e in inner if not _is_memee_entry(e)
+                ]
+                # Normalise matcher so Claude Code sees a well-formed block.
                 block.setdefault("matcher", "")
-                replaced = True
-                break
 
-        if not replaced:
-            blocks.append({"matcher": "", "hooks": list(mem_entries)})
+        # Always append a single fresh marker'd Memee block. If
+        # ``had_any_memee`` is True we just stripped the old entries above;
+        # if False this is a fresh install. Either way one block goes in.
+        blocks.append({"matcher": "", "hooks": list(mem_entries)})
+        # Silence the unused-variable lint without obscuring intent.
+        del had_any_memee
+
+        # Sweep: drop blocks whose inner ``hooks`` list is empty. This
+        # happens when the only entries in a block were unmarked Memee
+        # entries that the heuristic above identified and stripped (the
+        # replace branch produces a fresh marker'd list, but a block whose
+        # ``hooks`` list got emptied via some other path would otherwise
+        # leave a stale ``{"matcher": "", "hooks": []}`` skeleton behind).
+        hooks_root[event] = [
+            block for block in blocks
+            if not (
+                isinstance(block, dict)
+                and isinstance(block.get("hooks"), list)
+                and len(block["hooks"]) == 0
+            )
+        ]
 
     return config
 

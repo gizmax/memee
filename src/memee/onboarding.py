@@ -122,18 +122,55 @@ def _parse_iso(s: object) -> datetime | None:
 
 
 def _resolve_project(project_path: str | None) -> str:
-    """Resolve a project path to an absolute string. ``Path.cwd()`` when
-    None. ``Path.resolve(strict=False)`` to handle paths the agent may
-    have referenced before the directory exists locally."""
-    if project_path is None:
+    """Resolve a project path to an absolute string.
+
+    Resolution chain (v2.2.2 fix for F4):
+
+      1. Explicit ``project_path`` arg if given
+      2. ``$CLAUDE_PROJECT_DIR`` env var (Claude Code provides it)
+      3. ``git rev-parse --show-toplevel`` from CWD (2s timeout)
+      4. ``Path.cwd()`` (last resort)
+
+    Before this fix, running ``memee setup`` from ``~`` keyed the
+    onboarding marker off ``~`` and the first-week arc never fired in
+    the user's actual project. The fix is shared by every consumer of
+    project resolution (setup, briefing prepends, onboarding stages).
+    """
+    if project_path:
         try:
-            return str(Path.cwd().resolve(strict=False))
+            return str(Path(project_path).resolve(strict=False))
         except OSError:
-            return str(Path.cwd())
+            return str(project_path)
+
+    env_path = os.environ.get("CLAUDE_PROJECT_DIR")
+    if env_path:
+        try:
+            return str(Path(env_path).resolve(strict=False))
+        except OSError:
+            return env_path
+
     try:
-        return str(Path(project_path).resolve(strict=False))
+        import subprocess
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+        )
+        if proc.returncode == 0:
+            top = proc.stdout.strip()
+            if top:
+                try:
+                    return str(Path(top).resolve(strict=False))
+                except OSError:
+                    return top
+    except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    try:
+        return str(Path.cwd().resolve(strict=False))
     except OSError:
-        return str(project_path)
+        return str(Path.cwd())
 
 
 def _evict_lru_if_needed(by_project: dict) -> None:
@@ -162,18 +199,50 @@ def _evict_lru_if_needed(by_project: dict) -> None:
 # ── DB helpers ──────────────────────────────────────────────────────────────
 
 
-def _query_latest_memory_title(session) -> str | None:
-    """Return the title of the most recently created memory, or None.
+def _query_latest_memory_title(
+    session, abs_project_path: str | None = None
+) -> tuple[str | None, bool]:
+    """Return the title of the most recently created memory.
 
-    The query is intentionally broad (no project filter): Memee's OSS
-    schema doesn't tie memories to a project FK directly, and stage 2
-    is the user's *first* memory anywhere — telling them "Memee learned
-    X" right after they recorded X is the whole point. False positives
-    (a memory recorded in a different project) are acceptable: it still
-    proves Memee is alive and listening.
+    Returns ``(title, scoped_to_project)``. ``scoped_to_project`` is
+    True when the title belongs to a memory linked to
+    ``abs_project_path``; False when no project memories exist and the
+    fallback global query found a memory belonging to a different
+    project.
+
+    v2.2.2 (F5): the first version queried globally regardless of
+    project, which meant a consultant working in repo B would see stage
+    2 receipts naming a memory recorded in repo A. Now we prefer
+    project-scoped queries via the ``ProjectMemory`` link and fall
+    back to a global query only when no project-scoped memories exist.
+    The caller can append "(from another project)" when the fallback
+    was used so the receipt stays honest.
     """
-    from memee.storage.models import Memory
+    from memee.storage.models import Memory, Project, ProjectMemory
 
+    if abs_project_path:
+        proj = (
+            session.query(Project)
+            .filter(Project.path == abs_project_path)
+            .first()
+        )
+        if proj is not None:
+            mem = (
+                session.query(Memory)
+                .join(ProjectMemory, ProjectMemory.memory_id == Memory.id)
+                .filter(ProjectMemory.project_id == proj.id)
+                .order_by(Memory.created_at.desc())
+                .limit(1)
+                .first()
+            )
+            if mem is not None:
+                title = getattr(mem, "title", None)
+                if isinstance(title, str) and title.strip():
+                    return (title.strip(), True)
+
+    # Fall back to the global query so a fresh project that hasn't yet
+    # recorded its first memory still gets *some* signal from a sibling
+    # project — but flag it so the renderer can be honest about origin.
     mem = (
         session.query(Memory)
         .order_by(Memory.created_at.desc())
@@ -181,18 +250,49 @@ def _query_latest_memory_title(session) -> str | None:
         .first()
     )
     if mem is None:
-        return None
+        return (None, False)
     title = getattr(mem, "title", None)
     if not isinstance(title, str) or not title.strip():
-        return None
-    return title.strip()
+        return (None, False)
+    return (title.strip(), False)
 
 
-def _query_latest_reuse_title(session) -> str | None:
+def _query_latest_reuse_title(
+    session, abs_project_path: str | None = None
+) -> tuple[str | None, bool]:
     """Return the title of the memory referenced by the most recent
-    KNOWLEDGE_REUSED ImpactEvent, or None."""
+    KNOWLEDGE_REUSED ImpactEvent.
+
+    Returns ``(title, scoped_to_project)``. v2.2.2 (F5): mirrors
+    ``_query_latest_memory_title`` — prefer project-scoped events,
+    fall back to global, flag origin so the caller can be honest.
+    """
     from memee.engine.impact import ImpactEvent, ImpactType
-    from memee.storage.models import Memory
+    from memee.storage.models import Memory, Project
+
+    if abs_project_path:
+        proj = (
+            session.query(Project)
+            .filter(Project.path == abs_project_path)
+            .first()
+        )
+        if proj is not None:
+            event = (
+                session.query(ImpactEvent)
+                .filter(
+                    ImpactEvent.impact_type == ImpactType.KNOWLEDGE_REUSED.value,
+                    ImpactEvent.project_id == proj.id,
+                )
+                .order_by(ImpactEvent.created_at.desc())
+                .limit(1)
+                .first()
+            )
+            if event is not None and event.memory_id:
+                mem = session.get(Memory, event.memory_id)
+                if mem is not None:
+                    title = getattr(mem, "title", None)
+                    if isinstance(title, str) and title.strip():
+                        return (title.strip(), True)
 
     event = (
         session.query(ImpactEvent)
@@ -202,14 +302,14 @@ def _query_latest_reuse_title(session) -> str | None:
         .first()
     )
     if event is None:
-        return None
+        return (None, False)
     mem = session.get(Memory, event.memory_id) if event.memory_id else None
     if mem is None:
-        return None
+        return (None, False)
     title = getattr(mem, "title", None)
     if not isinstance(title, str) or not title.strip():
-        return None
-    return title.strip()
+        return (None, False)
+    return (title.strip(), False)
 
 
 def _has_any_memory(session) -> bool:
@@ -245,7 +345,7 @@ def mark_setup_complete(project_path: str | None = None) -> None:
     re-setup of an already-marked project is a no-op (we don't reset
     progress). Every error swallowed.
     """
-    if os.environ.get("MEMEE_NO_ONBOARDING"):
+    if os.environ.get("MEMEE_QUIET") or os.environ.get("MEMEE_NO_ONBOARDING"):
         return
     try:
         abs_path = _resolve_project(project_path)
@@ -313,7 +413,7 @@ def format_onboarding_notice(project_path: str | None = None) -> str | None:
     landed. No "skip" — the user always sees the next milestone they
     actually hit.
     """
-    if os.environ.get("MEMEE_NO_ONBOARDING"):
+    if os.environ.get("MEMEE_QUIET") or os.environ.get("MEMEE_NO_ONBOARDING"):
         return None
     try:
         return _format_onboarding_notice_inner(project_path)
@@ -379,55 +479,49 @@ def _format_onboarding_notice_inner(project_path: str | None) -> str | None:
         # ── Stage 2 active: memory recorded, reuse not yet seen.
         #    Check if a reuse has just landed; if so, advance to stage
         #    3 and render the reuse message.
+        #    v2.2.2 (F5): query project-scoped first; fall back to
+        #    global with a "(from another project)" suffix so the
+        #    receipt is honest about origin.
         if first_memory_seen is not None:
             if _has_any_reuse(session):
-                title = _query_latest_reuse_title(session)
+                title, scoped = _query_latest_reuse_title(session, abs_path)
                 if title:
                     entry["first_reuse_seen"] = now_iso
-                    # Stage 3 fires once and the arc ends. We do NOT
-                    # mark ``completed`` here — that happens on the
-                    # *next* read (so we render stage 3 exactly once,
-                    # then return None forever after).
                     _save_entry(marker, abs_path, entry)
+                    suffix = "" if scoped else " (from another project)"
                     return (
-                        f'Memee reused "{title}" — first time it '
+                        f'Memee reused "{title}"{suffix} — first time it '
                         f"saved you a re-explain."
                     )
-                # No memory found behind the reuse event (race or
-                # corruption) — fall through to stage 2 message.
             # No reuse yet — render stage 2 with the latest memory
             # title. We re-query each session so the title stays
             # current with whatever the user just recorded.
-            title = _query_latest_memory_title(session)
+            title, scoped = _query_latest_memory_title(session, abs_path)
             if title:
-                return f'Memee learned "{title}" from this session.'
-            # Memory got deleted between record and now; degrade to
-            # stage 1 silently.
+                suffix = "" if scoped else " (from another project)"
+                return f'Memee learned "{title}"{suffix} from this session.'
             return "Memee is listening. No memories yet."
 
         # ── Stage 1 active: no memory yet recorded for this project.
-        #    Check if memories exist NOW — if so, advance atomically to
-        #    stage 2 and render the stage 2 message.
         if _has_any_memory(session):
-            title = _query_latest_memory_title(session)
+            title, scoped = _query_latest_memory_title(session, abs_path)
             if title:
                 entry["first_memory_seen"] = now_iso
-                # If a reuse has ALSO already landed (rare but
-                # possible — bulk import + replay of a session), jump
-                # straight to stage 3.
                 if _has_any_reuse(session):
-                    reuse_title = _query_latest_reuse_title(session)
+                    reuse_title, reuse_scoped = _query_latest_reuse_title(
+                        session, abs_path
+                    )
                     if reuse_title:
                         entry["first_reuse_seen"] = now_iso
                         _save_entry(marker, abs_path, entry)
+                        suffix = "" if reuse_scoped else " (from another project)"
                         return (
-                            f'Memee reused "{reuse_title}" — first '
+                            f'Memee reused "{reuse_title}"{suffix} — first '
                             f"time it saved you a re-explain."
                         )
                 _save_entry(marker, abs_path, entry)
-                return f'Memee learned "{title}" from this session.'
-            # has_any returned True but title query returned None
-            # (race) — fall back to stage 1.
+                suffix = "" if scoped else " (from another project)"
+                return f'Memee learned "{title}"{suffix} from this session.'
 
         return "Memee is listening. No memories yet."
     finally:
@@ -448,7 +542,7 @@ def is_onboarding_active(project_path: str | None = None) -> bool:
 
     Errors swallowed → False.
     """
-    if os.environ.get("MEMEE_NO_ONBOARDING"):
+    if os.environ.get("MEMEE_QUIET") or os.environ.get("MEMEE_NO_ONBOARDING"):
         return False
     try:
         abs_path = _resolve_project(project_path)

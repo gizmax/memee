@@ -1430,11 +1430,13 @@ body::before { display: none; }
         <span><span class="dot"></span>Shared memory for AI agent teams</span>
         <span>
           <span class="mark">·</span>
-          <a href="https://github.com/gizmax/memee/releases/latest" rel="external">v2.0.0 on GitHub</a>
+          <a href="https://github.com/gizmax/memee/releases/latest" rel="external">v2.4.7 on GitHub</a>
           <span class="mark">·</span>
           <a href="/packs/">5 packs · 306 entries</a>
           <span class="mark">·</span>
           <a href="https://pypi.org/project/memee/" rel="external">PyPI</a>
+          <span class="mark">·</span>
+          <span>Menubar app · macOS</span>
         </span>
       </div>
 
@@ -1503,6 +1505,13 @@ body::before { display: none; }
           <h3>One canon, <strong>every model.</strong></h3>
           <p class="benefit">Claude, GPT, Gemini, Llama all write to and read from the same memory. One model&rsquo;s claim is provisional. A second family confirms: confidence &times;1.3. A second project re-uses: &times;1.5. Combined: &times;1.95. Nothing reaches canon on a single voice.</p>
           <div class="proof"><span>Model families, one canon</span><strong>4</strong></div>
+        </article>
+
+        <article class="usp reveal">
+          <span class="num">04 · Pins</span>
+          <h3>Some policies <strong>shouldn&rsquo;t lose to vibes.</strong></h3>
+          <p class="benefit">Mark a policy authoritative. It surfaces under <code>Pinned policies in scope:</code> in every briefing whose tags overlap &mdash; ahead of search, regardless of similarity score. The org rule outranks the conversational hit. <code>memee record --pin</code>.</p>
+          <div class="proof"><span>Layer 0.5, capped bullets</span><strong>5</strong></div>
         </article>
       </div>
     </section>
@@ -1739,6 +1748,58 @@ body::before { display: none; }
       </div>
     </section>
 
+    <!-- S5c MENUBAR — earned visibility (v2.3.0 + v2.4.4) -->
+    <section class="flatplan shell" id="bar">
+      <div class="flatplan-head">
+        <h2 class="display reveal">A light in the menubar. <em>Nothing else.</em></h2>
+        <p class="lede reveal">Memee&rsquo;s first GUI is one dot in your macOS menubar. It tells you Memee is awake. It tells you what it did. It writes nothing.</p>
+      </div>
+
+      <div class="flatplan-grid">
+        <article class="flatplan-card reveal">
+          <div class="n">01 · State, not noise</div>
+          <h3>Four lines. Read-only.</h3>
+          <p>Status, last brief, last learn, totals. No notifications, no badges, no popups. The bar reads what the hooks wrote. <em>memee bar install</em> wires it as a LaunchAgent.</p>
+        </article>
+        <article class="flatplan-card reveal">
+          <div class="n">02 · How Memee helped, 7 days</div>
+          <h3>Earned silence. Per counter.</h3>
+          <p>One rolling line: <em>3 mistakes avoided &middot; 42 patterns applied &middot; +2 canon this week.</em> Zero counters drop out. Zero across the board hides the row.</p>
+        </article>
+        <article class="flatplan-card reveal">
+          <div class="n">03 · Update notice, when there&rsquo;s one</div>
+          <h3>No popups. No nags.</h3>
+          <p>A line appears when a newer PyPI release exists. Click opens the release notes. Hidden when you&rsquo;re current. 24h cache, zero new network calls on the hot path.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- S5d CANON FALSIFIABILITY — Layer 0.7 + FSRS + SPRT (v2.4.0/1/2/5) -->
+    <section class="flatplan shell" id="recheck">
+      <div class="flatplan-head">
+        <h2 class="display reveal">Canon is <em>not</em> unfalsifiable.</h2>
+        <p class="lede reveal">A rule promoted two years ago is a candidate for being wrong today. Memee schedules its own re-checks. Per memory. Per half-life.</p>
+      </div>
+
+      <div class="flatplan-grid">
+        <article class="flatplan-card reveal">
+          <div class="n">01 · Half-life per row</div>
+          <h3>FSRS-light decay.</h3>
+          <p>Every memory carries a predicted recall <code>R(t) = 2^(-&Delta;t/h)</code>. Validate it under load, the half-life stretches. Skip it, it shrinks. Anki&rsquo;s scheduler, applied to canon.</p>
+        </article>
+        <article class="flatplan-card reveal">
+          <div class="n">02 · Re-checking canon</div>
+          <h3>One line. Sometimes.</h3>
+          <p>When a wide-uncertainty canon row gets stale, Memee adds <em>Re-checking canon: &lt;title&gt;</em> to the briefing. A quiet flag, not a directive. Per-week, not per-prompt.</p>
+        </article>
+        <article class="flatplan-card reveal">
+          <div class="n">03 · SPRT promotion</div>
+          <h3>Wald&rsquo;s test, not a magic number.</h3>
+          <p>Canon used to require <code>conf &ge; 0.85</code> and ten validations. v2.4.2 replaces both with the Sequential Probability Ratio Test at &alpha; = &beta; = 0.05. One statistical dial; tighter Type-I.</p>
+        </article>
+      </div>
+    </section>
+
     <!-- S6 COMPARE — Memee against the memory landscape -->
     <section class="compare shell" id="compare">
       <div class="compare-head">
@@ -1756,6 +1817,7 @@ body::before { display: none; }
               <th>Cross-team</th>
               <th>Auto-capture</th>
               <th>Aging / lifecycle</th>
+              <th>Re-checks itself</th>
               <th>Licence</th>
             </tr>
           </thead>
@@ -1767,6 +1829,7 @@ body::before { display: none; }
               <td>Yes. Team / org scope</td>
               <td>Both. Quality gate</td>
               <td>Confidence + 60-day archive</td>
+              <td>Yes. FSRS-light decay, SPRT promotion</td>
               <td>MIT (OSS) / EULA (Team)</td>
             </tr>
             <tr class="crow">
@@ -1776,6 +1839,7 @@ body::before { display: none; }
               <td>No. Static files</td>
               <td>No. Author-written</td>
               <td>None. Files don&rsquo;t decay</td>
+              <td>No</td>
               <td>Free with Claude</td>
             </tr>
             <tr class="crow">
@@ -1785,6 +1849,7 @@ body::before { display: none; }
               <td>Cloud tier</td>
               <td>Auto-extract from chat</td>
               <td>Not documented</td>
+              <td>No</td>
               <td>Apache 2.0 + cloud from $19</td>
             </tr>
             <tr class="crow">
@@ -1794,6 +1859,7 @@ body::before { display: none; }
               <td>Not advertised</td>
               <td>Auto via agent loop</td>
               <td>Three-tier virtual memory</td>
+              <td>No</td>
               <td>Apache 2.0 + cloud from $20</td>
             </tr>
             <tr class="crow">
@@ -1803,6 +1869,7 @@ body::before { display: none; }
               <td>Roles via API</td>
               <td>Auto from episodes</td>
               <td>Temporal graph</td>
+              <td>Temporal edges only</td>
               <td>Graphiti Apache 2.0. Cloud from $25</td>
             </tr>
             <tr class="crow">
@@ -1811,6 +1878,7 @@ body::before { display: none; }
               <td>Project containers. Isolated</td>
               <td>No. Per-user only</td>
               <td>Both</td>
+              <td>Not published</td>
               <td>Not published</td>
               <td>Bundled with Plus / Team</td>
             </tr>
@@ -1821,6 +1889,7 @@ body::before { display: none; }
               <td>No</td>
               <td>Both. Agent-curated</td>
               <td>Not documented</td>
+              <td>No</td>
               <td>MIT</td>
             </tr>
           </tbody>
@@ -1903,7 +1972,7 @@ body::before { display: none; }
           <div class="q">Q3</div>
           <h3>How is this different from Mem0, Letta, Zep, ChatGPT memory?</h3>
           <p>Most memory projects remember <em>conversations</em>: you talked about X last Tuesday, here it is again. That&rsquo;s chat history with a vector index.</p>
-          <p>Memee earns <em>canon</em>. A claim arrives at 0.5 confidence and goes nowhere until a second model family agrees and a second project re-uses it. On OrgMemEval v1.0 that capability gap shows up as <strong>92.3&nbsp;%</strong> against a competitor baseline of <strong>~2&nbsp;%</strong>. Not because the others are bad. Because they aren&rsquo;t built for the job.</p>
+          <p>Memee earns <em>canon</em>. A claim arrives at 0.5 confidence and goes nowhere until a second model family agrees and a second project re-uses it. On OrgMemEval v1.0 that capability gap shows up as <strong>96.3&nbsp;%</strong> against a competitor baseline of <strong>~2&nbsp;%</strong>. Not because the others are bad. Because they aren&rsquo;t built for the job.</p>
           <p class="kicker-line">Conversation memory remembers what was said. Institutional memory remembers what was learned.</p>
         </article>
 

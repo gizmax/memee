@@ -20,12 +20,21 @@ Measures EVERYTHING:
 Run: pytest tests/test_gigacorp.py -v -s
 """
 
+import os
 import random
 import time
 from collections import defaultdict
 
-import pytest
-from sqlalchemy import func
+# v2.4.4: disable per-search telemetry writes for the entire suite.
+# Gigacorp runs ~50 000 simulated searches × per-call SQLAlchemy
+# flush-and-commit on the telemetry row pushed wall time past 5 min
+# on Python 3.14 — the "hang" release_process.md documented. The
+# test measures throughput, accuracy, ROI — not the search event
+# log. Set BEFORE any memee import.
+os.environ.setdefault("MEMEE_TELEMETRY", "0")
+
+import pytest  # noqa: E402
+from sqlalchemy import func  # noqa: E402
 
 from memee.engine.confidence import update_confidence
 from memee.engine.dream import run_dream_cycle

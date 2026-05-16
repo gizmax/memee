@@ -270,6 +270,63 @@ def _setup_solo():
         session.add(proj)
         session.commit()
 
+    # ── v2.2.5: Auto-install a starter seed pack ──
+    #
+    # The empty-DB friction shows up repeatedly in competitor issues
+    # (Cognee, Mem0): users hit `record`/`search` on day 1, see nothing,
+    # and uninstall. Memee ships hand-curated `.memee` packs precisely
+    # to seed the value, but until v2.2.4 the wizard never installed
+    # them — the user had to know about `memee pack install` and pick a
+    # pack. Pick one based on the stack they just chose. Skipped in
+    # dry-run so the wizard stays honest about side effects.
+    #
+    # ``dry_run`` is normally read below where the AI-tool configuration
+    # runs; pull it forward so the seed-pack install respects --dry-run too.
+    _setup_dry_run = bool(SETUP_FLAGS.get("dry_run"))
+    seeded_canons: list[str] = []
+    seed_pack_name = _stack_to_seed_pack(stack)
+    if seed_pack_name and not _setup_dry_run:
+        try:
+            from memee.engine.packs import install_pack, resolve_seed_pack
+
+            pack_path = resolve_seed_pack(seed_pack_name)
+            if pack_path is not None:
+                result = install_pack(session, pack_path, allow_unsigned=True)
+                # Pull the top 3 canon titles for the success receipt —
+                # concrete proof the DB isn't empty.
+                if not result.no_op:
+                    from memee.storage.models import (
+                        MaturityLevel, Memory, MemoryType,
+                    )
+                    # Receipt shows PATTERNS only — the positive-framing
+                    # subset. Anti-pattern titles read as warnings even
+                    # after the v2.2.3 declarative rewrite, and a
+                    # "Seed patterns loaded:" block stacked with warnings
+                    # undercuts the receipt's reassuring tone. Most
+                    # seed-pack patterns ship as ``maturity=validated``
+                    # (canon is reserved for hand-promoted rows), so the
+                    # filter accepts both tiers and trusts the seed's
+                    # quality gate to have done the curation.
+                    rows = (
+                        session.query(Memory.title)
+                        .filter(
+                            Memory.type == MemoryType.PATTERN.value,
+                            Memory.maturity.in_(
+                                [MaturityLevel.CANON.value,
+                                 MaturityLevel.VALIDATED.value]
+                            ),
+                        )
+                        .order_by(Memory.confidence_score.desc())
+                        .limit(3)
+                        .all()
+                    )
+                    seeded_canons = [r[0] for r in rows]
+        except Exception:
+            # Best-effort: never let a pack install failure fail the
+            # wizard. The user can run `memee pack install <name>`
+            # explicitly afterwards if it didn't take.
+            pass
+
     # ── Auto-configure AI tools ──
     _section("CONFIGURING AI TOOLS")
 
@@ -347,19 +404,29 @@ def _setup_solo():
     # fire automatically anyway, so the marker would just sit unused.
     # Best-effort: any error swallowed inside ``mark_setup_complete``;
     # the wizard never fails on an onboarding marker IO error.
+    #
+    # v2.2.2 (F4): pass ``None`` so ``mark_setup_complete`` runs the
+    # full project-resolution chain ($CLAUDE_PROJECT_DIR → git toplevel
+    # → cwd). Before, the wizard always passed ``str(Path.cwd())``,
+    # which keyed the marker off ``~`` when setup was launched from
+    # home — and the arc never fired in the user's real project.
     if hooked_tools and not dry_run:
         try:
             from memee.onboarding import mark_setup_complete
 
-            mark_setup_complete(str(Path.cwd()))
+            mark_setup_complete(None)
         except Exception:
             pass
 
     tools_str = ", ".join(configured_tools) if configured_tools else "none (run memee doctor later)"
 
     # ── Success ──
+    #
+    # v2.2.5: the receipt screen now reinforces what Memee is *not*:
+    # cloud, paid-per-call, or service-dependent. Each line is declarative
+    # state (content policy rule 1) — never an instruction at the agent.
     print()
-    _box([
+    receipt_lines = [
         f"{C.BGREEN}✓ Memee is ready!{C.RESET}",
         "",
         "  Database:  ~/.memee/memee.db",
@@ -368,7 +435,21 @@ def _setup_solo():
         f"  Models:    {', '.join(models)}",
         f"  Tools:     {tools_str}",
         "  Scope:     personal (free tier)",
-    ], color=C.GREEN, width=55)
+    ]
+    if seeded_canons:
+        receipt_lines.append("")
+        receipt_lines.append(
+            f"  {C.BOLD}Seed patterns loaded:{C.RESET}"
+        )
+        for title in seeded_canons:
+            # Trim for box width.
+            short = title if len(title) <= 44 else title[:41] + "..."
+            receipt_lines.append(f"    • {short}")
+    receipt_lines.extend([
+        "",
+        f"  {C.DIM}0 API calls. 0 cents spent. No account.{C.RESET}",
+    ])
+    _box(receipt_lines, color=C.GREEN, width=55)
 
     # ── You're done. Say so clearly. ──
     _section("YOU'RE DONE")
@@ -466,6 +547,32 @@ def _setup_team_lead():
         "OSS `memee` is single-user by design. Team and org scope, SSO,",
         "and audit log live in the paid `memee-team` package.",
     )
+
+
+def _stack_to_seed_pack(stack: list[str]) -> str | None:
+    """Map a stack list (from the wizard's STEP 3) to a bundled seed pack.
+
+    Returns the pack *name* (no ``.memee`` suffix) that ``resolve_seed_pack``
+    knows how to find. ``None`` when none of the bundled packs fit — the
+    wizard then skips the auto-install step (no harm done, just no
+    pre-seeded value).
+
+    Heuristics are deliberately simple — match on the first token the
+    stack picker generates, then fall through to a sensible default for
+    full-stack pickers. We never install more than one pack here; that
+    keeps the receipt screen honest about which canons fired and saves
+    the user from a 10-pack import they didn't ask for.
+    """
+    lowered = {s.lower() for s in stack}
+    # Order matters: most-specific match wins, with the catch-all coming
+    # last so it only fires when nothing more specific applied.
+    if {"react", "vite", "typescript", "javascript", "node.js"} & lowered:
+        return "react-vite"
+    if {"python", "fastapi", "django", "flask"} & lowered:
+        return "python-web"
+    if "agent-discipline" in lowered or "agent" in lowered:
+        return "agent-discipline"
+    return None
 
 
 def _upgrade_cta(*lines: str) -> None:

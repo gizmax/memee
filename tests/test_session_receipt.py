@@ -260,11 +260,12 @@ def test_voice_env_var_overrides_default(db_session, monkeypatch):
     since, until = _window_now()
 
     # Default (no env): agent voice — line cites the memory by title.
+    # v2.2.1 stripped inline [mem:xxx] tokens from agent-voice receipts.
     monkeypatch.delenv("MEMEE_RECEIPT_VOICE", raising=False)
     line = format_session_receipt(db_session, since=since, until=until)
     assert line is not None
     assert "React Query keys must include tenant id" in line
-    assert "[mem:" in line
+    assert "[mem:" not in line
     assert not line.startswith("Memee ")
 
     # Override → tool voice.
@@ -333,7 +334,8 @@ def test_agent_voice_picks_canon_memory(db_session, monkeypatch):
     # Canon-tier memory wins on weight even with lower confidence.
     assert "Never use eval() on user input" in line
     assert "Hypothesis" not in line
-    assert "[mem:" in line
+    # v2.2.1: agent-voice receipts no longer carry inline [mem:xxx] tokens.
+    assert "[mem:" not in line
 
 
 def test_agent_voice_prevented_phrasing(db_session, monkeypatch):

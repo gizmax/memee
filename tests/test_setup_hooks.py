@@ -83,6 +83,144 @@ def test_merge_is_idempotent():
         assert len(memee_blocks) == 1
 
 
+def test_merge_collapses_unmarked_memee_entries():
+    """v2.4.7 regression: unmarked pre-v2.0.1 Memee entries are detected
+    and replaced on the next merge.
+
+    Pre-v2.0.1 installs wrote ``memee brief …`` / ``memee learn …``
+    commands WITHOUT the ``_memee: true`` marker. A v2.0.1+ ``memee
+    setup`` then added a fresh marker'd entry alongside them — every
+    hook event fired twice. The strengthened ``_is_memee_entry``
+    heuristic must catch the unmarked entries by command shape so
+    merge_hooks collapses them.
+    """
+    cfg = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        # Pre-v2.0.1 unmarked Memee entry (no _memee key).
+                        {
+                            "type": "command",
+                            "command": (
+                                "memee brief --project ./ --format compact"
+                            ),
+                        },
+                        # v2.0.1+ marker'd entry — this is the duplicate.
+                        {
+                            "type": "command",
+                            "command": (
+                                'memee brief --project "$CLAUDE_PROJECT_DIR" '
+                                "--format compact --budget 300"
+                            ),
+                            MEMEE_MARK: True,
+                        },
+                    ],
+                }
+            ],
+            "UserPromptSubmit": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        # Unmarked old entry.
+                        {"type": "command", "command": "memee brief --task X"},
+                    ],
+                },
+                {
+                    "matcher": "",
+                    "hooks": [
+                        # New marker'd entry in its own block.
+                        {
+                            "type": "command",
+                            "command": (
+                                'memee brief --project "$CLAUDE_PROJECT_DIR" '
+                                '--task "$CLAUDE_USER_PROMPT" '
+                                "--budget 200 --format compact"
+                            ),
+                            MEMEE_MARK: True,
+                        },
+                    ],
+                },
+            ],
+            "Stop": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        # Unmarked.
+                        {"type": "command", "command": "memee learn --auto"},
+                    ],
+                },
+                {
+                    "matcher": "",
+                    "hooks": [
+                        # Marker'd.
+                        {
+                            "type": "command",
+                            "command": "memee learn --auto",
+                            MEMEE_MARK: True,
+                        },
+                    ],
+                },
+            ],
+        }
+    }
+
+    merged = merge_hooks(cfg)
+
+    for event in ("SessionStart", "UserPromptSubmit", "Stop"):
+        memee_entries = [
+            e
+            for block in merged["hooks"][event]
+            for e in block.get("hooks", [])
+            if e.get(MEMEE_MARK) is True or (
+                isinstance(e.get("command"), str)
+                and e["command"].strip().startswith("memee ")
+                and e["command"].strip().split(maxsplit=2)[1]
+                in {"brief", "learn", "pulse", "doctor"}
+            )
+        ]
+        # Exactly ONE Memee entry per event after collapse.
+        assert len(memee_entries) == 1, (
+            f"{event}: expected 1 Memee entry, got {len(memee_entries)}"
+        )
+        # And it carries the marker.
+        assert memee_entries[0].get(MEMEE_MARK) is True
+
+
+def test_merge_drops_empty_matcher_blocks():
+    """v2.4.7: merge_hooks sweeps blocks whose inner ``hooks`` list is empty.
+
+    Previously only the uninstall path dropped them; the install path
+    could leave a stale ``{"matcher": "", "hooks": []}`` skeleton if the
+    new heuristic emptied a block.
+    """
+    cfg = {
+        "hooks": {
+            "SessionStart": [
+                # A pre-existing empty block (someone hand-edited).
+                {"matcher": "Bash", "hooks": []},
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": "user-cmd"},
+                    ],
+                },
+            ]
+        }
+    }
+
+    merged = merge_hooks(cfg)
+    # The empty Bash block was dropped.
+    matchers = [b.get("matcher") for b in merged["hooks"]["SessionStart"]]
+    assert "Bash" not in matchers
+    # User's non-empty block survives.
+    assert any(
+        any(e.get("command") == "user-cmd" for e in b.get("hooks", []))
+        for b in merged["hooks"]["SessionStart"]
+    )
+
+
 def test_merge_replaces_existing_memee_hook_on_re_run():
     """If we change the canonical command, re-merge replaces the old one."""
     cfg = merge_hooks({})

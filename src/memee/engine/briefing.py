@@ -328,7 +328,15 @@ def _format_briefing(
 
     # Warnings
     if warnings:
-        lines.append("### Critical warnings — DO NOT:" if not compact else "WARNINGS:")
+        # v2.2.3: drop "DO NOT" imperative from the markdown header so
+        # the markdown briefing (and the CLAUDE.md inject downstream of
+        # it) read declarative, matching router.smart_briefing's
+        # "Critical anti-patterns in scope:" label.
+        lines.append(
+            "### Critical anti-patterns in scope:"
+            if not compact
+            else "WARNINGS:"
+        )
         for m, ap in warnings:
             sev = ap.severity.upper()
             lines.append(f"- [{sev}] {m.title}")

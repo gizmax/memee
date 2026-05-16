@@ -448,29 +448,31 @@ def search_memories(
         # ranked the doc. R13: when the caller passes ``tags=`` we
         # additionally fuse a tag-graph retriever — Jaccard top-K via
         # MemoryTag — into the same RRF.
+        #
+        # v2.4.3 (Tier 1.1): unified RRF across both vector-aware and
+        # BM25-only paths. The pre-v2.4.3 ``else`` branch used a linear
+        # blend of *raw* scores (``BM25_ONLY_BM25_W·bm25 + …``), which
+        # mixed BM25's natural 0-15 range with tag/conf's 0-1 range —
+        # whichever direction the manually-tuned weights leaned, the
+        # other signals got swamped. Math/stats dossier flagged this
+        # as the canonical scale-mismatch failure mode (Cormack et al.
+        # SIGIR 2009; Bruch et al. TOIS 2023). RRF over rank positions
+        # is scale-invariant by construction. Tag and confidence stay
+        # as multiplicative boosts so they still influence ordering.
         rrf_score = 0.0
-        if has_vectors:
-            if memory_id in bm25_rank:
-                rrf_score += 1.0 / (RRF_K + bm25_rank[memory_id] + 1)
-            if memory_id in vector_rank:
-                rrf_score += 1.0 / (RRF_K + vector_rank[memory_id] + 1)
-            if memory_id in tag_rank:
-                rrf_score += 1.0 / (RRF_K + tag_rank[memory_id] + 1)
-            # Tag and confidence are post-RRF signal boosts (multiplicative).
-            # 1 + α gives a +α multiplier when the signal is at its max.
-            total = (
-                rrf_score
-                * (1.0 + TAG_BOOST_COEF * tag_score)
-                * (1.0 + CONF_BOOST_COEF * conf_score)
-            )
-        else:
-            # No vector retriever — fall back to the legacy linear blend so
-            # BM25-only deployments don't lose tag/confidence weighting.
-            total = (
-                BM25_ONLY_BM25_W * bm25_score
-                + BM25_ONLY_TAG_W * tag_score
-                + BM25_ONLY_CONF_W * conf_score
-            )
+        if memory_id in bm25_rank:
+            rrf_score += 1.0 / (RRF_K + bm25_rank[memory_id] + 1)
+        if has_vectors and memory_id in vector_rank:
+            rrf_score += 1.0 / (RRF_K + vector_rank[memory_id] + 1)
+        if memory_id in tag_rank:
+            rrf_score += 1.0 / (RRF_K + tag_rank[memory_id] + 1)
+        # Tag and confidence are post-RRF signal boosts (multiplicative).
+        # 1 + α gives a +α multiplier when the signal is at its max.
+        total = (
+            rrf_score
+            * (1.0 + TAG_BOOST_COEF * tag_score)
+            * (1.0 + CONF_BOOST_COEF * conf_score)
+        )
 
         # Apply title phrase boost (at most once) and intent boost (at most once).
         title_match = _title_phrase_match(query, memory.title)

@@ -20,6 +20,7 @@ Architecture:
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from sqlalchemy import func, text
@@ -77,6 +78,46 @@ def _maturity_gate_enabled() -> bool:
     """
     raw = os.environ.get("MEMEE_MATURITY_GATED_EXPANSION", "0").strip().lower()
     return raw in ("1", "true", "on", "yes")
+
+
+def _layer0_suppressed() -> bool:
+    """True iff the always-on critical-AP block (Layer 0) must be silent.
+
+    Symmetric with ``get_citation_footer()`` in ``citations.py``: the
+    operator can silence the surface without uninstalling Memee.
+
+      * ``MEMEE_QUIET=1``    — master cross-context shield (v2.2.1).
+      * ``MEMEE_NO_LAYER0=1`` — per-channel switch added in v2.2.3,
+                                introduced because Layer 0 is the only
+                                briefing block that fires uncondition-
+                                ally regardless of search results.
+
+    Any non-empty value of either env var counts as set, matching the
+    convention used by ``MEMEE_NO_FOOTER`` / ``MEMEE_NO_DIGEST`` etc.
+    """
+    return bool(
+        os.environ.get("MEMEE_QUIET") or os.environ.get("MEMEE_NO_LAYER0")
+    )
+
+
+def _layer05_suppressed() -> bool:
+    """True iff the authoritative-pinned block (Layer 0.5) must be silent.
+
+    New in v2.3.1. Symmetric with ``_layer0_suppressed()`` so an operator
+    can silence the pinned surface independently of the critical-AP
+    block:
+
+      * ``MEMEE_QUIET=1``     — master cross-context shield.
+      * ``MEMEE_NO_PINNED=1`` — per-channel switch for Layer 0.5.
+
+    Rationale: a user pinning a sensitive org policy (e.g. "PII never to
+    logs") may want it visible across all sessions, while another user
+    finds the policy redundant for personal projects. Per-channel kill
+    switches preserve agency.
+    """
+    return bool(
+        os.environ.get("MEMEE_QUIET") or os.environ.get("MEMEE_NO_PINNED")
+    )
 
 # Approximate tokens per memory line (legacy sentinel — kept for backward-compat
 # in tests that imported the symbol; real accounting uses _count_tokens below).
@@ -141,25 +182,39 @@ def smart_briefing(
     stack_tags = _get_stack_tags(project)
     exclude_tags = _get_exclude_tags(stack_tags)
 
-    # ── Layer 0: Critical DNA (always shown) ──
+    # ── Layer 0: Critical anti-patterns in scope ──
+    #
+    # v2.2.3 hardening: the previous header ("CRITICAL (always):") and the
+    # ``⚠`` glyph mimicked Claude Code's own system-warning surfaces and
+    # framed the block as instruction rather than state. Combined with
+    # imperative seed-pack titles ("Never X") the rendered output read as
+    # an unsigned directive — exactly the pattern v2.2.1 rewrote out of
+    # the citation footer. Header is now a declarative section label,
+    # bullets use a neutral glyph, and the block honours ``MEMEE_QUIET``
+    # / new ``MEMEE_NO_LAYER0`` kill switches so an operator can silence
+    # this surface without uninstalling Memee. Seed-pack titles were
+    # rewritten in tandem so the bullet text itself is declarative.
     critical_aps = (
-        session.query(Memory, AntiPattern)
-        .join(AntiPattern, AntiPattern.memory_id == Memory.id)
-        .filter(
-            AntiPattern.severity == "critical",
-            Memory.maturity != MaturityLevel.DEPRECATED.value,
+        [] if _layer0_suppressed()
+        else (
+            session.query(Memory, AntiPattern)
+            .join(AntiPattern, AntiPattern.memory_id == Memory.id)
+            .filter(
+                AntiPattern.severity == "critical",
+                Memory.maturity != MaturityLevel.DEPRECATED.value,
+            )
+            .order_by(Memory.confidence_score.desc())
+            .limit(3)
+            .all()
         )
-        .order_by(Memory.confidence_score.desc())
-        .limit(3)
-        .all()
     )
 
     if critical_aps:
-        header = "CRITICAL (always):"
+        header = "Critical anti-patterns in scope:"
         if would_fit(header, token_budget - FOOTER_RESERVE):
             lines.append(header)
             for m, _ap in critical_aps:
-                candidate = f"  ⚠ {m.title}"
+                candidate = f"  • {m.title}"
                 # Layer-0 cap: keep critical block ≤ ~100 tokens of content,
                 # but still respect overall budget first.
                 if current_tokens() + _count_tokens("\n" + candidate) > min(
@@ -171,6 +226,204 @@ def smart_briefing(
                     break
                 lines.append(candidate)
             lines.append("")
+
+    # ── Layer 0.5: Authoritative ("pinned") memories ──
+    #
+    # v2.3.1. Acts on Mem0 issue #4926 and Letta issue #3116: org
+    # policies, personas, and hard constraints get out-ranked by
+    # conversational similarity hits, so the agent never sees them.
+    # Layer 0.5 surfaces every ``is_authoritative=True`` memory whose
+    # tags overlap the task or project stack — regardless of
+    # cosine/BM25 score. Bypasses Layer 1's filter chain entirely.
+    #
+    # Tag-overlap gate: at least one tag in common with either the task
+    # tokens or the project stack. Falls back to "always show" when no
+    # task/stack tags are available — a pinned policy with no scope is
+    # explicitly global. The maturity gate excludes DEPRECATED so a
+    # superseded policy doesn't keep firing.
+    #
+    # Budget: shares the global ``token_budget - FOOTER_RESERVE`` with
+    # everything else. Hard sub-cap of ~120 tokens (~5 pinned bullets)
+    # so a user who pins 50 policies doesn't starve the search-routed
+    # block. Caller can tune via ``MEMEE_PINNED_MAX_BULLETS``.
+    pinned_ids: set[str] = set()
+    if not _layer05_suppressed():
+        try:
+            max_pinned = max(
+                1, int(os.environ.get("MEMEE_PINNED_MAX_BULLETS", "5"))
+            )
+        except ValueError:
+            max_pinned = 5
+
+        # v2.3.3 perf fix: push tag-overlap into SQL via the
+        # normalised ``memory_tags`` index instead of loading every
+        # authoritative row and filtering in Python. At 10 k
+        # authoritative memories the pre-v2.3.3 Python loop measured
+        # ~500 ms; the SQL path serves the same set in <10 ms.
+        #
+        # Scope rules preserved exactly:
+        #   • no scope_tags (no task + no stack) → load top-N pinned
+        #   • mem_tags empty (declared global policy) → always include
+        #   • both non-empty → require ≥1 tag in common
+        # The query is split into "tagged" (overlap) + "global" (empty
+        # tags) so we can express each branch as a single SQL.
+        from memee.storage.models import MemoryTag
+
+        task_tokens = {
+            tok.lower()
+            for tok in re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", task or "")
+        } if task else set()
+        scope_tags = {t.lower() for t in stack_tags} | task_tokens
+
+        matching: list[Memory] = []
+        base_filter = (
+            Memory.is_authoritative.is_(True),
+            Memory.maturity != MaturityLevel.DEPRECATED.value,
+        )
+
+        if not scope_tags:
+            # No scope signal — surface the top-N pinned by confidence.
+            matching = (
+                session.query(Memory)
+                .filter(*base_filter)
+                .order_by(Memory.confidence_score.desc())
+                .limit(max_pinned)
+                .all()
+            )
+        else:
+            # Overlap branch: pinned rows whose normalised tag-index
+            # contains at least one scope tag. ``DISTINCT`` because a
+            # row can match on multiple tags.
+            overlap_rows = (
+                session.query(Memory)
+                .join(MemoryTag, MemoryTag.memory_id == Memory.id)
+                .filter(
+                    *base_filter,
+                    MemoryTag.tag.in_(scope_tags),
+                )
+                .distinct()
+                .order_by(Memory.confidence_score.desc())
+                .limit(max_pinned)
+                .all()
+            )
+            seen = {m.id for m in overlap_rows}
+            # Global branch: pinned rows with NO tags at all. Cheap
+            # because we LEFT JOIN and keep only the NULL side.
+            remaining = max_pinned - len(overlap_rows)
+            global_rows: list[Memory] = []
+            if remaining > 0:
+                from sqlalchemy import not_, exists
+                global_rows = (
+                    session.query(Memory)
+                    .filter(
+                        *base_filter,
+                        not_(
+                            exists().where(MemoryTag.memory_id == Memory.id)
+                        ),
+                    )
+                    .order_by(Memory.confidence_score.desc())
+                    .limit(remaining)
+                    .all()
+                )
+            # Concatenate, preserving confidence order via merge.
+            merged = list(overlap_rows) + [
+                m for m in global_rows if m.id not in seen
+            ]
+            merged.sort(key=lambda m: (m.confidence_score or 0.0), reverse=True)
+            matching = merged[:max_pinned]
+
+        if matching:
+            header = "Pinned policies in scope:"
+            if would_fit(header, token_budget - FOOTER_RESERVE):
+                lines.append(header)
+                pinned_start_tokens = _count_tokens("\n".join(lines))
+                for m in matching:
+                    candidate = f"  → {m.title}"
+                    # Sub-cap: ≤ ~120 tokens of pinned content. Same
+                    # shape as Layer 0's cap, just sized for the longer
+                    # titles policies tend to have.
+                    if current_tokens() + _count_tokens("\n" + candidate) > min(
+                        token_budget - FOOTER_RESERVE,
+                        pinned_start_tokens + 120,
+                    ):
+                        break
+                    if not would_fit(candidate, token_budget - FOOTER_RESERVE):
+                        break
+                    lines.append(candidate)
+                    pinned_ids.add(m.id)
+                lines.append("")
+
+    # ── Layer 0.7: Re-checking canon (v2.4.1 — Tier 1.6) ──
+    #
+    # The cognitive-science dossier (docs/memee-2026-roadmap.md
+    # Tier 1.6) flagged: canon as currently implemented is
+    # *unfalsifiable*. A pattern that hit canon two years ago and is
+    # silently stale only ever deprecates if somebody manually
+    # invalidates it — survivorship bias. Spaced-repetition
+    # literature (Wozniak SM-2, FSRS / Ye et al. KDD 2022) solved
+    # the analogous problem for human memory: actively schedule
+    # re-tests of items with uncertain stability and let the test
+    # outcome update the model.
+    #
+    # The Beta-Binomial posterior (v2.4.0) gives us the right signal
+    # for free — wide HDI on a canon claim means "we say it's solid
+    # but we have surprisingly little evidence for that". Combined
+    # with staleness (last_applied_at age), this picks the top N
+    # canon memories most in need of re-validation and surfaces them
+    # under a declarative "Re-checking canon:" header.
+    #
+    # Feedback closes naturally: agent applying the candidate (via
+    # `MemoryUsage` / `SearchEvent.accepted_memory_id`) already
+    # routes to ``update_confidence`` which bumps α; explicit
+    # invalidate routes to β. Skipping the candidate leaves the
+    # row's score unchanged so the next select_verify_candidates
+    # picks it up again — eventually surfacing the staleness to the
+    # operator if nothing happens.
+    verify_ids: set[str] = set()
+    try:
+        from memee.engine.repetition import (
+            select_verify_candidates,
+            verify_limit_from_env,
+        )
+
+        verify_rows = select_verify_candidates(
+            session, limit=verify_limit_from_env()
+        )
+        # De-dup against earlier layers (v2.4.6 fix):
+        #   * Layer 0 critical anti-patterns — surfaced under the
+        #     "⚠"/"•" glyph already; re-surfacing them as "? verify
+        #     this" was the most visible duplication bug a real
+        #     install demonstrated.
+        #   * Layer 0.5 pinned policies — same logic, different glyph.
+        critical_ids = {m.id for m, _ in critical_aps} if critical_aps else set()
+        verify_rows = [
+            m for m in verify_rows
+            if m.id not in pinned_ids and m.id not in critical_ids
+        ]
+
+        if verify_rows:
+            header = "Re-checking canon:"
+            if would_fit(header, token_budget - FOOTER_RESERVE):
+                lines.append(header)
+                verify_start_tokens = _count_tokens("\n".join(lines))
+                for m in verify_rows:
+                    candidate = f"  ? {m.title}"
+                    if current_tokens() + _count_tokens("\n" + candidate) > min(
+                        token_budget - FOOTER_RESERVE,
+                        verify_start_tokens + 120,
+                    ):
+                        break
+                    if not would_fit(candidate, token_budget - FOOTER_RESERVE):
+                        break
+                    lines.append(candidate)
+                    verify_ids.add(m.id)
+                lines.append("")
+    except Exception:
+        # Best-effort: a broken verify pass never breaks the briefing.
+        # The Beta-Binomial posterior or the staleness query could
+        # fail on partial schema (mid-migration); fall through to
+        # Layer 1 with no Layer 0.7 block.
+        verify_ids = set()
 
     # ── Layer 1: Search-routed briefing ──
     # R10 accuracy fix: ``_build_search_query`` expands the task with related
@@ -203,6 +456,13 @@ def smart_briefing(
 
         # Filter: exclude unrelated TECH stacks (not business/marketing content)
         shown_ids = {m.id for m, _ in critical_aps} if critical_aps else set()
+        # v2.3.1: also de-dup Layer 0.5 pinned memories so the same
+        # policy doesn't appear twice when search would also surface it.
+        shown_ids |= pinned_ids
+        # v2.4.1: also de-dup Layer 0.7 verify candidates so the same
+        # canon row doesn't appear twice when search would also surface
+        # it (verify block already named it; search hit is redundant).
+        shown_ids |= verify_ids
         tech_exclude = exclude_tags or set()
         filtered = []
         for r in results:

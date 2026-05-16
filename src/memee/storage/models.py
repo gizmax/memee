@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text as sa_text,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -132,8 +133,35 @@ class Memory(Base):
     source_type = Column(String(20), default="unknown")  # "human", "llm", "import"
     quality_score = Column(Float)                         # 1-5 heuristic score
 
-    # Confidence
+    # Authoritative flag (v2.3.1): policies, personas, hard org constraints
+    # that must surface in the briefing for any task whose tags overlap,
+    # regardless of cosine/BM25 score. The smart router's Layer 0.5 reads
+    # this. Set via ``memee record … --authoritative`` or the
+    # ``memory_record`` MCP tool's ``is_authoritative`` parameter.
+    # Default False keeps every existing memory unchanged on upgrade.
+    is_authoritative = Column(Boolean, default=False, nullable=False)
+
+    # Confidence (v2.4.0: Beta-Binomial posterior)
+    #
+    # ``confidence_score`` is the derived posterior mean α/(α+β), kept
+    # populated on every update for backward compatibility with the
+    # 30+ callsites that read it. The two Beta parameters are the
+    # source of truth: each successful validation contributes
+    # ``+w`` to alpha; each invalidation contributes ``+w`` to beta,
+    # where ``w`` is the scope/source-weighted evidence count
+    # (cross-project + cross-model + diminishing returns + source
+    # quality folded in). Beta(1, 1) is a uniform prior with mean 0.5
+    # — matches the legacy ``default=0.5`` on confidence_score so
+    # fresh memories keep their day-1 behaviour.
+    #
+    # Credible intervals (`engine/confidence.confidence_hdi`) are the
+    # exact Beta-distribution quantiles, replacing the pre-v2.4.0
+    # ad-hoc ``conf ± 1/√(n+1)`` heuristic. See
+    # docs/memee-2026-roadmap.md (Tier 1.2) for the math anchor
+    # (Bayes Rules! ch. 3; Paun et al. 2018).
     confidence_score = Column(Float, default=0.5)
+    alpha = Column(Float, default=1.0, nullable=False)
+    beta = Column(Float, default=1.0, nullable=False)
     validation_count = Column(Integer, default=0)
     invalidation_count = Column(Integer, default=0)
     application_count = Column(Integer, default=0)
@@ -152,6 +180,22 @@ class Memory(Base):
     expires_at = Column(DateTime)
     deprecated_at = Column(DateTime)
     deprecated_reason = Column(Text)
+
+    # v2.4.5 — FSRS-light per-memory decay (Tier 1.5 from
+    # docs/memee-2026-roadmap.md). Each memory carries its own
+    # ``half_life`` (in days). Predicted retrievability at time t is
+    # R(t) = 2^(-Δt/h) where Δt is days since ``last_retrieved``.
+    # Successful validation stretches the half-life (recall is itself
+    # consolidation, per Wozniak SM-2 and FSRS / Ye et al. KDD 2022 —
+    # the Anki 23.10+ default). Layer 0.7 reads this signal instead
+    # of the pre-v2.4.5 global 30-day staleness cliff.
+    #
+    # Default 14 days mirrors FSRS' initial stability; that's roughly
+    # "remember a fresh fact for two weeks before recall noticeably
+    # slips" under the Ebbinghaus power-law fit. Bumps to weeks /
+    # months as a memory accumulates validations.
+    half_life = Column(Float, default=14.0, nullable=False)
+    last_retrieved = Column(DateTime)
 
     # Scope: personal → team → org. In OSS only `personal` is used;
     # memee-team activates team/org with its own User/Team tables and wires
@@ -218,6 +262,19 @@ class Memory(Base):
         # prefix lets memee-team partition without a second lookup.
         Index("ix_memories_org_type_maturity", "organization_id", "type", "maturity"),
         Index("ix_memories_org_scope", "organization_id", "scope"),
+        # v2.3.3: partial index for Layer 0.5 (authoritative / pinned)
+        # selection. Mirrors the index `_bootstrap_memory_is_authoritative`
+        # and the alembic migration `8f3a52c1d4e7` both declare, so a
+        # fresh DB from `Base.metadata.create_all()` matches the upgrade
+        # path. Without this, Layer 0.5's
+        # `WHERE is_authoritative=True` scans the whole table on fresh
+        # installs.
+        Index(
+            "ix_memories_authoritative",
+            "is_authoritative",
+            sqlite_where=sa_text("is_authoritative = 1"),
+            postgresql_where=sa_text("is_authoritative IS TRUE"),
+        ),
         CheckConstraint("confidence_score >= 0.0 AND confidence_score <= 1.0"),
     )
 

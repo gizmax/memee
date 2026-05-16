@@ -91,7 +91,8 @@ class TestBriefing:
     def test_briefing_includes_warnings(self, briefing_env):
         session, proj, org = briefing_env
         result = briefing(session, "/tmp/test-project")
-        assert "CRITICAL" in result
+        # v2.2.3 renamed the Layer 0 header to a declarative label.
+        assert "Critical anti-patterns in scope:" in result
         assert "API keys" in result or "eval" in result
 
     def test_briefing_includes_decisions(self, briefing_env):

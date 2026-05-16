@@ -273,7 +273,13 @@ def test_setup_ignore_multi_install_proceeds(monkeypatch, tmp_path):
 
 
 def test_version_flag_single_install(monkeypatch, tmp_path):
-    """--version prints the version and the resolved binary path."""
+    """--version prints the version and the running python path.
+
+    v2.4.7: ``--version`` no longer scans PATH (the v2.4.6 fork-bomb).
+    The output is the version line, ``installed:`` (Python import dir),
+    and ``binary:`` (``sys.executable`` — the python actually running).
+    Multi-install detection moved to ``memee doctor``.
+    """
     bindir = tmp_path / "bin"
     _make_fake_memee(bindir)
     monkeypatch.setenv("PATH", str(bindir))
@@ -282,28 +288,45 @@ def test_version_flag_single_install(monkeypatch, tmp_path):
     result = runner.invoke(cli, ["--version"])
 
     assert result.exit_code == 0
-    # Just asserts the version line is the first thing printed and the
-    # binary path appears somewhere — exact formatting may evolve.
     from memee import __version__
     assert f"memee {__version__}" in result.output
-    assert str(bindir / "memee") in result.output
-    # Single install → no "alt:" line.
+    # No "alt:" line — that diagnosis is now in `memee doctor` only.
     assert "alt:" not in result.output
+    # Sanity: the "binary:" line is printed (the running python's path).
+    assert "binary:" in result.output
 
 
-def test_version_flag_multi_install_warns(monkeypatch, tmp_path):
-    """--version surfaces shadow installs and points at memee doctor."""
+def test_version_flag_multi_install_does_not_scan_path(monkeypatch, tmp_path):
+    """v2.4.7 regression: --version MUST NOT scan PATH, even with multiple
+    binaries present.
+
+    The pre-v2.4.7 behaviour was to call ``detect_memee_installs()`` and
+    print an ``alt:`` line per shadowed binary. That call spawned child
+    memees with ``--version``, which re-entered the same callback —
+    classic fork-bomb. The fix: the callback prints version + locations
+    only. No PATH walk. The doctor command does the diagnosis.
+    """
     homebrew = tmp_path / "opt" / "homebrew" / "bin"
     pipx = tmp_path / "home" / ".local" / "pipx" / "venvs" / "memee" / "bin"
     _make_fake_memee(homebrew)
     _make_fake_memee(pipx)
     monkeypatch.setenv("PATH", f"{homebrew}{os.pathsep}{pipx}")
 
+    # Sentinel: detect_memee_installs MUST NOT be called from the
+    # --version callback. If it ever is, this raises and we see the
+    # regression in CI.
+    def boom(*a, **kw):
+        raise AssertionError(
+            "--version must not call detect_memee_installs (v2.4.6 fork-bomb)"
+        )
+
+    monkeypatch.setattr(doctor, "detect_memee_installs", boom)
+
     runner = CliRunner()
     result = runner.invoke(cli, ["--version"])
     assert result.exit_code == 0
-    assert "alt:" in result.output
-    assert "memee doctor" in result.output
+    # No alt: line — the multi-install info moved to `memee doctor`.
+    assert "alt:" not in result.output
 
 
 # ── memee doctor --ignore-multi-install ────────────────────────────────

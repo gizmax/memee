@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memee"
-version = "2.2.0"
+version = "2.4.7"
 description = "Cross-model shared memory for AI agents. One canon. Every model, every project, every teammate."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -79,6 +79,16 @@ pack = [
     # format itself works without the dep — only authenticity does not.
     "cryptography>=42.0",
 ]
+bar = [
+    # v2.3.0 menubar miniapp. macOS-only in this release; rumps is gated
+    # on darwin so a `pipx install memee[bar]` on Linux is a no-op for
+    # the menubar but watchdog still ships (used by the state-file
+    # refresh path in any future cross-platform tray). Pillow is
+    # rumps' icon dependency.
+    "rumps>=0.4; sys_platform=='darwin'",
+    "watchdog>=4.0",
+    "Pillow>=10.0; sys_platform=='darwin'",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -89,9 +99,10 @@ dev = [
     "sentence-transformers>=3.0",
     "datasketch>=1.6",
     "cryptography>=42.0",
+    "watchdog>=4.0",
 ]
 all = [
-    "memee[api,vectors,fast-dedup,ltr,rerank,pack]",
+    "memee[api,vectors,fast-dedup,ltr,rerank,pack,bar]",
 ]
 
 [project.scripts]

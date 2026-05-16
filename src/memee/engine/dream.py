@@ -4,9 +4,10 @@ Nightly process that:
 1. Auto-connects related memories (builds the graph)
 2. Identifies contradictions between patterns
 3. Infers ``depends_on`` and ``supersedes`` edges (R9)
-4. Boosts confidence of well-connected memories
-5. Proposes promotions for memories near thresholds
-6. Generates digest of what the org learned
+4. Folds semantic duplicates into their canonical entry (v2.2.4)
+5. Boosts confidence of well-connected memories
+6. Proposes promotions for memories near thresholds
+7. Generates digest of what the org learned
 
 This runs as a batch job, not real-time.
 """
@@ -14,6 +15,7 @@ This runs as a batch job, not real-time.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections import defaultdict
 
@@ -59,6 +61,50 @@ _DEPENDS_CUES = re.compile(
     r"depend(?:s|ent)\s+on|after\s+setting|once\s+you\s+have)\b",
     re.IGNORECASE,
 )
+
+# ── v2.2.4 semantic dedup tunables ──
+#
+# Quality gate's existing dedup pass (`engine/quality_gate.py`) catches
+# lexical near-duplicates via SequenceMatcher on normalised titles. It
+# misses semantic paraphrases — "User likes Vim", "user prefers Vim",
+# "Vim is the user's editor of choice" share no token n-grams but mean
+# the same thing. Letta issue #3116 and Mem0 audit #4573 both flag this
+# exact failure mode (808 entries asserting the same preference).
+#
+# Memee already stores 384-dim embeddings for every memory; comparing
+# them is the obvious second pass. We run it in dream rather than at
+# write time so the write path stays cheap (no on-the-fly encode) and
+# the merge has access to confidence/maturity stats that only stabilise
+# overnight.
+#
+# Threshold: 0.92 cosine. Empirically the boundary where embeddings
+# disagree on "same fact, different phrasing" vs "related but distinct".
+# Below 0.92 the false-positive rate climbs sharply on tech docs (where
+# "Always pass timeout to requests" and "Always set timeout on httpx"
+# legitimately differ). Operators can tune via env var.
+SEMANTIC_DEDUP_THRESHOLD_DEFAULT = 0.92
+SEMANTIC_DEDUP_TAG_OVERLAP_MIN = 0.5
+# Hard cap per cycle keeps the wall-clock bounded even if a corpus has
+# many near-duplicates; the rest get folded on the next dream pass.
+SEMANTIC_DEDUP_MAX_MERGES_PER_CYCLE = 100
+
+
+def _semantic_dedup_threshold() -> float:
+    """Cosine threshold for semantic-dup detection, env-tunable.
+
+    ``MEMEE_SEMANTIC_DEDUP_THRESHOLD`` accepts a float in (0.0, 1.0].
+    Out-of-range or unparseable values fall back to the default.
+    """
+    raw = os.environ.get("MEMEE_SEMANTIC_DEDUP_THRESHOLD")
+    if raw is None:
+        return SEMANTIC_DEDUP_THRESHOLD_DEFAULT
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return SEMANTIC_DEDUP_THRESHOLD_DEFAULT
+    if not (0.0 < val <= 1.0):
+        return SEMANTIC_DEDUP_THRESHOLD_DEFAULT
+    return val
 
 
 def run_dream_cycle(session: Session) -> dict:
@@ -113,6 +159,16 @@ def run_dream_cycle(session: Session) -> dict:
     supers_stats = _infer_supersessions(session)
     stats["supersessions_inferred"] = supers_stats["created"]
     stats["digest"].extend(supers_stats["digest"])
+
+    # Phase 1d (v2.2.4): Fold semantic duplicates that the write-time
+    # lexical dedup missed. Runs AFTER supersessions so a "B replaces A"
+    # relationship is on the graph before we'd otherwise quietly merge
+    # them — the existing-edge guard in _semantic_dedup_pass leaves those
+    # pairs alone. Runs BEFORE contradictions so a freshly-folded loser
+    # doesn't get reported as contradicting its winner.
+    semdup_stats = _semantic_dedup_pass(session)
+    stats["semantic_duplicates_merged"] = semdup_stats["merged"]
+    stats["digest"].extend(semdup_stats["digest"])
 
     # Phase 2: Find contradictions
     contradictions = _find_contradictions(session)
@@ -466,6 +522,208 @@ def _infer_relationship(m1: Memory, m2: Memory) -> str:
         return "supports" if m1.type == MemoryType.PATTERN.value else "related_to"
 
     return "related_to"
+
+
+def _semantic_dedup_pass(session: Session) -> dict:
+    """Fold semantic-duplicate memories into their canonical entry (v2.2.4).
+
+    Companion to the lexical dedup that the quality gate already runs at
+    write time. The quality gate uses SequenceMatcher on normalised titles
+    and catches "API keys in source" vs "Api Keys in Source"; semantic
+    dedup uses the existing 384-dim embeddings and catches "user prefers
+    Vim" vs "Vim is the editor the user likes".
+
+    Pipeline:
+      1. Pull the cached embedding matrix from search._embedded_corpus_matrix.
+      2. Compute all-pairs cosine via one matrix multiply.
+      3. For each upper-triangle pair with cosine ≥ threshold:
+           - skip cross-type pairs
+           - skip pairs where either side is DEPRECATED
+           - skip pairs that already have ANY edge (depends_on,
+             supersedes, contradicts, supports, related_to, …)
+           - require tag overlap ≥ SEMANTIC_DEDUP_TAG_OVERLAP_MIN
+           - require winner.merge_count < LARGE_CLUSTER_MERGE_LIMIT (5)
+      4. Pick a winner: higher confidence_score, tie-break older
+         created_at. Fold loser into winner via the existing
+         ``merge_duplicate`` helper (re-uses the evidence-chain audit
+         entry and the MemoryTag re-sync logic).
+      5. Mark loser DEPRECATED and create a ``semantic_dup_of`` edge
+         pointing loser → winner so the relationship is auditable.
+
+    Cap: ``SEMANTIC_DEDUP_MAX_MERGES_PER_CYCLE`` (100). Anything beyond
+    that gets folded on subsequent nightly runs. Keeps wall-clock bounded
+    on corpora that just imported a giant pack with many overlaps.
+
+    Returns ``{"merged": N, "skipped_no_embedding": N, "scanned_pairs": N}``.
+    """
+    stats = {
+        "merged": 0,
+        "skipped_no_embedding": 0,
+        "scanned_pairs": 0,
+        "digest": [],
+    }
+
+    try:
+        import numpy as np
+    except ImportError:
+        logger.debug("semantic_dedup: numpy missing, skipping pass")
+        return stats
+
+    from memee.engine.search import _embedded_corpus_matrix
+
+    corpus = _embedded_corpus_matrix(session)
+    if corpus is None:
+        return stats
+
+    ids = corpus["ids"]
+    matrix = corpus["matrix"]  # shape (N, dim)
+    row_norms = corpus["row_norms"]
+    type_array = corpus["type_array"]
+    maturity_array = corpus["maturity_array"]
+    n = len(ids)
+    if n < 2:
+        return stats
+
+    # Cosine similarity = (M @ Mᵀ) / (‖row_i‖ · ‖row_j‖). One matmul; the
+    # whole thing fits easily in float32 up to ~10k memories (10k×10k×4B ≈ 400 MB
+    # before we mask) — well above any realistic single-org corpus.
+    sim = (matrix @ matrix.T) / (row_norms[:, None] * row_norms[None, :])
+
+    threshold = _semantic_dedup_threshold()
+
+    # Upper triangle only (i<j), threshold mask.
+    iu, ju = np.where(np.triu(sim >= threshold, k=1))
+    stats["scanned_pairs"] = int(len(iu))
+    if stats["scanned_pairs"] == 0:
+        return stats
+
+    # Pre-filter using cached type / maturity arrays — same-type AND both
+    # non-deprecated. Avoids loading Memory rows for pairs we'll throw out.
+    deprecated_val = MaturityLevel.DEPRECATED.value
+    same_type = type_array[iu] == type_array[ju]
+    both_live = (
+        (maturity_array[iu] != deprecated_val)
+        & (maturity_array[ju] != deprecated_val)
+    )
+    keep = same_type & both_live
+    iu = iu[keep]
+    ju = ju[keep]
+    if len(iu) == 0:
+        return stats
+
+    # Walk candidate pairs in descending similarity so the most-confident
+    # merges happen first and downstream pairs get a chance to skip cluster-
+    # capped winners cleanly.
+    sims_for_pairs = sim[iu, ju]
+    order = np.argsort(-sims_for_pairs)
+    iu = iu[order]
+    ju = ju[order]
+    sims_for_pairs = sims_for_pairs[order]
+
+    existing_edges = _existing_edge_types(session)
+
+    # Hydrate Memory rows we'll actually need. Build the id set from the
+    # filtered pair lists so we don't fetch the whole corpus.
+    needed_ids = {ids[i] for i in iu} | {ids[j] for j in ju}
+    rows = (
+        session.query(Memory)
+        .filter(Memory.id.in_(needed_ids))
+        .all()
+    )
+    by_id: dict[str, Memory] = {m.id: m for m in rows}
+
+    # Track ids we already folded — skip them as either side of further pairs.
+    folded: set[str] = set()
+
+    from memee.engine.quality_gate import (
+        LARGE_CLUSTER_MERGE_LIMIT,
+        merge_duplicate,
+    )
+
+    for idx in range(len(iu)):
+        if stats["merged"] >= SEMANTIC_DEDUP_MAX_MERGES_PER_CYCLE:
+            break
+
+        a_id = ids[int(iu[idx])]
+        b_id = ids[int(ju[idx])]
+        if a_id in folded or b_id in folded:
+            continue
+        a = by_id.get(a_id)
+        b = by_id.get(b_id)
+        if a is None or b is None:
+            continue
+
+        # Skip pairs that already have ANY edge in either direction —
+        # depends_on, supersedes, contradicts, supports, related_to. The
+        # graph already encodes a relationship and we don't want to
+        # quietly collapse something the contradictions or supersession
+        # passes flagged for human review.
+        if (a.id, b.id) in existing_edges or (b.id, a.id) in existing_edges:
+            continue
+
+        # Tag overlap gate. Two pieces of canon about the same topic
+        # should share most of their tags; if they don't, the embedding
+        # similarity is probably picking up shared phrasing rather than
+        # shared meaning (e.g. two unrelated patterns that both use the
+        # word "always").
+        a_tags = set(a.tags or [])
+        b_tags = set(b.tags or [])
+        if not a_tags or not b_tags:
+            continue
+        overlap = len(a_tags & b_tags) / max(len(a_tags | b_tags), 1)
+        if overlap < SEMANTIC_DEDUP_TAG_OVERLAP_MIN:
+            continue
+
+        # Winner: higher confidence; tie-break = older (more validated).
+        if (a.confidence_score or 0.0) != (b.confidence_score or 0.0):
+            winner, loser = (
+                (a, b) if (a.confidence_score or 0.0) > (b.confidence_score or 0.0)
+                else (b, a)
+            )
+        else:
+            winner, loser = (a, b) if (a.created_at or utcnow()) <= (b.created_at or utcnow()) else (b, a)
+
+        if int(winner.merge_count or 0) >= LARGE_CLUSTER_MERGE_LIMIT:
+            # The cluster-size gate exists for the same reason as in
+            # quality_gate: runaway merging hides genuinely-distinct
+            # memories under one bloated entry. Skip and let an operator
+            # split the cluster if needed.
+            continue
+
+        similarity = float(sims_for_pairs[idx])
+        # v2.3.3 atomicity fix: pass commit=False so dream's
+        # BEGIN EXCLUSIVE stays atomic. The default merge_duplicate
+        # commit() would land partial state mid-cycle.
+        merge_duplicate(
+            session,
+            winner,
+            loser.content or "",
+            new_tags=list(b_tags if loser is b else a_tags),
+            new_title=loser.title,
+            similarity=similarity,
+            commit=False,
+        )
+
+        # Deprecate the loser and link it to the winner with a typed edge
+        # so an operator running `memee why` later can trace the merge.
+        loser.maturity = MaturityLevel.DEPRECATED.value
+        session.add(
+            MemoryConnection(
+                source_id=loser.id,
+                target_id=winner.id,
+                relationship_type="semantic_dup_of",
+                strength=similarity,
+            )
+        )
+        folded.add(loser.id)
+        stats["merged"] += 1
+        stats["digest"].append(
+            f"SEMANTIC_DUP: '{loser.title}' folded into '{winner.title}' "
+            f"(cos={similarity:.3f})"
+        )
+
+    session.flush()
+    return stats
 
 
 def _find_contradictions(session: Session) -> list[dict]:

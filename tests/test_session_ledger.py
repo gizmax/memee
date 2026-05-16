@@ -175,7 +175,9 @@ def test_one_citation_renders_singular_notice(isolated_home, db_session):
     assert summary.startswith(">")
     assert "applied 1 memory" in summary
     assert "React Query keys must include tenant id" in summary
-    assert "[mem:" in summary
+    # v2.2.1: stripped trailing [mem:xxx] token. Lineage lives behind
+    # `memee cite` — the summary doesn't have to advertise an ID.
+    assert "[mem:" not in summary
 
 
 # ── Three citations: pick highest-scoring ──────────────────────────────

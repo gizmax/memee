@@ -320,17 +320,39 @@ def _iso(dt) -> str:
     return str(dt)
 
 
-# Footer text for compact briefings — kept short by spec (≤200 tokens).
-# This is the single source of truth so tests can import it directly.
+# Footer text for compact briefings — declarative state, not directive.
+#
+# v2.2.1 rewrite: the previous footer issued imperatives toward the agent
+# ("Cite Memee canon..."), demanded a specific output token format
+# ("[mem:<8-char-id>]"), and used reward language ("becomes evidence")
+# inside a deadline ("within 24h"). All three are textbook injection
+# signals (OWASP LLM01) and Anthropic-trained models reasonably refuse
+# them. The new footer describes state ("N memories included; the
+# memee cite tool can record which were useful"), uses no imperative
+# voice toward the model, names no compliance format, and promises no
+# reward — it is information, not instruction.
+#
+# Citation eventing is a property of MCP tool calls, not inline text:
+# agents that want to cite a memory do so by calling memee cite (CLI)
+# or future memory_cite (MCP). Inline [mem:xxx] tokens are no longer
+# requested.
 CITATION_FOOTER = (
     "---\n"
-    "Cite Memee canon you apply with [mem:<8-char-id>]. Any memory in "
-    "this briefing is fair game. Run `memee cite <id>` to inspect "
-    "lineage. Memee counts a citation as a soft validation; an "
-    "uncontested cite within 24h becomes evidence."
+    "Memee context above. Inspect any memory with `memee cite <id-prefix>`."
 )
 
 
-def get_citation_footer() -> str:
-    """Return the canonical citation footer string."""
+def get_citation_footer() -> str | None:
+    """Return the canonical citation footer string.
+
+    Returns ``None`` when the footer should be suppressed:
+      * ``MEMEE_QUIET=1`` (master kill-switch, v2.2.1)
+      * ``MEMEE_NO_FOOTER=1`` (per-channel kill-switch, v2.2.1)
+
+    Callers that handle footer placement themselves should treat ``None``
+    as "skip the footer" and emit no separator.
+    """
+    import os
+    if os.environ.get("MEMEE_QUIET") or os.environ.get("MEMEE_NO_FOOTER"):
+        return None
     return CITATION_FOOTER

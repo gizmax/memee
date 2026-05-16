@@ -85,7 +85,14 @@ class TestModelFamilyDetection:
 class TestCrossModelConfidence:
 
     def test_same_model_no_bonus(self, session):
-        """Same model validation = no cross-model bonus."""
+        """Same model validation = no cross-model bonus.
+
+        v2.4.0 Beta-Binomial: same-family validator contributes only the
+        base weight (1.0) to α. Starting from Beta(1, 1) → Beta(2, 1)
+        with posterior mean 2/3 ≈ 0.667. A *cross-family* validator
+        would add ×1.3 to the weight → Beta(2.3, 1), mean ≈ 0.697.
+        The 0.03 gap is the cross-model bonus expressed as evidence.
+        """
         m = Memory(
             type=MemoryType.PATTERN.value,
             title="Test", content="Test",
@@ -94,12 +101,12 @@ class TestCrossModelConfidence:
         session.add(m)
         session.commit()
 
-        base_score = m.confidence_score
         new_score = update_confidence(m, True, model_name="claude-sonnet-4")
-        same_model_delta = new_score - base_score
 
-        # Same family (anthropic) = no cross-model bonus
-        assert same_model_delta == pytest.approx(0.08 * 0.5, abs=0.01)
+        # α = 1 + 1.0 (base weight, no cross-family bonus) → mean = 2/3
+        assert new_score == pytest.approx(2.0 / 3.0, abs=0.01)
+        assert m.alpha == pytest.approx(2.0, abs=0.001)
+        assert m.beta == pytest.approx(1.0, abs=0.001)
 
     def test_cross_model_bonus(self, session):
         """Different model family = 2.0x cross-model bonus."""
@@ -238,8 +245,18 @@ class TestCrossModelConfidence:
         assert m.model_count >= 2
         assert m.maturity in (MaturityLevel.TESTED.value, MaturityLevel.VALIDATED.value)
 
-    def test_invalidation_unaffected_by_model(self, session):
-        """Invalidation doesn't get cross-model bonus (failures are failures)."""
+    def test_invalidation_gets_symmetric_evidence_weight(self, session):
+        """v2.4.0 Beta-Binomial: invalidation evidence weights mirror
+        validation evidence weights. A cross-family negative carries
+        the same statistical signal as a cross-family positive — the
+        pre-v2.4.0 ``-0.12·conf`` proportional decay was a hand-tuned
+        magic number that the math/stats dossier flagged as
+        unprincipled (asymmetric without justification).
+
+        Concretely: invalidation from ``gpt-4o`` against an
+        ``anthropic``-authored memory carries cross-model evidence
+        weight (×1.3) → β += 1.3.
+        """
         m = Memory(
             type=MemoryType.PATTERN.value,
             title="Test", content="Test",
@@ -248,9 +265,10 @@ class TestCrossModelConfidence:
         session.add(m)
         session.commit()
 
-        base = m.confidence_score
         update_confidence(m, False, model_name="gpt-4o")
-        delta = base - m.confidence_score
 
-        # Invalidation weight is 0.12 × 0.5 = 0.06 regardless of model
-        assert delta == pytest.approx(0.06, abs=0.01)
+        # α stays at the Beta(1, 1) prior; β grows by the cross-family
+        # weight (1.0 × 1.3 = 1.3). Posterior mean = 1 / (1 + 2.3) ≈ 0.303.
+        assert m.alpha == pytest.approx(1.0, abs=0.001)
+        assert m.beta == pytest.approx(2.3, abs=0.001)
+        assert m.confidence_score == pytest.approx(1.0 / 3.3, abs=0.005)

@@ -165,13 +165,20 @@ async def memory_record(
     project_path: str = "",
     context: str = "{}",
     model: str = "",
+    is_authoritative: bool = False,
 ) -> str:
-    """Record a new memory to organizational knowledge base.
+    """Records a new memory in the organizational knowledge base.
 
     Types: pattern, decision, anti_pattern, lesson, observation.
     Tags are comma-separated. Context is JSON string with extra metadata.
     Model is auto-detected if not provided.
-    Use this after learning something that could help future projects.
+
+    Set ``is_authoritative=True`` for policies, personas, or hard
+    constraints that the router's Layer 0.5 surfaces in every briefing
+    whose tags overlap, regardless of similarity score.
+
+    Suitable for capturing a learning from the current task that could
+    inform future projects.
     """
     from memee.engine.quality_gate import merge_duplicate, run_quality_gate
     from memee.storage.models import Memory, Project, ProjectMemory
@@ -219,6 +226,7 @@ async def memory_record(
         confidence_score=gate.initial_confidence,
         source_type=gate.source_type,
         quality_score=gate.quality_score,
+        is_authoritative=bool(is_authoritative),
     )
     session.add(memory)
 
@@ -245,17 +253,18 @@ async def memory_search(
     limit: int = 10,
     project_path: str = "",
 ) -> str:
-    """Search organizational memory using natural language.
+    """Searches organizational memory using natural language.
 
     Returns memories ranked by relevance (BM25 + tag overlap + confidence).
-    Use this to find existing knowledge before solving a problem.
+    Suitable for finding existing knowledge that may be relevant to a
+    problem.
 
     R13 ``project_path``: when set, memories validated in the named
     project receive a small rerank boost so in-stack proven patterns
     surface ahead of equivalents from elsewhere.
 
-    The response includes a ``query_event_id`` — pass it to
-    ``search_feedback`` once you pick a result so Memee can track hit@k.
+    The response includes a ``query_event_id`` — passing it to
+    ``search_feedback`` after picking a result lets Memee track hit@k.
     """
     from memee.engine.search import search_memories
     from memee.storage.models import Project
@@ -637,10 +646,11 @@ async def antipattern_check(
     context: str,
     tags: str = "",
 ) -> str:
-    """Check current approach against known anti-patterns.
+    """Checks an approach against known anti-patterns.
 
-    Call this BEFORE implementing to avoid repeating known mistakes.
-    Describe what you're about to do and get warnings if it matches anti-patterns.
+    Returns warnings when the described context matches a recorded
+    anti-pattern. Suitable for surfacing relevant lessons before
+    implementation.
     """
     from memee.engine.search import search_anti_patterns
 
@@ -689,15 +699,16 @@ async def get_briefing(
     task: str = "",
     token_budget: int = 500,
 ) -> str:
-    """Get a smart knowledge briefing BEFORE starting a task.
+    """Returns task-routed organizational knowledge for a project.
 
-    CALL THIS FIRST when starting work on a project.
-    Describe your task and get ONLY relevant knowledge — not everything.
+    Smart router selects only the patterns, warnings, and decisions
+    relevant to the described task — token-budgeted, not exhaustive.
 
     Example: get_briefing(task="write unit tests for auth module")
-    → Returns testing + security patterns only (~300 tokens, not 14,000)
+    → testing + security patterns only (~300 tokens, not 14,000)
 
-    Token-budgeted: max 500 tokens by default. Adjust with token_budget.
+    Token-budgeted: max 500 tokens by default. Adjustable via
+    ``token_budget``.
     """
     from memee.engine.router import smart_briefing
 
@@ -713,11 +724,11 @@ async def post_task_feedback(
     outcome: str = "success",
     model: str = "",
 ) -> str:
-    """Report what happened AFTER a task. Closes the feedback loop.
+    """Records the outcome of a task and closes the feedback loop.
 
-    Pass the git diff and outcome. Memee checks:
-    - Did you follow recommended patterns? (validates them)
-    - Did you violate any warnings? (records incident)
+    Accepts the git diff and outcome. Memee checks:
+    - Whether recommended patterns were followed (validates them)
+    - Whether any warnings were violated (records incident)
     - Teaching effectiveness score.
     """
     from memee.engine.feedback import post_task_review
@@ -738,7 +749,8 @@ async def post_task_feedback(
 async def learning_status() -> str:
     """Organizational learning dashboard: memory stats, maturity distribution, learning rate.
 
-    Use this to understand how the organization's knowledge is growing.
+    Returns counts and aggregates that describe the shape of the
+    knowledge base.
     """
     from sqlalchemy import func
 
@@ -837,10 +849,11 @@ async def propagate_patterns(
 async def predict_warnings(
     project_path: str = "",
 ) -> str:
-    """Scan a project's stack against all known anti-patterns.
+    """Scans a project's stack against all known anti-patterns.
 
-    PROACTIVELY pushes relevant warnings — don't wait for the agent to check.
-    Call this when starting work on a project to get all applicable warnings upfront.
+    Returns every warning whose tags overlap the project's stack.
+    Suitable for surfacing relevant lessons up front rather than per
+    file.
     """
     from memee.engine.predictive import scan_project_for_warnings
     from memee.storage.models import Project
@@ -874,11 +887,10 @@ async def inherit_knowledge(
     min_confidence: float = 0.6,
     max_inherit: int = 50,
 ) -> str:
-    """Inherit validated patterns from similar-stack projects.
+    """Inherits validated patterns from similar-stack projects.
 
-    When starting a new project, call this to get a head start with
-    proven patterns from projects with overlapping technology stacks.
-    Don't start from zero.
+    For new projects: pulls proven patterns from projects with
+    overlapping technology stacks so the canon doesn't start empty.
     """
     from memee.engine.inheritance import inherit_memories
     from memee.storage.models import Project
@@ -909,11 +921,11 @@ async def inherit_knowledge(
 
 @mcp.tool()
 async def run_dream() -> str:
-    """Run Dream Mode: nightly knowledge processing cycle.
+    """Runs Dream Mode: a nightly knowledge processing cycle.
 
     Auto-connects related memories, finds contradictions, boosts
-    well-connected memories, proposes promotions, and extracts meta-patterns.
-    Run this periodically (nightly or weekly) to keep knowledge healthy.
+    well-connected memories, proposes promotions, and extracts
+    meta-patterns. Designed to run on a schedule (nightly or weekly).
     """
     from memee.engine.dream import run_dream_cycle
 

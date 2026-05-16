@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass, field
 from typing import Iterable
@@ -270,10 +271,173 @@ _MIN_PER_SLICE = 50
 
 
 @dataclass
+class BetaCurve:
+    """3-parameter Beta calibration (Kull, Filho, Flach AISTATS 2017).
+
+    v2.4.3 (Tier 1.7). Beta calibration dominates Platt scaling when
+    the score's class-conditional distribution isn't sigmoidal, and
+    dominates isotonic at small n (< ~500 records) where the
+    pool-adjacent-violators fit overfits to bin boundaries. Memee's
+    typical per-slice calibration data is exactly in that small-n
+    regime, so Beta is the right default below the cutoff.
+
+    Functional form (Kull 2017 eq. 4):
+        σ_{a,b,c}(p) = 1 / (1 + exp(-(a·log(p) - b·log(1-p) + c)))
+
+    The 3 parameters are fit via logistic regression on the transformed
+    features ``[log(p), -log(1-p)]`` against the binary outcome. We use
+    pure-Python Newton-Raphson on the log-likelihood; converges in
+    O(10) iterations for any realistic input.
+
+    Storage shape parallels :class:`IsotonicCurve` so the registry can
+    hold either type transparently.
+    """
+    a: float = 1.0
+    b: float = 1.0
+    c: float = 0.0
+    n_train: int = 0
+    slice_key: str = ""
+
+    def predict(self, x: float) -> float:
+        # Clamp to (eps, 1-eps) so log() and log(1-x) are finite.
+        eps = 1e-6
+        x = max(eps, min(1.0 - eps, x))
+        z = self.a * math.log(x) - self.b * math.log(1.0 - x) + self.c
+        # Stable sigmoid: avoid overflow on large negative z.
+        if z >= 0:
+            return 1.0 / (1.0 + math.exp(-z))
+        ez = math.exp(z)
+        return ez / (1.0 + ez)
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "beta",
+            "a": self.a, "b": self.b, "c": self.c,
+            "n_train": self.n_train,
+            "slice_key": self.slice_key,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "BetaCurve":
+        return cls(
+            a=float(d.get("a", 1.0)),
+            b=float(d.get("b", 1.0)),
+            c=float(d.get("c", 0.0)),
+            n_train=int(d.get("n_train", 0)),
+            slice_key=d.get("slice_key", ""),
+        )
+
+
+def fit_beta_calibration(
+    pairs: Iterable[tuple[float, int]],
+    *,
+    slice_key: str = "global",
+    max_iter: int = 50,
+    tol: float = 1e-6,
+) -> BetaCurve:
+    """Fit a 3-parameter Beta calibrator (Kull et al. 2017).
+
+    ``pairs``: ``[(predicted_probability, outcome_0_or_1), …]``.
+
+    Pure-Python Newton-Raphson on the binary cross-entropy of
+    ``σ(a·log(p) - b·log(1-p) + c)`` vs the observed outcomes. Three
+    params → 3×3 Hessian, easy to invert in closed form. Returns the
+    identity (a=1, b=1, c=0) when the input is degenerate (no data,
+    all-zero or all-one labels — sigmoid is undefined there).
+    """
+    rows = list(pairs)
+    if len(rows) < 2:
+        return BetaCurve(slice_key=slice_key, n_train=len(rows))
+
+    eps = 1e-6
+    # Pre-compute features once.
+    X = [(math.log(max(eps, min(1.0 - eps, p))),
+          -math.log(max(eps, min(1.0 - eps, 1.0 - p))),
+          1.0)
+         for p, _ in rows]
+    y = [int(o) for _, o in rows]
+    n = len(rows)
+
+    # Degenerate: all-same labels → calibrator can't separate; return identity.
+    if all(o == 0 for o in y) or all(o == 1 for o in y):
+        return BetaCurve(slice_key=slice_key, n_train=n)
+
+    # Newton-Raphson on logistic loss. Init at a=1, b=1, c=0 (identity).
+    theta = [1.0, 1.0, 0.0]
+    for _ in range(max_iter):
+        # Forward + gradient + Hessian
+        g = [0.0, 0.0, 0.0]
+        H = [[0.0] * 3 for _ in range(3)]
+        loss = 0.0
+        for xi, yi in zip(X, y):
+            z = theta[0] * xi[0] + theta[1] * xi[1] + theta[2] * xi[2]
+            # Stable sigmoid + log-loss.
+            if z >= 0:
+                p = 1.0 / (1.0 + math.exp(-z))
+            else:
+                ez = math.exp(z)
+                p = ez / (1.0 + ez)
+            p = max(eps, min(1.0 - eps, p))
+            loss -= yi * math.log(p) + (1 - yi) * math.log(1.0 - p)
+            err = p - yi
+            for i in range(3):
+                g[i] += err * xi[i]
+                for j in range(3):
+                    H[i][j] += p * (1.0 - p) * xi[i] * xi[j]
+
+        # Newton step: θ -= H^-1 g. Solve the 3×3 linear system directly.
+        # Add a tiny ridge so the inverse is stable on near-singular H.
+        for i in range(3):
+            H[i][i] += 1e-8
+        delta = _solve_3x3(H, g)
+        if delta is None:
+            break
+        max_step = max(abs(d) for d in delta)
+        theta = [theta[i] - delta[i] for i in range(3)]
+        if max_step < tol:
+            break
+
+    return BetaCurve(a=theta[0], b=theta[1], c=theta[2],
+                     n_train=n, slice_key=slice_key)
+
+
+def _solve_3x3(M: list[list[float]], b: list[float]) -> list[float] | None:
+    """Cramer's rule on a 3×3 — cheaper than importing numpy here."""
+    def det3(m: list[list[float]]) -> float:
+        return (
+            m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+        )
+    d = det3(M)
+    if abs(d) < 1e-12:
+        return None
+    out = []
+    for col in range(3):
+        Mi = [row[:] for row in M]
+        for r in range(3):
+            Mi[r][col] = b[r]
+        out.append(det3(Mi) / d)
+    return out
+
+
+# Threshold below which BetaCurve is preferred over IsotonicCurve.
+# Kull et al. show beta wins decisively at n < ~1000; isotonic wins
+# above. The 500 split is conservative — at the boundary either is
+# acceptable.
+_BETA_CALIBRATION_MAX_N = 500
+
+
+@dataclass
 class CurveRegistry:
-    """Per-(type, scope, source) calibration curves with a global fallback."""
-    global_curve: IsotonicCurve
-    by_slice: dict[str, IsotonicCurve] = field(default_factory=dict)
+    """Per-(type, scope, source) calibration curves with a global fallback.
+
+    v2.4.3: curves may be either :class:`IsotonicCurve` (large n) or
+    :class:`BetaCurve` (small n). Both expose ``predict(x)`` so the
+    registry doesn't care which kind it holds.
+    """
+    global_curve: IsotonicCurve | BetaCurve
+    by_slice: dict[str, IsotonicCurve | BetaCurve] = field(default_factory=dict)
 
     @staticmethod
     def slice_key(memory_type: str | None, scope: str | None, source: str | None) -> str:
@@ -298,11 +462,42 @@ class CurveRegistry:
     @classmethod
     def from_dict(cls, d: dict) -> "CurveRegistry":
         return cls(
-            global_curve=IsotonicCurve.from_dict(d.get("global", {"xs": [], "ys": [], "n_train": 0})),
+            global_curve=_curve_from_dict(d.get("global", {"xs": [], "ys": [], "n_train": 0})),
             by_slice={
-                k: IsotonicCurve.from_dict(v) for k, v in (d.get("slices") or {}).items()
+                k: _curve_from_dict(v) for k, v in (d.get("slices") or {}).items()
             },
         )
+
+
+def _curve_from_dict(d: dict) -> IsotonicCurve | BetaCurve:
+    """Pick the right curve class based on the persisted ``kind`` marker.
+
+    v2.4.3: introduced ``"kind": "beta"`` for BetaCurve. Legacy
+    IsotonicCurve dicts have no ``kind`` field and are detected by
+    structure (presence of ``xs``/``ys``). Future curve types add
+    new ``kind`` markers without breaking old dicts.
+    """
+    if d.get("kind") == "beta":
+        return BetaCurve.from_dict(d)
+    return IsotonicCurve.from_dict(d)
+
+
+def _fit_curve_by_size(
+    pairs: list[tuple[float, int]],
+    *,
+    slice_key: str,
+) -> IsotonicCurve | BetaCurve:
+    """Pick a calibrator type based on training set size.
+
+    v2.4.3 (Tier 1.7): below ``_BETA_CALIBRATION_MAX_N``, BetaCurve's
+    3-parameter parametric form generalises better than isotonic's
+    pool-adjacent-violators fit. Above the threshold, the data has
+    enough resolution that isotonic's non-parametric flexibility
+    earns its complexity. Kull et al. AISTATS 2017 §5.2.
+    """
+    if len(pairs) < _BETA_CALIBRATION_MAX_N:
+        return fit_beta_calibration(pairs, slice_key=slice_key)
+    return fit_isotonic(pairs, slice_key=slice_key)
 
 
 def fit_curves(records: Iterable[dict]) -> CurveRegistry:
@@ -310,13 +505,17 @@ def fit_curves(records: Iterable[dict]) -> CurveRegistry:
 
     Each record: ``{"prediction": float, "outcome": int, "memory_type":
     str, "scope": str, "source_type": str}``.
+
+    v2.4.3: per-slice fits use BetaCurve below ~500 records, isotonic
+    above. The global curve uses the same rule. Both classes share the
+    ``predict(x)`` interface so the registry stays type-blind.
     """
     rows = list(records)
     if not rows:
         return CurveRegistry(global_curve=IsotonicCurve(xs=[], ys=[], n_train=0))
 
     global_pairs = [(r["prediction"], int(r["outcome"])) for r in rows]
-    global_curve = fit_isotonic(global_pairs, slice_key="global")
+    global_curve = _fit_curve_by_size(global_pairs, slice_key="global")
 
     by_slice_inputs: dict[str, list[tuple[float, int]]] = {}
     for r in rows:
@@ -328,7 +527,7 @@ def fit_curves(records: Iterable[dict]) -> CurveRegistry:
         )
 
     by_slice = {
-        k: fit_isotonic(pairs, slice_key=k)
+        k: _fit_curve_by_size(pairs, slice_key=k)
         for k, pairs in by_slice_inputs.items()
         if len(pairs) >= _MIN_PER_SLICE
     }
@@ -438,6 +637,7 @@ def beta_binomial_posterior(memory, *, alpha: float = 2.0, beta: float = 2.0) ->
 
 
 __all__ = [
+    "BetaCurve",
     "CalibrationMetrics",
     "CurveRegistry",
     "IsotonicCurve",
@@ -445,6 +645,7 @@ __all__ = [
     "brier_score",
     "calibration_metrics",
     "fit_beta_binomial",
+    "fit_beta_calibration",
     "fit_curves",
     "fit_isotonic",
     "invalidate_cache",

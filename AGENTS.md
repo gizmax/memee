@@ -292,7 +292,7 @@ MCP tool `sync_to_cmam` lets agents trigger the push themselves.
 ## Tests
 
 ```bash
-pytest tests/ -v   # 201 tests, ~67s
+pytest tests/ -v   # ~500 tests, ~40s (excluding heavy simulations)
 ```
 
 Simulation tests: test_company_simulation (NovaTech 6mo), test_enterprise (TechCorp 52wk),
@@ -304,6 +304,6 @@ test_real_impact (A/B with/without), test_perf_simulation (9 scenarios)
 
 - 33 commits on feat/initial-setup
 - 63 Python files, 18,899 lines of code
-- 201 tests passing
+- ~500 tests passing (excluding heavy simulations)
 - 16 engine modules + CMAM adapter, 19 MCP tools, 12+ API endpoints (GET-only dashboard API)
 - MIT licence (OSS `memee`), proprietary EULA for `memee-team`

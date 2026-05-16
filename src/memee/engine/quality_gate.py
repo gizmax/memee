@@ -538,12 +538,22 @@ def merge_duplicate(
     new_tags: list[str] | None = None,
     new_title: str | None = None,
     similarity: float | None = None,
+    commit: bool = True,
 ) -> Memory:
     """Merge new information into existing memory.
 
     Also records the merge in ``evidence_chain`` so operators can audit what
     got collapsed, and bumps ``merge_count`` so the cluster-size gate can
     halt runaway clustering.
+
+    ``commit`` (v2.3.3): controls whether to call ``session.commit()`` at
+    the end. Default True preserves the historical contract for the
+    write-time path (``memee record``, ``memee pack install``) where each
+    merge is its own logical transaction. The dream loop passes
+    ``commit=False`` so its outer ``BEGIN EXCLUSIVE`` stays atomic — the
+    pre-v2.3.3 inner commit silently broke the
+    "one transaction per cycle" promise documented at
+    ``dream.run_dream_cycle``.
     """
     # Append unique content
     if new_content and new_content not in (existing.content or ""):
@@ -582,7 +592,13 @@ def merge_duplicate(
         session.flush()  # ensure existing.id is resolved and updates are visible
         sync_memory_tags(session, existing)
 
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        # Caller owns the transaction — flush so the row state is visible
+        # to subsequent reads within the same outer transaction, without
+        # actually committing.
+        session.flush()
     logger.info(
         f"Merged into existing memory: {existing.id[:8]} "
         f"(cluster size now {existing.merge_count})"

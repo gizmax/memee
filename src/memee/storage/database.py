@@ -134,6 +134,119 @@ def _bootstrap_memory_organization_id(engine) -> None:
         conn.commit()
 
 
+def _bootstrap_memory_fsrs_light(engine) -> None:
+    """Ensure ``memories.half_life`` + ``memories.last_retrieved`` exist (v2.4.5).
+
+    Symmetric with alembic ``c3f9e8a1b4d2_memory_fsrs_light`` so SQLite-
+    only deployments converge on the same schema without running
+    alembic. Idempotent.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    with engine.connect() as conn:
+        cols = {c[1] for c in conn.execute(text("PRAGMA table_info(memories)")).fetchall()}
+        if "half_life" not in cols:
+            try:
+                conn.execute(
+                    text(
+                        "ALTER TABLE memories ADD COLUMN half_life "
+                        "FLOAT NOT NULL DEFAULT 14.0"
+                    )
+                )
+                conn.commit()
+            except OperationalError as e:
+                logger.debug("ADD COLUMN half_life skipped: %s", e)
+        if "last_retrieved" not in cols:
+            try:
+                conn.execute(
+                    text("ALTER TABLE memories ADD COLUMN last_retrieved DATETIME")
+                )
+                conn.commit()
+            except OperationalError as e:
+                logger.debug("ADD COLUMN last_retrieved skipped: %s", e)
+
+
+def _bootstrap_memory_alpha_beta(engine) -> None:
+    """Ensure ``memories.alpha`` and ``memories.beta`` exist (v2.4.0).
+
+    The model declares both columns; older DBs created before v2.4.0
+    don't have them. ALTER TABLE in place if missing, with a NOT NULL
+    DEFAULT 1.0 so every existing row starts at Beta(1, 1) — uniform
+    prior with posterior mean 0.5. Memories that already accumulated
+    validation history get back-filled at first read by
+    ``engine.confidence._backfill_alpha_beta`` (preserves the
+    posterior mean equal to the legacy confidence_score).
+
+    Idempotent; symmetric with the alembic migration
+    ``9c2e187f3ab4_memory_beta_binomial`` so init_db-only deployments
+    and alembic-only deployments converge on the same schema.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    with engine.connect() as conn:
+        cols = {c[1] for c in conn.execute(text("PRAGMA table_info(memories)")).fetchall()}
+        for col_name in ("alpha", "beta"):
+            if col_name in cols:
+                continue
+            try:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE memories ADD COLUMN {col_name} "
+                        "FLOAT NOT NULL DEFAULT 1.0"
+                    )
+                )
+                conn.commit()
+            except OperationalError as e:
+                logger.debug("ADD COLUMN %s skipped: %s", col_name, e)
+
+
+def _bootstrap_memory_is_authoritative(engine) -> None:
+    """Ensure ``memories.is_authoritative`` exists on legacy DBs (v2.3.1).
+
+    The model declares the column; older DBs created before v2.3.1 don't
+    have it. ALTER TABLE in place if missing, with a NOT NULL DEFAULT 0
+    so every existing row stays non-authoritative (preserves prior
+    routing behaviour).
+
+    Idempotent; symmetric with the alembic migration so init_db-only
+    deployments and alembic-only deployments converge on the same schema.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(memories)")).fetchall()
+        has_col = any(c[1] == "is_authoritative" for c in cols)
+        if has_col:
+            return
+        try:
+            conn.execute(
+                text(
+                    "ALTER TABLE memories ADD COLUMN is_authoritative "
+                    "BOOLEAN NOT NULL DEFAULT 0"
+                )
+            )
+            conn.commit()
+        except OperationalError as e:
+            logger.debug("ADD COLUMN is_authoritative skipped: %s", e)
+            return
+
+        # Best-effort index — same shape as the alembic migration so
+        # query plans match between the two upgrade paths. Skip silently
+        # if the SQLite version doesn't support partial indexes (extremely
+        # old; we ship for 3.8+).
+        try:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_memories_authoritative "
+                    "ON memories(is_authoritative) "
+                    "WHERE is_authoritative = 1"
+                )
+            )
+            conn.commit()
+        except OperationalError as e:
+            logger.debug("CREATE INDEX ix_memories_authoritative skipped: %s", e)
+
+
 def _bootstrap_porter_tokenizer(engine) -> None:
     """R11 native: rebuild the FTS5 index with ``porter unicode61`` if the
     existing index uses plain ``unicode61``. SQLite doesn't allow ALTERing
@@ -391,6 +504,9 @@ def init_db(engine=None):
     _bootstrap_search_event_ranker_columns(engine)
     _bootstrap_r10_indexes(engine)
     _bootstrap_porter_tokenizer(engine)
+    _bootstrap_memory_is_authoritative(engine)
+    _bootstrap_memory_alpha_beta(engine)
+    _bootstrap_memory_fsrs_light(engine)
 
     # Stamp alembic head if the version table is empty / missing. This keeps
     # both paths (init_db-only and alembic-only) interoperable — without this

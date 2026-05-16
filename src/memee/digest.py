@@ -326,7 +326,7 @@ def format_digest_notice() -> str | None:
     All numbers come from the local DB at ``~/.memee/memee.db``;
     nothing leaves the machine.
     """
-    if os.environ.get("MEMEE_NO_DIGEST"):
+    if os.environ.get("MEMEE_QUIET") or os.environ.get("MEMEE_NO_DIGEST"):
         return None
 
     now = datetime.now(timezone.utc)

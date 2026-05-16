@@ -153,13 +153,20 @@ def _fallback_headline(impact_counts: dict, days: int) -> str:
     return f"Memee — {window}: {', '.join(parts)}."
 
 
-def _try_receipt_headline(impact_counts: dict, days: int) -> str | None:
-    """Try the M1 receipt formatter; fall through to ``None`` if it isn't
-    available or its signature differs.
+def _try_receipt_headline(
+    session, since: datetime, until: datetime
+) -> str | None:
+    """Render the M1 session receipt for the (since, until) window, or None.
 
-    The contract with M1 isn't pinned (sibling agent owns that file) so
-    we probe with several plausible call shapes and ignore everything
-    except a non-empty string return value. Any exception → None.
+    v2.2.2 (F2): the previous probe-the-signature approach was a
+    leftover from when M1 lived in a sibling worktree; the function's
+    signature is now pinned at ``format_session_receipt(session, *,
+    since, until, voice=None)``. Probing made the call always fall
+    through to the hand-crafted headline because none of the probed
+    kwargs matched. Now we call it directly with the right shape.
+
+    Any exception → None: the pulse falls back to its own headline
+    rather than failing.
     """
     try:
         from memee import receipts as _receipts  # type: ignore[attr-defined]
@@ -172,25 +179,14 @@ def _try_receipt_headline(impact_counts: dict, days: int) -> str | None:
     if fn is None or not callable(fn):
         return None
 
-    # Try a couple of plausible signatures. M1 may take a session/dict/
-    # nothing — we don't want to bind to a specific shape and break if
-    # the sibling agent picks a different one. Each attempt is wrapped
-    # in its own try so a TypeError on one shape doesn't kill the rest.
-    for kwargs in (
-        {"impact": impact_counts, "days": days},
-        {"counts": impact_counts, "days": days},
-        {"impact_counts": impact_counts, "days": days},
-        {"days": days},
-        {},
-    ):
-        try:
-            out = fn(**kwargs) if kwargs else fn()
-        except TypeError:
-            continue
-        except Exception:
-            return None
-        if isinstance(out, str) and out.strip():
-            return out.strip()
+    try:
+        out = fn(session, since=since, until=until)
+    except TypeError:
+        return None
+    except Exception:
+        return None
+    if isinstance(out, str) and out.strip():
+        return out.strip()
     return None
 
 
@@ -496,7 +492,7 @@ def compute_pulse(session, days: int = 7) -> dict:
     # Headline: try M1's formatter first, fall back to the hand-rolled
     # version. Both paths can return None; on None we use the canonical
     # "quiet week" line so the renderer's empty-state branch fires.
-    headline = _try_receipt_headline(impact_counts, days)
+    headline = _try_receipt_headline(session, since, until)
     if not headline:
         headline = _fallback_headline(impact_counts, days)
 

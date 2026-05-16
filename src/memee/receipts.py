@@ -14,11 +14,17 @@ not Memee.** A line that brags about Memee reframes the agent's work as
 brag — and the same content reads as:
 
     Pulling from "React Query keys must include tenant id" — settled in
-    this canon last March. [mem:c12a7e8f]
+    this canon last March.
 
 So this module ships a **voice flag** (``agent | tool``), default
 ``agent`` for new installs. Tool voice is preserved for users who already
 quote the line in their docs / dashboards and don't want it to mutate.
+
+v2.2.1: stripped inline ``[mem:xxxxxxxx]`` tokens from agent-voice
+receipts. The token belonged to a v2.0 footer that asked the agent to
+emit citations; that footer was rewritten as injection-class text. The
+receipt is now pure state description — the user runs ``memee cite``
+when they want lineage, and the agent doesn't need a token to imitate.
 
 Design rules (mirrors digest.py + session_ledger.py)
 ----------------------------------------------------
@@ -315,15 +321,21 @@ def _format_when(created_at: datetime | None) -> str:
 
 
 def _format_agent_voice(session, since: datetime, until: datetime, counters: dict) -> str | None:
-    """Render the agent's-footnote phrasing citing the headline memory.
+    """Render the agent's-footnote phrasing for the headline memory.
+
+    v2.2.1: stripped the inline ``[mem:xxxxxxxx]`` token. The receipt is
+    a passive description of what Memee did, not a directive asking the
+    agent to reproduce a specific output format. Citation tokens belong
+    only on surfaces where the user is meant to act (e.g. ``memee cite``
+    CLI hint), not in transcript-prepended state descriptions.
 
     Picks the most-significant memory for the window (see
     ``_pick_headline_event``) and crafts one of three sentences keyed
     on the impact type:
 
-      * MISTAKE_AVOIDED   → 'Avoided a repeat of "<title>" from past project. [mem:xxxxxxxx]'
-      * KNOWLEDGE_REUSED  → 'Applied "<title>" — pattern reused N time(s) before. [mem:xxxxxxxx]'
-      * DECISION_INFORMED → 'Pulling from "<title>" — settled in this canon last <when>. [mem:xxxxxxxx]'
+      * MISTAKE_AVOIDED   → 'Avoided a repeat of "<title>" from past project.'
+      * KNOWLEDGE_REUSED  → 'Applied "<title>" — pattern reused N time(s) before.'
+      * DECISION_INFORMED → 'Pulling from "<title>" — settled in this canon last <when>.'
 
     Returns ``None`` if no headline event could be picked (DB is dry,
     every event has a missing memory row, etc.). Caller falls back to
@@ -339,8 +351,6 @@ def _format_agent_voice(session, since: datetime, until: datetime, counters: dic
     mem = event.memory
     title = (mem.title or "").strip() or "(untitled)"
     truncated = _truncate_title(title, 60)
-    short = _short_hash(mem.id or "")
-    cite = f"[mem:{short}]" if short else "[mem:?]"
 
     kind = event.impact_type
     # The "before" reuse count is the memory's application_count — every
@@ -354,13 +364,11 @@ def _format_agent_voice(session, since: datetime, until: datetime, counters: dic
     when = _format_when(event.created_at)
 
     if kind == "mistake_avoided":
-        sentence = (
-            f'Avoided a repeat of "{truncated}" from past project. {cite}'
-        )
+        sentence = f'Avoided a repeat of "{truncated}" from past project.'
     elif kind == "knowledge_reused":
         sentence = (
             f'Applied "{truncated}" — pattern reused '
-            f"{prior} {'time' if prior == 1 else 'times'} before. {cite}"
+            f"{prior} {'time' if prior == 1 else 'times'} before."
         )
     else:
         # DECISION_INFORMED + forward-compat fall-through. The "settled
@@ -369,29 +377,25 @@ def _format_agent_voice(session, since: datetime, until: datetime, counters: dic
         # decision is.
         sentence = (
             f'Pulling from "{truncated}" — settled in this canon '
-            f"{when}. {cite}"
+            f"{when}."
         )
 
     # Hard 140-char cap. If a long title pushed us over, trim the title
     # in 8-char chunks until we fit. Worst case the title becomes just
-    # the ellipsis — better than a truncated cite token.
+    # the ellipsis.
     while len(sentence) > 140 and len(truncated) > 4:
         truncated = _truncate_title(truncated, max(len(truncated) - 8, 4))
         if kind == "mistake_avoided":
-            sentence = (
-                f'Avoided a repeat of "{truncated}" from past project. '
-                f"{cite}"
-            )
+            sentence = f'Avoided a repeat of "{truncated}" from past project.'
         elif kind == "knowledge_reused":
             sentence = (
                 f'Applied "{truncated}" — pattern reused '
-                f"{prior} {'time' if prior == 1 else 'times'} before. "
-                f"{cite}"
+                f"{prior} {'time' if prior == 1 else 'times'} before."
             )
         else:
             sentence = (
                 f'Pulling from "{truncated}" — settled in this canon '
-                f"{when}. {cite}"
+                f"{when}."
             )
     return sentence
 
@@ -437,7 +441,7 @@ def format_session_receipt(
     Best-effort: every error collapses to ``None``. The hook must never
     break the agent's session.
     """
-    if os.environ.get("MEMEE_NO_RECEIPT"):
+    if os.environ.get("MEMEE_QUIET") or os.environ.get("MEMEE_NO_RECEIPT"):
         return None
     try:
         counters = _aggregate_counters(session, since, until)

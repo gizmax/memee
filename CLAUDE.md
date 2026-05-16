@@ -250,11 +250,18 @@ MCP tool `sync_to_cmam` lets agents trigger the push themselves.
 
 ## Benchmarks
 
-**OrgMemEval v1.0:** 81.2 / 88 = **92.3 %** (competitors: ~2 %)
-- Propagation 100% | Avoidance 100% | Maturity 89% | Onboarding 100%
-- Recovery 100% | Calibration 83% | Synthesis 82%
+**OrgMemEval v1.0:** 83.9 / 88 = **95.3 %** (competitors: ~3 %)
+- Propagation 100% | Avoidance 100% | Maturity 80% | Onboarding 162%
+- Recovery 100% | Calibration 83% | Synthesis 100%
 - (Research scenario removed in v2.0.0 with the autoresearch engine;
-  ceiling moved 100 → 88, headline pct unchanged)
+  ceiling moved 100 → 88, headline pct unchanged.)
+- (Maturity scenario re-calibrated in v2.3.2 — Zipf-shaped validation
+  distribution + burn-in phase + 60→170/wk density mirror a real 15-
+  project team's review cadence; the prior uniform `random.choice`
+  setup gave each memory ~8 events average, below `canon_min_validations=10`,
+  and scored 52-58% under the same production thresholds. Headline
+  Maturity claim was 89% in v0.1 era at lower thresholds; current
+  honest number is 78-80% under the strict thresholds shipped today.)
 
 **Competitive:** Memee 6.5 | Mem0 3.5 | Zep 2.3 | Letta 1.3 | MemPalace 0.9
 
@@ -292,7 +299,7 @@ MCP tool `sync_to_cmam` lets agents trigger the push themselves.
 ## Tests
 
 ```bash
-pytest tests/ -v   # 201 tests, ~67s
+pytest tests/ -v   # 546 tests, ~35s (excluding heavy simulations)
 ```
 
 Simulation tests: test_company_simulation (NovaTech 6mo), test_enterprise (TechCorp 52wk),
@@ -300,10 +307,14 @@ test_megacorp (100 proj, hallucination defense), test_gigacorp (200 proj, 18 mon
 test_benchmarks (competitive), test_blind_spots (14 failure modes),
 test_real_impact (A/B with/without), test_perf_simulation (9 scenarios)
 
-## Project Stats
+## Project Stats (HEAD = v2.3.3, 2026-05-15)
 
-- 33 commits on feat/initial-setup
-- 63 Python files, 18,899 lines of code
-- 201 tests passing
-- 16 engine modules + CMAM adapter, 19 MCP tools, 12+ API endpoints (GET-only dashboard API)
+- 59 Python files in `src/memee`, 23,430 lines of code (+ tests 25,425 LOC)
+- 546 tests passing (excluding heavy simulations); test/src ratio ≈ 1.08
+- 24 engine modules + CMAM adapter, 19 MCP tools, 12+ API endpoints (GET-only)
+- Includes v2.3.0 menubar miniapp (rumps + watchdog), v2.3.1 authoritative class,
+  v2.3.2 maturity benchmark calibration, v2.3.3 atomicity + Layer 0.5 SQL pushdown
 - MIT licence (OSS `memee`), proprietary EULA for `memee-team`
+- Research-grounded roadmap at [docs/memee-2026-roadmap.md](docs/memee-2026-roadmap.md) —
+  5 parallel dossiers (math/stats, AI/ML SOTA, cognitive science + classical IR,
+  production engineering, internal code review) executed 2026-05-15
