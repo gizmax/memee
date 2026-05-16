@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.4.9] — 2026-05-16
+
+Menubar app no longer shows up in the Dock as "Python."
+
+### Fixed
+
+`memee bar` is now a true menu-bar-only app on macOS — `LSUIElement="1"`
+is written to the bundle info dict before `rumps.App` constructs, so the
+pipx-Python host process no longer creates a Dock icon or a Cmd+Tab
+entry. Real user report from a v2.4.8 install ("zustav na liste python").
+The fix is idempotent and falls through silently when AppKit isn't
+available (non-macOS, missing pyobjc) so the surrounding code stays
+portable.
+
+### Migration
+
+After `pipx upgrade memee`, restart the LaunchAgent so the new code path
+runs:
+
+```bash
+memee bar uninstall
+memee bar install
+```
+
 ## [2.4.8] — 2026-05-16
 
 **Contradiction false-positive flood patch. Cross-encoder semantic

@@ -352,6 +352,33 @@ def _build_app():
     return MemeeBarApp()
 
 
+def _hide_from_dock() -> None:
+    """Make the menubar app menu-bar-only (no Dock, no Cmd+Tab).
+
+    Without this, pipx-installed rumps apps show up as a "Python" icon in
+    the Dock because the host is a plain Python interpreter, not a proper
+    ``.app`` bundle. Setting ``LSUIElement`` at runtime via the NSBundle
+    info dictionary is the documented workaround for menubar-only Python
+    apps.
+
+    Must be called BEFORE ``rumps.App`` is constructed — setting it after
+    the process has registered with the WindowServer is a no-op.
+
+    Idempotent. Falls through silently when AppKit isn't available
+    (non-macOS, missing pyobjc) so the surrounding code stays portable.
+    """
+    try:
+        from AppKit import NSBundle  # pyobjc — transitive dep of rumps
+        bundle = NSBundle.mainBundle()
+        info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+        if info is not None:
+            info["LSUIElement"] = "1"   # NSDictionary expects string-y truthy
+            info.setdefault("CFBundleName", "Memee")
+            info.setdefault("CFBundleDisplayName", "Memee")
+    except Exception:
+        pass
+
+
 def run() -> int:
     """Foreground entry point for ``memee bar start``.
 
@@ -374,6 +401,11 @@ def run() -> int:
             "pipx install --force 'memee[bar]'\n"
         )
         return 2
+
+    # Hide the host Python process from the Dock + Cmd+Tab BEFORE the
+    # WindowServer registration that rumps.App.__init__ triggers — too
+    # late afterwards.
+    _hide_from_dock()
 
     # File-watcher: refresh on state.json change. watchdog is a soft
     # dependency — fall back to the 60s rumps timer if it's missing so
