@@ -1023,18 +1023,45 @@ def propagate(threshold, max_prop):
 
 
 @cli.command()
-def dream():
+@click.option(
+    "--rebuild-contradictions",
+    is_flag=True,
+    default=False,
+    help=(
+        "Purge every existing contradicts edge before running the "
+        "cycle, so the v2.4.8 cross-encoder semantic gate re-evaluates "
+        "all pairs. Use once after upgrading from v2.4.7 or earlier "
+        "to clean up the naive-heuristic false-positive flood."
+    ),
+)
+def dream(rebuild_contradictions):
     """Run Dream Mode: nightly knowledge processing cycle."""
+    import os
+
     from memee.engine.dream import run_dream_cycle
     from memee.storage.database import get_session, init_db
 
     engine = init_db()
     session = get_session(engine)
 
-    stats = run_dream_cycle(session)
+    # Honour the env var alongside the flag — useful for cron / hooks.
+    env_rebuild = os.environ.get("MEMEE_REBUILD_CONTRADICTIONS", "").strip().lower()
+    rebuild = rebuild_contradictions or env_rebuild in {"1", "true", "yes", "on"}
+
+    stats = run_dream_cycle(session, rebuild_contradictions=rebuild)
     click.echo("Dream Mode complete:")
+    if rebuild:
+        threshold = os.environ.get("MEMEE_CONTRADICTION_THRESHOLD", "0.55")
+        click.echo(
+            f"  Contradictions purged:   {stats.get('contradictions_purged', 0)} (rebuilt)"
+        )
+        click.echo(
+            f"  Contradictions found:    {stats['contradictions_found']}  "
+            f"(after semantic gate, threshold {threshold})"
+        )
+    else:
+        click.echo(f"  Contradictions:  {stats['contradictions_found']}")
     click.echo(f"  Connections:     {stats['connections_created']} new")
-    click.echo(f"  Contradictions:  {stats['contradictions_found']}")
     click.echo(f"  Confidence boosts: {stats['confidence_boosts']}")
     click.echo(f"  Promotions:      {stats['promotions_applied']}/{stats['promotions_proposed']}")
 

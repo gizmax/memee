@@ -394,7 +394,15 @@ class TestDreamMode:
         # m3 has no overlap with m1/m2 → no extra connection
 
     def test_find_contradictions(self, multi_project_env):
-        """Dream mode finds pattern vs anti-pattern contradictions."""
+        """Dream mode finds pattern vs anti-pattern contradictions.
+
+        v2.4.8: contradiction classification is now gated by the
+        cross-encoder. We inject a deterministic high-score fake scorer
+        so the test asserts the gate path rather than relying on the
+        local HF cache.
+        """
+        from memee.engine.dream import _ContradictionScorer
+
         session, projects, org = multi_project_env
 
         m_pattern = Memory(
@@ -416,7 +424,13 @@ class TestDreamMode:
         session.add(ap)
         session.commit()
 
-        stats = run_dream_cycle(session)
+        # Force a "this is a contradiction" verdict by injecting a
+        # scorer that always returns a value well above the default
+        # threshold (0.55).
+        scorer = _ContradictionScorer()
+        scorer.score_pair = lambda a, b: 0.9  # type: ignore[assignment]
+
+        stats = run_dream_cycle(session, scorer=scorer)
         assert stats["contradictions_found"] >= 1
 
     def test_promotions(self, multi_project_env):

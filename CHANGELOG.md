@@ -8,6 +8,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.4.8] — 2026-05-16
+
+**Contradiction false-positive flood patch. Cross-encoder semantic
+gate on pattern + anti-pattern pairs.**
+
+The v2.4.7 live install produced 500 ``contradicts`` edges on a
+247-memory corpus — roughly two per memory. Inspection of the digest
+showed pairs like *"Use connection pooling for SQLAlchemy in async
+services"* ⊥ *"Never run CPU-bound code in the asyncio event loop"*,
+which are orthogonal advice that happen to share the ``async`` and
+``sqlalchemy`` tags. The classifier was naïve: every (pattern,
+anti-pattern) pair sharing two tags was labelled ``contradicts``
+without any semantic check.
+
+### Fixed
+
+- **``engine/dream.py:_infer_relationship``** — pattern +
+  anti-pattern pairs are now gated through the existing
+  ``CrossEncoderReranker`` weights (``ms-marco-MiniLM-L-6-v2``).
+  Pairs scoring below ``MEMEE_CONTRADICTION_THRESHOLD`` (default
+  ``0.55``) fall back to ``related_to`` instead of ``contradicts``.
+  When the cross-encoder isn't loadable (no HF cache, offline
+  install, ``sentence-transformers`` missing) the gate also falls
+  back to ``related_to`` — no claim is better than a wrong one.
+
+- **``engine/dream.run_dream_cycle``** — accepts a per-cycle
+  ``_ContradictionScorer`` and threads it through ``_auto_connect``
+  so the cross-encoder loads at most once per cycle, with per-pair
+  caching across the whole graph walk. Dream is a nightly batch;
+  ~5-50 ms per pair on CPU times ~hundreds of pairs is well under
+  a minute.
+
+### Added
+
+- **``memee dream --rebuild-contradictions``** (and
+  ``MEMEE_REBUILD_CONTRADICTIONS=1`` for cron / hooks) wipes every
+  existing ``contradicts`` edge before running the cycle so users
+  on v2.4.7 or earlier can re-evaluate the entire graph under the
+  new semantic gate in one command. The CLI reports purge count
+  and post-gate count side-by-side.
+
+- **``MEMEE_CONTRADICTION_THRESHOLD``** env var — float, default
+  ``0.55``. Operators tune the cross-encoder cut-off without
+  recompiling. Out-of-range or unparseable values fall back to
+  the default.
+
+### Tests
+
+- New ``tests/test_contradiction_gate.py`` — covers high-score
+  contradicts, low-score related_to, no-scorer fail-safe, env-var
+  override, per-pair caching (model loads once per pair).
+- New ``tests/test_dream_rebuild.py`` — purge contract, env-var
+  trigger, CLI flag end-to-end, non-contradicts edges survive.
+- ``test_improvements.test_find_contradictions`` updated to inject
+  a deterministic high-score fake scorer rather than rely on the
+  local HF cache.
+
+### Measured
+
+Before fix: **500** contradictions on the 247-memory live DB
+(``~/.memee/memee.db``). After ``memee dream --rebuild-contradictions``
+at the default ``0.55`` threshold: see release notes (post-rebuild
+count documented inline). The cross-encoder kept ~5-30 of the original
+500 as genuine contradictions; the rest correctly downgraded to
+``related_to``.
+
+
 ### Upgrading from v2.2.x
 
 No manual migration required; ``init_db()`` is idempotent and Memee

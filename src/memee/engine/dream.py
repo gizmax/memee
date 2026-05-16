@@ -18,6 +18,7 @@ import logging
 import os
 import re
 from collections import defaultdict
+from typing import Any
 
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -88,6 +89,129 @@ SEMANTIC_DEDUP_TAG_OVERLAP_MIN = 0.5
 # many near-duplicates; the rest get folded on the next dream pass.
 SEMANTIC_DEDUP_MAX_MERGES_PER_CYCLE = 100
 
+# ── v2.4.8 contradiction semantic gate ──
+#
+# Pre-v2.4.8 the contradiction classifier flagged any (pattern,
+# anti-pattern) pair that shared two tags. On a real 247-memory live
+# install this produced 500 false positives — pairs like
+# "Use connection pooling for SQLAlchemy" ⊥ "Never run CPU-bound code
+# in the asyncio event loop" share `async, sqlalchemy` tags without
+# semantically contradicting each other.
+#
+# Fix: gate the heuristic through the existing cross-encoder reranker.
+# We score the (m1.title + body[:200]) text against m2's same shape;
+# only pairs above ``MEMEE_CONTRADICTION_THRESHOLD`` (default 0.55)
+# keep the ``contradicts`` label. Pairs below fall back to
+# ``related_to`` — they're co-tagged advice, not contradictions.
+#
+# 0.55 is a starting estimate against the ms-marco-MiniLM-L-6-v2
+# distribution. Operators can tune via env var; ``memee dream
+# --rebuild-contradictions`` lets them re-evaluate the whole edge set
+# after a tweak without waiting for natural churn.
+CONTRADICTION_THRESHOLD_DEFAULT = 0.55
+
+
+def _contradiction_threshold() -> float:
+    """Cross-encoder threshold for contradiction classification, env-tunable.
+
+    ``MEMEE_CONTRADICTION_THRESHOLD`` accepts any float. Out-of-range or
+    unparseable values fall back to the default. We don't clamp to a
+    [0, 1] window because the cross-encoder score is unbounded — a user
+    setting it to 2.0 to require very strong signal is legitimate.
+    """
+    raw = os.environ.get("MEMEE_CONTRADICTION_THRESHOLD")
+    if raw is None:
+        return CONTRADICTION_THRESHOLD_DEFAULT
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return CONTRADICTION_THRESHOLD_DEFAULT
+
+
+class _ContradictionScorer:
+    """Thin per-cycle wrapper around the cross-encoder reranker.
+
+    Why this exists separately from ``CrossEncoderReranker``: the
+    reranker's API is shaped around (query, candidate-list) for search
+    rerank. Dream needs pairwise scoring with caching across calls in
+    one cycle, so this class:
+
+      * Loads the cross-encoder once (delegated to the reranker's
+        module-cached loader — same model, same weights, no double load).
+      * Exposes ``score_pair(m1, m2)`` returning a float or ``None``.
+      * Caches by ``(m1.id, m2.id)`` (order-insensitive) so the same
+        pair isn't re-scored within a cycle.
+      * Fails safe: if the cross-encoder can't load (no HF cache, no
+        ``sentence-transformers``, network-offline cold install),
+        ``score_pair`` returns ``None`` and ``_infer_relationship``
+        treats the absence as "no claim → ``related_to``".
+
+    Cost: ~5-50 ms per pair on CPU after warm-up. Dream is a nightly
+    batch — at 500 candidate pairs this is well under a minute total,
+    and the cache means subsequent passes inside the same cycle are
+    free.
+    """
+
+    def __init__(self) -> None:
+        self._cache: dict[tuple[str, str], float | None] = {}
+        self._model: Any | None = None
+        self._tried_load = False
+
+    def _ensure_model(self) -> Any | None:
+        if self._tried_load:
+            return self._model
+        self._tried_load = True
+        try:
+            from memee.engine.reranker import (
+                _model_name_from_env,
+                _try_load,
+            )
+        except Exception as e:  # pragma: no cover — defensive
+            logger.debug("contradiction scorer: reranker import failed: %s", e)
+            return None
+        model_name = _model_name_from_env()
+        if not model_name:
+            return None
+        self._model = _try_load(model_name)
+        return self._model
+
+    @staticmethod
+    def _text_for(memory: Memory) -> str:
+        title = (memory.title or "").strip()
+        content = (memory.content or "")[:200].strip()
+        if title and content:
+            return f"{title} — {content}"
+        return title or content
+
+    def score_pair(self, m1: Memory, m2: Memory) -> float | None:
+        """Return the cross-encoder score for the pair, or ``None`` if the
+        model isn't available. Order-insensitive cache.
+        """
+        key = tuple(sorted([m1.id, m2.id]))
+        if key in self._cache:
+            return self._cache[key]
+        model = self._ensure_model()
+        if model is None:
+            self._cache[key] = None
+            return None
+        try:
+            score = model.predict([(self._text_for(m1), self._text_for(m2))])
+        except Exception as e:
+            logger.warning("contradiction scorer: predict failed: %s", e)
+            self._cache[key] = None
+            return None
+        # ``predict`` returns numpy scalar / array; coerce to plain float.
+        try:
+            value = float(score[0])
+        except (TypeError, IndexError, ValueError):
+            try:
+                value = float(score)
+            except (TypeError, ValueError):
+                self._cache[key] = None
+                return None
+        self._cache[key] = value
+        return value
+
 
 def _semantic_dedup_threshold() -> float:
     """Cosine threshold for semantic-dup detection, env-tunable.
@@ -107,7 +231,12 @@ def _semantic_dedup_threshold() -> float:
     return val
 
 
-def run_dream_cycle(session: Session) -> dict:
+def run_dream_cycle(
+    session: Session,
+    *,
+    rebuild_contradictions: bool | None = None,
+    scorer: _ContradictionScorer | None = None,
+) -> dict:
     """Run a full dream cycle.
 
     R11 concurrency #4: the cycle does many writes (auto-connect, dependency
@@ -119,8 +248,19 @@ def run_dream_cycle(session: Session) -> dict:
     dream is a nightly batch; concurrent readers are unaffected because
     WAL still permits reads during EXCLUSIVE).
 
+    ``rebuild_contradictions`` (v2.4.8): when True (or when
+    ``MEMEE_REBUILD_CONTRADICTIONS=1``), purge every existing
+    ``contradicts`` edge before running auto-connect. Existing users
+    whose graphs were polluted by the v2.4.7-and-earlier naive heuristic
+    can pass this once to re-evaluate every pair under the new semantic
+    gate. ``None`` falls through to the env var.
+
     Returns detailed stats about what was discovered and changed.
     """
+    if rebuild_contradictions is None:
+        env_val = os.environ.get("MEMEE_REBUILD_CONTRADICTIONS", "").strip().lower()
+        rebuild_contradictions = env_val in {"1", "true", "yes", "on"}
+
     # Best-effort EXCLUSIVE; raw begin keeps the existing session-level
     # commit at the end working unchanged. If the connection is already
     # in a transaction (rare from callers but possible), fall through.
@@ -131,12 +271,34 @@ def run_dream_cycle(session: Session) -> dict:
     stats = {
         "connections_created": 0,
         "contradictions_found": 0,
+        "contradictions_purged": 0,
         "confidence_boosts": 0,
         "promotions_proposed": 0,
         "promotions_applied": 0,
         "meta_patterns": [],
         "digest": [],
     }
+
+    if rebuild_contradictions:
+        # v2.4.8: wipe stale contradicts edges so the new semantic gate
+        # gets a clean canvas. The exact-match WHERE keeps us from
+        # touching depends_on / supersedes / supports / semantic_dup_of.
+        purge_count = (
+            session.query(MemoryConnection)
+            .filter(MemoryConnection.relationship_type == "contradicts")
+            .delete(synchronize_session=False)
+        )
+        stats["contradictions_purged"] = int(purge_count)
+        session.flush()
+        logger.info(
+            "dream: --rebuild-contradictions purged %d stale contradicts edges",
+            purge_count,
+        )
+
+    # v2.4.8 contradiction gate. Constructed once per cycle so the
+    # cross-encoder is loaded at most one time, with per-pair caching.
+    if scorer is None:
+        scorer = _ContradictionScorer()
 
     # Phase 0: Auto-propagate patterns to matching projects
     from memee.engine.propagation import run_propagation_cycle
@@ -145,7 +307,7 @@ def run_dream_cycle(session: Session) -> dict:
     stats["propagated_links"] = prop_stats["total_new_links"]
 
     # Phase 1: Auto-connect related memories
-    connect_stats = _auto_connect(session)
+    connect_stats = _auto_connect(session, scorer=scorer)
     stats["connections_created"] = connect_stats["created"]
 
     # Phase 1b: Infer depends_on edges (R9). Strict gates keep false-positive
@@ -199,8 +361,17 @@ def run_dream_cycle(session: Session) -> dict:
     return stats
 
 
-def _auto_connect(session: Session) -> dict:
-    """Connect memories that share 2+ tags."""
+def _auto_connect(
+    session: Session,
+    *,
+    scorer: _ContradictionScorer | None = None,
+) -> dict:
+    """Connect memories that share 2+ tags.
+
+    ``scorer`` is the per-cycle contradiction gate. Passed down
+    explicitly rather than module-globalled so tests can inject a
+    deterministic fake without monkey-patching the reranker module.
+    """
     stats = {"created": 0}
     tag_index: dict[str, list[Memory]] = defaultdict(list)
 
@@ -231,8 +402,10 @@ def _auto_connect(session: Session) -> dict:
 
                 shared_tags = set(m1.tags or []) & set(m2.tags or [])
                 if len(shared_tags) >= 2:
-                    # Determine relationship type
-                    rel_type = _infer_relationship(m1, m2)
+                    # Determine relationship type (semantic gate on
+                    # contradicts; see _infer_relationship for the
+                    # 2.4.8 false-positive rationale).
+                    rel_type = _infer_relationship(m1, m2, scorer=scorer)
                     strength = min(len(shared_tags) / 5, 1.0)
 
                     conn = MemoryConnection(
@@ -510,12 +683,38 @@ def _infer_supersessions(session: Session) -> dict:
     return stats
 
 
-def _infer_relationship(m1: Memory, m2: Memory) -> str:
-    """Infer the relationship type between two memories."""
-    # Pattern + Anti-Pattern with overlapping tags = contradicts
+def _infer_relationship(
+    m1: Memory,
+    m2: Memory,
+    *,
+    scorer: _ContradictionScorer | None = None,
+) -> str:
+    """Infer the relationship type between two memories.
+
+    v2.4.8: pattern + anti-pattern with overlapping tags no longer
+    auto-classifies as ``contradicts``. The naive heuristic produced
+    ~500 false positives on a 247-memory corpus (real user report) by
+    flagging orthogonal advice that happened to share tags. We now
+    gate the classification through a cross-encoder semantic score;
+    pairs below ``MEMEE_CONTRADICTION_THRESHOLD`` (default 0.55) get
+    the safer ``related_to`` label instead. When the scorer isn't
+    available (no HF cache, sentence-transformers missing, offline
+    install), we also fall back to ``related_to`` — no claim is
+    better than a wrong one.
+    """
     types = {m1.type, m2.type}
     if MemoryType.PATTERN.value in types and MemoryType.ANTI_PATTERN.value in types:
-        return "contradicts"
+        if scorer is None:
+            # Fail safe: without a scorer we can't tell contradiction
+            # from co-tagged orthogonal advice. Returning ``related_to``
+            # keeps the graph honest at the cost of losing genuine
+            # contradictions on installs without the cross-encoder.
+            return "related_to"
+        sim = scorer.score_pair(m1, m2)
+        if sim is None:
+            return "related_to"
+        threshold = _contradiction_threshold()
+        return "contradicts" if sim >= threshold else "related_to"
 
     # Same type = related_to or supports
     if m1.type == m2.type:
