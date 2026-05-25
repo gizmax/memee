@@ -135,6 +135,50 @@ def _count_tokens(text: str) -> int:
         return 0
     return len(text) // 4
 
+
+def _evidence_prefix(memory) -> str:
+    """Verifiable provenance tag for a briefing bullet.
+
+    Renders e.g. ``[mem:a1b2c3d4 · canon 91%]`` — an 8-char citation
+    handle (resolvable with ``memee cite``) plus maturity + confidence.
+    A concrete resolved handle, never a fill-in template, so it reads as
+    *attributed canon state* rather than an unsigned imperative —
+    the signal Anthropic-trained models use to separate organizational
+    memory from prompt injection (OWASP LLM01).
+
+    Crucially this is attribution, NOT instruction: it labels Memee's own
+    rows and never asks the model to emit a token. That is the distinction
+    the v2.2.1 footer rewrite missed — the old footer *demanded* the agent
+    produce ``[mem:xxx]`` tokens (an imperative toward the model = injection
+    signal), whereas a self-applied provenance prefix only describes where
+    a fact came from. Returns ``""`` when the row has no id (defensive;
+    callers fall back to the bare title).
+    """
+    from memee.engine.citations import short_hash
+
+    h = short_hash(getattr(memory, "id", "") or "")
+    if not h:
+        return ""
+    conf = getattr(memory, "confidence_score", None) or 0.0
+    mat = getattr(memory, "maturity", None) or "?"
+    return f"[mem:{h} · {mat} {conf:.0%}]"
+
+
+def _bullet(glyph: str, memory, title: str | None = None) -> str:
+    """Render a briefing bullet with its evidence prefix.
+
+    ``glyph`` is the layer marker (``•`` critical, ``→`` pinned, ``?``
+    re-check, ``✓`` pattern, ``[SEV]`` warning). The prefix sits between
+    glyph and title so that even after the compact path strips section
+    headers, every surviving line still carries its own provenance.
+    """
+    prefix = _evidence_prefix(memory)
+    text = title if title is not None else memory.title
+    if prefix:
+        return f"  {glyph} {prefix} {text}"
+    return f"  {glyph} {text}"
+
+
 # Stack exclusion: filter out memories from completely unrelated stacks
 _UNRELATED_TAGS = {
     "python": {"react", "swift", "swiftui", "kotlin", "angular", "vue",
@@ -214,7 +258,7 @@ def smart_briefing(
         if would_fit(header, token_budget - FOOTER_RESERVE):
             lines.append(header)
             for m, _ap in critical_aps:
-                candidate = f"  • {m.title}"
+                candidate = _bullet("•", m)
                 # Layer-0 cap: keep critical block ≤ ~100 tokens of content,
                 # but still respect overall budget first.
                 if current_tokens() + _count_tokens("\n" + candidate) > min(
@@ -338,7 +382,7 @@ def smart_briefing(
                 lines.append(header)
                 pinned_start_tokens = _count_tokens("\n".join(lines))
                 for m in matching:
-                    candidate = f"  → {m.title}"
+                    candidate = _bullet("→", m)
                     # Sub-cap: ≤ ~120 tokens of pinned content. Same
                     # shape as Layer 0's cap, just sized for the longer
                     # titles policies tend to have.
@@ -407,7 +451,7 @@ def smart_briefing(
                 lines.append(header)
                 verify_start_tokens = _count_tokens("\n".join(lines))
                 for m in verify_rows:
-                    candidate = f"  ? {m.title}"
+                    candidate = _bullet("?", m)
                     if current_tokens() + _count_tokens("\n" + candidate) > min(
                         token_budget - FOOTER_RESERVE,
                         verify_start_tokens + 120,
@@ -501,8 +545,10 @@ def smart_briefing(
                 lines.append(label)
                 for r in patterns:
                     m = r["memory"]
-                    conf = f"{m.confidence_score:.0%}"
-                    candidate = f"  ✓ {m.title} ({conf})"
+                    # Evidence prefix carries the confidence now, so the
+                    # trailing ``(conf)`` suffix is dropped to avoid showing
+                    # it twice.
+                    candidate = _bullet("✓", m)
                     if not would_fit(candidate, token_budget - FOOTER_RESERVE):
                         break
                     lines.append(candidate)
@@ -516,7 +562,7 @@ def smart_briefing(
                 for r in warnings:
                     m = r["memory"]
                     sev = m.anti_pattern.severity.upper() if m.anti_pattern else "!"
-                    candidate = f"  [{sev}] {m.title}"
+                    candidate = _bullet(f"[{sev}]", m)
                     if not would_fit(candidate, token_budget - FOOTER_RESERVE):
                         break
                     lines.append(candidate)

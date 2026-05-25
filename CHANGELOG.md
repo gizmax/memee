@@ -8,6 +8,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.4.10] — 2026-05-24
+
+**Every briefing bullet now carries a verifiable evidence prefix —
+so the agent reads canon, not an anonymous directive.**
+
+### Fixed
+
+The compact briefing rendered Layer 0 / 0.5 / 0.7 / 1 bullets as bare
+imperatives once the section headers were stripped: `• Never combine
+private data, untrusted content, and external sends`. With no provenance
+attached, an Anthropic-trained model reasonably treats that line as a
+prompt-injection attempt (OWASP LLM01) and ignores it — the institutional
+memory the hook pushed gets discarded at the door.
+
+Each bullet now leads with its own citation handle:
+
+```
+• [mem:8ae0600a · hypothesis 77%] Never combine private data, …
+✓ [mem:19be2fa5 · canon 92%]      Always use timeout on HTTP requests
+[HIGH] [mem:1a198bbc · validated 71%] Do not declare success on a partial check
+```
+
+The `[mem:<8hex>]` handle resolves with `memee cite`, and the maturity +
+confidence turn the line into *attributed state* the model can weigh
+honestly. This is attribution, not instruction — it labels Memee's own
+rows and never asks the model to emit a token, so it does not reintroduce
+the v2.2.1 footer mistake (which *demanded* the agent produce `[mem:…]`
+tokens). The content-policy guard (`test_no_imperatives.py`) still passes:
+the prefix is a concrete resolved handle, never a `[mem:<id>]` template.
+
+A pleasant side effect: the prefix exposes maturity honestly. The three
+"critical" anti-patterns a fresh install surfaces turn out to be
+`hypothesis 77%`, not canon — the agent now sees that and weights
+accordingly instead of treating a hypothesis as gospel.
+
+### Migration
+
+None. Format-only change to briefing output; no schema, no API. Token
+cost per briefing rises ~7 tokens/bullet (≈35–50 tokens total), well
+within the 500-token budget. `MEMEE_QUIET` / `MEMEE_NO_LAYER0` /
+`MEMEE_NO_FOOTER` kill-switches are unchanged.
+
 ## [2.4.9] — 2026-05-16
 
 Menubar app no longer shows up in the Dock as "Python."

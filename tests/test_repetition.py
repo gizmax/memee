@@ -25,6 +25,7 @@ Tests below pin:
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 
@@ -203,7 +204,12 @@ def test_router_renders_layer07_block(session, monkeypatch):
 
     out = smart_briefing(session, task="canon", token_budget=500)
     assert "Re-checking canon:" in out
-    assert "? Stale canon worth re-checking" in out
+    # v2.4.10: bullets carry an evidence prefix between glyph and title,
+    # e.g. "? [mem:6bc2ae7b · canon 83%] Stale canon worth re-checking".
+    assert re.search(
+        r"\? \[mem:[0-9a-f]{8} · \w+ \d+%\] Stale canon worth re-checking",
+        out,
+    )
     # Stale canon must appear ONLY ONCE — Layer 0.7 took it, the
     # Layer 1 de-dup must keep it out of the search-routed bullets
     # even when the search query matches the title.
