@@ -15,6 +15,15 @@ class Settings(BaseSettings):
     cross_model_bonus: float = 1.3  # Diversity bonus, not "peer review"
     diminishing_factor: float = 0.95
 
+    # Soft validation (v2.4.11): an explicit `memee cite --confirm` is
+    # positive but weak evidence — the agent applied a memory, but unlike a
+    # post-task review there's no diff/outcome check behind it. It bumps the
+    # Beta posterior's α by this fractional weight (vs 1.0 for a full
+    # validation) so confidence rises gently with use, while leaving
+    # validation_count / project_count untouched so the validated/canon
+    # gates stay reserved for genuine cross-project evidence.
+    soft_validation_weight: float = 0.5
+
     # Maturity thresholds
     tested_min_applications: int = 1
     validated_min_confidence: float = 0.7

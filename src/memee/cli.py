@@ -2711,9 +2711,15 @@ def cite_cmd(hash_or_id, confirm, note, fmt):
         click.echo(f"  {memory.source_url}")
     if confirm_result is not None:
         click.echo("")
+        before = confirm_result.get("confidence_before")
+        after = confirm_result.get("confidence_after")
+        delta = ""
+        if before is not None and after is not None:
+            delta = f" · confidence {before:.2f} → {after:.2f}"
         click.echo(
             f"Confirmed citation — application_count is now "
-            f"{confirm_result['application_count']}."
+            f"{confirm_result['application_count']} "
+            f"(maturity: {confirm_result.get('maturity', '?')}){delta}"
         )
 
 

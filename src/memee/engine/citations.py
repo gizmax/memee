@@ -202,13 +202,30 @@ def confirm_citation(
     memory: Memory,
     note: str = "",
 ) -> dict:
-    """Manually confirm an agent applied this memory.
+    """Manually confirm an agent applied this memory — a soft validation.
 
-    Bumps ``application_count`` once and appends a ``citation`` entry to
-    the evidence chain. Returns the new shape so the CLI can echo it.
+    Three effects:
+      1. bumps ``application_count`` (the memory was applied → "tested"),
+      2. records a *soft* validation: bumps the Beta posterior's α by the
+         fractional ``soft_validation_weight`` so confidence rises gently
+         with use (see :func:`engine.confidence.soft_validate` — it leaves
+         the validated/canon project gates untouched, so a single user
+         can't inflate maturity past "tested"),
+      3. appends a ``citation`` entry to the evidence chain.
+
+    Returns the new shape so the CLI can echo it, including the
+    confidence before/after so the caller can show the delta.
     """
+    from memee.engine.confidence import soft_validate
+
+    conf_before = float(memory.confidence_score or 0.0)
+
     memory.application_count = (memory.application_count or 0) + 1
     memory.last_applied_at = datetime.now(timezone.utc)
+
+    # Soft validation: explicit-but-weak positive evidence bumps α.
+    conf_after = soft_validate(memory)
+
     chain = list(memory.evidence_chain or [])
     chain.append(
         {
@@ -223,6 +240,9 @@ def confirm_citation(
         "memory_id": memory.id,
         "application_count": memory.application_count,
         "evidence_entries": len(chain),
+        "confidence_before": round(conf_before, 4),
+        "confidence_after": round(conf_after, 4),
+        "maturity": memory.maturity,
     }
 
 

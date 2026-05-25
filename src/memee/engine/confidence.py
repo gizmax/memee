@@ -397,6 +397,40 @@ def update_confidence(
     return memory.confidence_score
 
 
+def soft_validate(memory: Memory, weight: float | None = None) -> float:
+    """Record a *soft* validation — explicit but weak positive evidence.
+
+    A ``memee cite --confirm`` is the agent (or human) saying "I applied
+    this memory and it helped". That's real positive evidence, but weaker
+    than a :func:`update_confidence` validation, which is backed by a
+    post-task diff scan and a task outcome. So instead of a full evidence
+    count we bump the Beta posterior's α by a fractional ``weight``
+    (default :attr:`settings.soft_validation_weight`, 0.5). Confidence
+    rises gently with repeated use.
+
+    Deliberately leaves ``validation_count`` and ``project_count``
+    untouched: those are the hard gates that promote a memory to
+    ``validated`` (≥3 projects) or ``canon`` (≥5 projects, ≥10
+    validations). Reserving them for genuine, automated, cross-project
+    evidence keeps a single-user install honest — confirming your own
+    memories raises confidence% and can promote ``hypothesis → tested``
+    (via ``application_count``, bumped by the caller), but it can never
+    mint ``validated`` or ``canon`` on its own.
+
+    Maturity is re-evaluated so the new confidence (and any tested
+    promotion) is reflected immediately rather than waiting for the
+    nightly lifecycle pass. Returns the updated confidence_score.
+    """
+    s = config.settings
+    w = s.soft_validation_weight if weight is None else weight
+    w = max(0.0, float(w))
+    _backfill_alpha_beta(memory)
+    memory.alpha = float(memory.alpha or 1.0) + w
+    memory.confidence_score = max(0.01, min(0.99, _posterior_mean(memory)))
+    memory.maturity = evaluate_maturity(memory)
+    return memory.confidence_score
+
+
 def get_uncertainty(memory: Memory) -> float:
     """Get uncertainty estimate for a memory's confidence.
 

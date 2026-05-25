@@ -8,6 +8,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.4.11] — 2026-05-24
+
+**`memee cite --confirm` is now a real soft validation — confirming a
+memory actually moves its confidence.**
+
+### Fixed
+
+The CLI documented `--confirm` as "a soft validation", but
+`confirm_citation` only bumped `application_count` and appended an
+evidence-chain entry — it never touched the confidence posterior. So an
+agent that cited and confirmed a memory left its confidence flat at the
+day-1 prior. The loop that v2.4.10's `[mem:…]` handles opened (agent reads
+a handle → confirms it helped) had no effect on the knowledge.
+
+`confirm_citation` now also records a *soft* validation via the new
+`engine.confidence.soft_validate`: it bumps the Beta posterior's α by a
+fractional `soft_validation_weight` (default 0.5, vs 1.0 for a full
+post-task validation), recomputes the posterior mean, and re-evaluates
+maturity so a `hypothesis` with its first confirm promotes to `tested`
+immediately.
+
+Crucially it leaves `validation_count` and `project_count` **untouched** —
+the gates that promote to `validated` (≥3 projects) and `canon` (≥5
+projects, ≥10 validations) stay reserved for genuine, automated,
+cross-project evidence. A single-user install can now watch confidence%
+rise with use, but **cannot** inflate maturity past `tested` by confirming
+its own memories. That ceiling is by design: canon means "proven across
+the organization", not "I clicked confirm five times".
+
+`memee cite --confirm` now echoes the confidence delta and resulting
+maturity, e.g. `application_count is now 3 (maturity: tested) · confidence
+0.50 → 0.60`.
+
+### Added
+
+- `engine.confidence.soft_validate(memory, weight=None)` — public helper
+  for fractional positive evidence.
+- `settings.soft_validation_weight` (default 0.5), tunable via
+  `MEMEE_SOFT_VALIDATION_WEIGHT`.
+
+### Migration
+
+None. Additive. Existing `application_count` / evidence-chain behaviour is
+unchanged; the α bump is new and only fires on explicit `--confirm`.
+
 ## [2.4.10] — 2026-05-24
 
 **Every briefing bullet now carries a verifiable evidence prefix —
