@@ -8,6 +8,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.4.13] — 2026-05-29
+
+**`memee cite --confirm` closes the retrieval-feedback loop: hit@k /
+acceptance-rate stop being 0%.**
+
+### Fixed
+
+`SearchEvent.accepted_memory_id` was the signal behind hit@1 / hit@3 /
+acceptance-rate, but the only path to set it was the `search_feedback`
+MCP tool, which needs a raw `event_id` the agent never sees. A live
+install measured 272 search_events with 0 % accepted — the retrieval
+side of the loop was completely dark.
+
+`confirm_citation` now reconciles the explicit confirm back to the most
+recent unaccepted SearchEvent that surfaced this memory and marks it
+accepted (with the snapshot rank as `position_of_accepted`). So an agent
+that reads a `[mem:8hex]` handle from the v2.4.10 briefing, applies it,
+and runs `memee cite mem:8hex --confirm` (which already soft-validates
+since v2.4.11) now also fills the retrieval telemetry. The loop closes
+end-to-end: shown → applied → confirmed → accepted.
+
+Scoped to the most recent `max_lookback_events` (default 50) so a confirm
+can't retroactively credit an ancient unrelated search.
+
+### Added
+
+- `engine.telemetry.reconcile_acceptance(session, memory_id,
+  max_lookback_events=50)` — public helper, never raises into the caller,
+  uses a fresh session on the same bind.
+- `confirm_citation` return shape gains `reconciled_event_id`.
+
+### Migration
+
+None. Additive. The reconcile call is best-effort and silent if no recent
+event surfaced the memory.
+
+## [2.4.12] — 2026-05-29
+
+**`memee bar` actually hides the host Python from the Dock now.**
+
+### Fixed
+
+v2.4.9 set `LSUIElement="1"` on `NSBundle.mainBundle().infoDictionary()`
+at runtime. That key is only read from a bundle's Info.plist *at launch* —
+mutating the running pipx interpreter's dict was a no-op for the Dock,
+and could leave the app registered as a regular foreground app.
+
+`_hide_from_dock` now uses the documented runtime path:
+`NSApplication.sharedApplication().setActivationPolicy_(1)` — accessory
+(menu-bar-only). Called *after* `_build_app()` constructs the shared
+NSApplication; the v2.4.9 ordering ("before rumps.App") was inverted for
+the LSUIElement approach and wrong for the activation-policy approach.
+The fix is canonical for menubar-only Python apps and still degrades
+silently when AppKit is unavailable (non-macOS, missing pyobjc).
+
+### Migration
+
+```bash
+pipx upgrade memee
+memee bar uninstall
+memee bar install
+```
+
+Required because the LaunchAgent re-execs the new code path on
+(re)install.
+
 ## [2.4.11] — 2026-05-24
 
 **`memee cite --confirm` is now a real soft validation — confirming a

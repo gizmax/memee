@@ -236,6 +236,20 @@ def confirm_citation(
     )
     memory.evidence_chain = chain
     session.commit()
+
+    # Close the retrieval-feedback loop: credit the most recent search that
+    # surfaced this memory so ``accepted_memory_id`` (hit@k / acceptance
+    # rate) reflects reality instead of staying 0%. Best-effort — telemetry
+    # never raises into us, and a None result just means no recent search
+    # surfaced it.
+    reconciled_event_id = None
+    try:
+        from memee.engine.telemetry import reconcile_acceptance
+
+        reconciled_event_id = reconcile_acceptance(session, memory.id)
+    except Exception:
+        pass
+
     return {
         "memory_id": memory.id,
         "application_count": memory.application_count,
@@ -243,6 +257,7 @@ def confirm_citation(
         "confidence_before": round(conf_before, 4),
         "confidence_after": round(conf_after, 4),
         "maturity": memory.maturity,
+        "reconciled_event_id": reconciled_event_id,
     }
 
 

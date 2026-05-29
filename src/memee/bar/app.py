@@ -355,26 +355,31 @@ def _build_app():
 def _hide_from_dock() -> None:
     """Make the menubar app menu-bar-only (no Dock, no Cmd+Tab).
 
-    Without this, pipx-installed rumps apps show up as a "Python" icon in
-    the Dock because the host is a plain Python interpreter, not a proper
-    ``.app`` bundle. Setting ``LSUIElement`` at runtime via the NSBundle
-    info dictionary is the documented workaround for menubar-only Python
-    apps.
+    pipx-installed rumps apps run under a plain Python interpreter, not a
+    proper ``.app`` bundle, so macOS shows a generic "Python" Dock icon and
+    a Cmd+Tab entry. The reliable runtime fix is the NSApplication
+    *activation policy*: ``NSApplicationActivationPolicyAccessory`` (== 1)
+    marks the process as a UI element that lives only in the menu bar.
 
-    Must be called BEFORE ``rumps.App`` is constructed — setting it after
-    the process has registered with the WindowServer is a no-op.
+    This replaces the v2.4.9 attempt that mutated ``NSBundle``'s
+    ``LSUIElement`` info-dict key. That key is only read from a bundle's
+    Info.plist *at launch*, so mutating the running interpreter's dict was
+    a no-op for the Dock — and could leave the app registered as a regular
+    foreground app. ``setActivationPolicy_`` is the documented, supported
+    runtime path and, unlike LSUIElement, must be called *after* the shared
+    NSApplication exists (i.e. after ``rumps.App`` is constructed).
 
     Idempotent. Falls through silently when AppKit isn't available
     (non-macOS, missing pyobjc) so the surrounding code stays portable.
     """
     try:
-        from AppKit import NSBundle  # pyobjc — transitive dep of rumps
-        bundle = NSBundle.mainBundle()
-        info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
-        if info is not None:
-            info["LSUIElement"] = "1"   # NSDictionary expects string-y truthy
-            info.setdefault("CFBundleName", "Memee")
-            info.setdefault("CFBundleDisplayName", "Memee")
+        from AppKit import NSApplication  # pyobjc — transitive dep of rumps
+
+        # NSApplicationActivationPolicyAccessory == 1: menu-bar/UI-element
+        # only — no Dock tile, no Cmd+Tab, no application menu bar. The
+        # integer is a stable AppKit ABI value; hard-coded so a missing
+        # symbol export can't break the import.
+        NSApplication.sharedApplication().setActivationPolicy_(1)
     except Exception:
         pass
 
@@ -402,15 +407,15 @@ def run() -> int:
         )
         return 2
 
-    # Hide the host Python process from the Dock + Cmd+Tab BEFORE the
-    # WindowServer registration that rumps.App.__init__ triggers — too
-    # late afterwards.
-    _hide_from_dock()
-
     # File-watcher: refresh on state.json change. watchdog is a soft
     # dependency — fall back to the 60s rumps timer if it's missing so
     # the app still works.
     app = _build_app()
+
+    # Hide the host Python process from the Dock + Cmd+Tab. Must run AFTER
+    # rumps.App constructs the shared NSApplication — setActivationPolicy_
+    # is a runtime call, not a launch-time Info.plist key (the v2.4.9 bug).
+    _hide_from_dock()
     try:
         from watchdog.events import FileSystemEventHandler
         from watchdog.observers import Observer

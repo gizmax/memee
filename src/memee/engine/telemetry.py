@@ -242,6 +242,97 @@ def mark_event_accepted(
                 pass
 
 
+def reconcile_acceptance(
+    session: Session,
+    memory_id: str,
+    *,
+    max_lookback_events: int = 50,
+) -> str | None:
+    """Link an explicit memory use back to the search that surfaced it.
+
+    When the agent confirms it applied ``memory_id`` (e.g. via
+    ``memee cite --confirm``), credit the most recent SearchEvent that
+    actually surfaced that memory and hasn't already recorded an
+    acceptance. This is what fills ``accepted_memory_id`` — the signal
+    behind hit@1 / hit@3 / acceptance-rate — which otherwise stays 0%
+    because the agent never sees a raw ``event_id`` to feed back through
+    ``mark_event_accepted`` / ``search_feedback``.
+
+    Only the most recent ``max_lookback_events`` unaccepted events are
+    scanned, newest first, so a confirm can't retroactively credit an
+    ancient, unrelated search. An event "surfaced" the memory if it was
+    the top hit (``top_memory_id``) or appeared in the event's ranking
+    snapshot. ``position_of_accepted`` is set from the snapshot rank (0
+    for a top hit) so hit@k buckets stay honest.
+
+    Returns the event id it marked, or ``None`` if nothing matched. Like
+    the rest of telemetry, never raises into the caller and never touches
+    the caller's transaction (uses a fresh session on the same bind).
+    """
+    bind = _resolve_bind(session)
+    if bind is None:
+        return None
+
+    from sqlalchemy.orm import Session as SASession
+
+    from memee.storage.models import SearchRankingSnapshot
+
+    tele_session = None
+    try:
+        tele_session = SASession(bind=bind, autoflush=False)
+        recent = (
+            tele_session.query(SearchEvent)
+            .filter(SearchEvent.accepted_memory_id.is_(None))
+            .order_by(SearchEvent.created_at.desc())
+            .limit(max_lookback_events)
+            .all()
+        )
+        if not recent:
+            return None
+
+        recent_ids = [e.id for e in recent]
+        snap_rows = (
+            tele_session.query(
+                SearchRankingSnapshot.event_id, SearchRankingSnapshot.rank
+            )
+            .filter(
+                SearchRankingSnapshot.event_id.in_(recent_ids),
+                SearchRankingSnapshot.memory_id == memory_id,
+            )
+            .all()
+        )
+        rank_by_event = {ev_id: rank for ev_id, rank in snap_rows}
+
+        # Walk newest → oldest; the first event that surfaced the memory
+        # wins (the search most likely responsible for the application).
+        for ev in recent:
+            if ev.top_memory_id == memory_id:
+                position = 0
+            elif ev.id in rank_by_event:
+                position = rank_by_event[ev.id]
+            else:
+                continue
+            ev.accepted_memory_id = memory_id
+            ev.position_of_accepted = int(position)
+            tele_session.commit()
+            return ev.id
+        return None
+    except Exception as e:  # pragma: no cover — never raise into the caller
+        logger.debug("telemetry: reconcile_acceptance failed: %s", e)
+        if tele_session is not None:
+            try:
+                tele_session.rollback()
+            except Exception:
+                pass
+        return None
+    finally:
+        if tele_session is not None:
+            try:
+                tele_session.close()
+            except Exception:
+                pass
+
+
 def compute_retrieval_metrics(session: Session, window_days: int) -> dict:
     """Compute hit@1 / hit@3 / accepted_rate / p50 latency over a window.
 
