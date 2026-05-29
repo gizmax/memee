@@ -8,6 +8,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.4.17] — 2026-05-29
+
+**Every MCP tool now closes the session it opens.**
+
+### Fixed
+
+Five tools (`memory_search`, `search_feedback`, `memory_suggest`, and
+two adjacent helpers) already wrapped session use in `try/finally`. The
+other 16 tools (`memory_record`, `memory_validate`, `memory_invalidate`,
+`decision_record`, `antipattern_record`, and 11 more in the analytics /
+intelligence / delivery clusters) called `_get_session()` and returned
+without a matching `close()`. Long-running MCP servers leaked one
+session per call; the connection pool slowly bled out.
+
+Every tool now follows the same shape as the five that already did it:
+
+```python
+session = _get_session()
+try:
+    ...
+finally:
+    try:
+        session.close()
+    except Exception:
+        pass
+```
+
+### Added
+
+`tests/test_mcp_session_lifecycle.py` — three regressions:
+
+* Source-level audit walks `mcp_server.py` and asserts every
+  `session = _get_session()` is immediately followed by `try:` and a
+  reachable `session.close()` (catches the next forgotten tool at PR
+  time, not in production).
+* Runtime check on `memory_invalidate`'s early-return / error path
+  proves `close()` runs even when the tool short-circuits.
+* Inventory guard: at least 16 tool-level session opens audited —
+  catches accidental removals of the audit set.
+
+### Migration
+
+None. Behavioural-only — long-running deploys can drop the manual
+`pgbouncer pool_reset` or scheduled MCP restart they may have been
+running as a workaround.
+
 ## [2.4.16] — 2026-05-29
 
 **Three CLI UX hygiene fixes bundled.**

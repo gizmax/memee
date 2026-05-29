@@ -184,70 +184,76 @@ async def memory_record(
     from memee.storage.models import Memory, Project, ProjectMemory
 
     session = _get_session()
+    try:
 
-    tag_list = _parse_tags(tags)
-    ctx, ctx_err = _safe_json(context, {}, arg_name="context")
-    if ctx_err:
-        return json.dumps({"status": "rejected", "reason": ctx_err})
-    model_name = _detect_model(model)
+        tag_list = _parse_tags(tags)
+        ctx, ctx_err = _safe_json(context, {}, arg_name="context")
+        if ctx_err:
+            return json.dumps({"status": "rejected", "reason": ctx_err})
+        model_name = _detect_model(model)
 
-    # Quality gate
-    gate = run_quality_gate(session, title, content, tag_list, type, source="llm")
+        # Quality gate
+        gate = run_quality_gate(session, title, content, tag_list, type, source="llm")
 
-    if not gate.accepted and gate.merged:
-        existing = session.get(Memory, gate.merged_id)
-        if existing:
-            merge_duplicate(
-                session, existing, content, tag_list,
-                new_title=title, similarity=gate.dedup_similarity,
-            )
-            return json.dumps({"status": "merged", "existing_id": existing.id,
-                               "title": existing.title})
+        if not gate.accepted and gate.merged:
+            existing = session.get(Memory, gate.merged_id)
+            if existing:
+                merge_duplicate(
+                    session, existing, content, tag_list,
+                    new_title=title, similarity=gate.dedup_similarity,
+                )
+                return json.dumps({"status": "merged", "existing_id": existing.id,
+                                   "title": existing.title})
 
-    if not gate.accepted and gate.flagged and gate.reason == "large_cluster_manual_review":
+        if not gate.accepted and gate.flagged and gate.reason == "large_cluster_manual_review":
+            return json.dumps({
+                "status": "flagged",
+                "reason": gate.reason,
+                "candidate_id": gate.merged_id,
+                "similarity": gate.dedup_similarity,
+                "issues": gate.issues,
+            })
+
+        if not gate.accepted:
+            return json.dumps({"status": "rejected", "issues": gate.issues})
+
+        memory = Memory(
+            type=type,
+            title=title,
+            content=content,
+            tags=tag_list,
+            context=ctx,
+            source_model=model_name,
+            confidence_score=gate.initial_confidence,
+            source_type=gate.source_type,
+            quality_score=gate.quality_score,
+            is_authoritative=bool(is_authoritative),
+        )
+        session.add(memory)
+        session.flush()
+
+        # MemoryTag index sync — see cli.py:record for the leak this prevents.
+        from memee.engine.tag_index import sync_memory_tags
+        sync_memory_tags(session, memory)
+
+        if project_path:
+            abs_path = str(Path(project_path).resolve())
+            proj = session.query(Project).filter_by(path=abs_path).first()
+            if proj:
+                pm = ProjectMemory(project_id=proj.id, memory_id=memory.id)
+                session.add(pm)
+
+        session.commit()
+
         return json.dumps({
-            "status": "flagged",
-            "reason": gate.reason,
-            "candidate_id": gate.merged_id,
-            "similarity": gate.dedup_similarity,
-            "issues": gate.issues,
+            "status": "recorded",
+            "memory": _memory_to_dict(memory),
         })
-
-    if not gate.accepted:
-        return json.dumps({"status": "rejected", "issues": gate.issues})
-
-    memory = Memory(
-        type=type,
-        title=title,
-        content=content,
-        tags=tag_list,
-        context=ctx,
-        source_model=model_name,
-        confidence_score=gate.initial_confidence,
-        source_type=gate.source_type,
-        quality_score=gate.quality_score,
-        is_authoritative=bool(is_authoritative),
-    )
-    session.add(memory)
-    session.flush()
-
-    # MemoryTag index sync — see cli.py:record for the leak this prevents.
-    from memee.engine.tag_index import sync_memory_tags
-    sync_memory_tags(session, memory)
-
-    if project_path:
-        abs_path = str(Path(project_path).resolve())
-        proj = session.query(Project).filter_by(path=abs_path).first()
-        if proj:
-            pm = ProjectMemory(project_id=proj.id, memory_id=memory.id)
-            session.add(pm)
-
-    session.commit()
-
-    return json.dumps({
-        "status": "recorded",
-        "memory": _memory_to_dict(memory),
-    })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 @mcp.tool()
@@ -401,41 +407,47 @@ async def memory_validate(
     from memee.storage.models import Memory, MemoryValidation, Project
 
     session = _get_session()
-    memory = session.get(Memory, memory_id)
-    if not memory:
-        return json.dumps({"error": f"Memory not found: {memory_id}"})
+    try:
+        memory = session.get(Memory, memory_id)
+        if not memory:
+            return json.dumps({"error": f"Memory not found: {memory_id}"})
 
-    model_name = _detect_model(model)
-    project_id = None
-    if project_path:
-        abs_path = str(Path(project_path).resolve())
-        proj = session.query(Project).filter_by(path=abs_path).first()
-        if proj:
-            project_id = proj.id
+        model_name = _detect_model(model)
+        project_id = None
+        if project_path:
+            abs_path = str(Path(project_path).resolve())
+            proj = session.query(Project).filter_by(path=abs_path).first()
+            if proj:
+                project_id = proj.id
 
-    validation = MemoryValidation(
-        memory_id=memory.id,
-        project_id=project_id,
-        validated=True,
-        evidence=evidence,
-        validator_model=model_name,
-    )
-    session.add(validation)
+        validation = MemoryValidation(
+            memory_id=memory.id,
+            project_id=project_id,
+            validated=True,
+            evidence=evidence,
+            validator_model=model_name,
+        )
+        session.add(validation)
 
-    old_maturity = memory.maturity
-    new_score = update_confidence(
-        memory, validated=True, project_id=project_id, model_name=model_name
-    )
-    memory.last_validated_at = datetime.now(timezone.utc)
+        old_maturity = memory.maturity
+        new_score = update_confidence(
+            memory, validated=True, project_id=project_id, model_name=model_name
+        )
+        memory.last_validated_at = datetime.now(timezone.utc)
 
-    session.commit()
+        session.commit()
 
-    return json.dumps({
-        "status": "validated",
-        "memory_id": memory.id,
-        "confidence": new_score,
-        "maturity_change": f"{old_maturity} -> {memory.maturity}",
-    })
+        return json.dumps({
+            "status": "validated",
+            "memory_id": memory.id,
+            "confidence": new_score,
+            "maturity_change": f"{old_maturity} -> {memory.maturity}",
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 @mcp.tool()
@@ -452,36 +464,42 @@ async def memory_invalidate(
     from memee.storage.models import Memory, MemoryValidation, Project
 
     session = _get_session()
-    memory = session.get(Memory, memory_id)
-    if not memory:
-        return json.dumps({"error": f"Memory not found: {memory_id}"})
+    try:
+        memory = session.get(Memory, memory_id)
+        if not memory:
+            return json.dumps({"error": f"Memory not found: {memory_id}"})
 
-    project_id = None
-    if project_path:
-        abs_path = str(Path(project_path).resolve())
-        proj = session.query(Project).filter_by(path=abs_path).first()
-        if proj:
-            project_id = proj.id
+        project_id = None
+        if project_path:
+            abs_path = str(Path(project_path).resolve())
+            proj = session.query(Project).filter_by(path=abs_path).first()
+            if proj:
+                project_id = proj.id
 
-    validation = MemoryValidation(
-        memory_id=memory.id,
-        project_id=project_id,
-        validated=False,
-        evidence=reason,
-    )
-    session.add(validation)
+        validation = MemoryValidation(
+            memory_id=memory.id,
+            project_id=project_id,
+            validated=False,
+            evidence=reason,
+        )
+        session.add(validation)
 
-    old_maturity = memory.maturity
-    new_score = update_confidence(memory, validated=False, project_id=project_id)
+        old_maturity = memory.maturity
+        new_score = update_confidence(memory, validated=False, project_id=project_id)
 
-    session.commit()
+        session.commit()
 
-    return json.dumps({
-        "status": "invalidated",
-        "memory_id": memory.id,
-        "confidence": new_score,
-        "maturity_change": f"{old_maturity} -> {memory.maturity}",
-    })
+        return json.dumps({
+            "status": "invalidated",
+            "memory_id": memory.id,
+            "confidence": new_score,
+            "maturity_change": f"{old_maturity} -> {memory.maturity}",
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 # ── Decisions ──
@@ -506,78 +524,84 @@ async def decision_record(
     from memee.storage.models import Decision, Memory, MemoryType, Project, ProjectMemory
 
     session = _get_session()
+    try:
 
-    alt_list, alt_err = _safe_json(alternatives, [], arg_name="alternatives")
-    if alt_err:
-        return json.dumps({"status": "rejected", "reason": alt_err})
-    crit_list, crit_err = _safe_json(criteria, [], arg_name="criteria")
-    if crit_err:
-        return json.dumps({"status": "rejected", "reason": crit_err})
-    content = f"Chose {chosen}. Alternatives: {alternatives}"
+        alt_list, alt_err = _safe_json(alternatives, [], arg_name="alternatives")
+        if alt_err:
+            return json.dumps({"status": "rejected", "reason": alt_err})
+        crit_list, crit_err = _safe_json(criteria, [], arg_name="criteria")
+        if crit_err:
+            return json.dumps({"status": "rejected", "reason": crit_err})
+        content = f"Chose {chosen}. Alternatives: {alternatives}"
 
-    gate = run_quality_gate(session, title, content, ["decision"], "decision", source="llm")
-    # Dedup hit — fold into the existing memory instead of creating a twin.
-    if not gate.accepted and gate.merged:
-        existing = session.get(Memory, gate.merged_id)
-        if existing:
-            merge_duplicate(
-                session, existing, content, ["decision"],
-                new_title=title, similarity=gate.dedup_similarity,
-            )
-            return json.dumps({
-                "status": "merged",
-                "existing_id": existing.id,
-                "title": existing.title,
-            })
-    if not gate.accepted:
-        return json.dumps({"status": "rejected", "issues": gate.issues})
+        gate = run_quality_gate(session, title, content, ["decision"], "decision", source="llm")
+        # Dedup hit — fold into the existing memory instead of creating a twin.
+        if not gate.accepted and gate.merged:
+            existing = session.get(Memory, gate.merged_id)
+            if existing:
+                merge_duplicate(
+                    session, existing, content, ["decision"],
+                    new_title=title, similarity=gate.dedup_similarity,
+                )
+                return json.dumps({
+                    "status": "merged",
+                    "existing_id": existing.id,
+                    "title": existing.title,
+                })
+        if not gate.accepted:
+            return json.dumps({"status": "rejected", "issues": gate.issues})
 
-    # Persist the "decision" tag so future decision_record calls with the
-    # same title+tag signature can be detected by the fingerprint gate.
-    # Without this the second call can't match the first and we create a
-    # twin row (this was the P2 dedup bug before the April 2026 fix).
-    memory = Memory(
-        type=MemoryType.DECISION.value,
-        title=title,
-        content=content,
-        tags=["decision"],
-        confidence_score=gate.initial_confidence,
-        source_type=gate.source_type,
-        quality_score=gate.quality_score,
-    )
-    session.add(memory)
-    session.flush()
+        # Persist the "decision" tag so future decision_record calls with the
+        # same title+tag signature can be detected by the fingerprint gate.
+        # Without this the second call can't match the first and we create a
+        # twin row (this was the P2 dedup bug before the April 2026 fix).
+        memory = Memory(
+            type=MemoryType.DECISION.value,
+            title=title,
+            content=content,
+            tags=["decision"],
+            confidence_score=gate.initial_confidence,
+            source_type=gate.source_type,
+            quality_score=gate.quality_score,
+        )
+        session.add(memory)
+        session.flush()
 
-    # MemoryTag index sync (v2.4.14).
-    from memee.engine.tag_index import sync_memory_tags
-    sync_memory_tags(session, memory)
+        # MemoryTag index sync (v2.4.14).
+        from memee.engine.tag_index import sync_memory_tags
+        sync_memory_tags(session, memory)
 
-    decision = Decision(
-        memory_id=memory.id,
-        chosen=chosen,
-        alternatives=alt_list,
-        criteria=crit_list,
-        reversible=reversible,
-    )
-    session.add(decision)
+        decision = Decision(
+            memory_id=memory.id,
+            chosen=chosen,
+            alternatives=alt_list,
+            criteria=crit_list,
+            reversible=reversible,
+        )
+        session.add(decision)
 
-    if project_path:
-        abs_path = str(Path(project_path).resolve())
-        proj = session.query(Project).filter_by(path=abs_path).first()
-        if proj:
-            pm = ProjectMemory(project_id=proj.id, memory_id=memory.id)
-            session.add(pm)
+        if project_path:
+            abs_path = str(Path(project_path).resolve())
+            proj = session.query(Project).filter_by(path=abs_path).first()
+            if proj:
+                pm = ProjectMemory(project_id=proj.id, memory_id=memory.id)
+                session.add(pm)
 
-    session.commit()
+        session.commit()
 
-    return json.dumps({
-        "status": "recorded",
-        "decision": {
-            "memory_id": memory.id,
-            "chosen": chosen,
-            "alternatives": alt_list,
-        },
-    })
+        return json.dumps({
+            "status": "recorded",
+            "decision": {
+                "memory_id": memory.id,
+                "chosen": chosen,
+                "alternatives": alt_list,
+            },
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 # ── Anti-Patterns ──
@@ -601,57 +625,63 @@ async def antipattern_record(
     from memee.storage.models import AntiPattern, Memory, MemoryType
 
     session = _get_session()
-    tag_list = _parse_tags(tags)
-    content = f"Trigger: {trigger}\nConsequence: {consequence}\nAlternative: {alternative}"
+    try:
+        tag_list = _parse_tags(tags)
+        content = f"Trigger: {trigger}\nConsequence: {consequence}\nAlternative: {alternative}"
 
-    gate = run_quality_gate(session, title, content, tag_list, "anti_pattern", source="llm")
-    # Dedup hit — fold into the existing anti-pattern instead of creating a twin.
-    if not gate.accepted and gate.merged:
-        existing = session.get(Memory, gate.merged_id)
-        if existing:
-            merge_duplicate(
-                session, existing, content, tag_list,
-                new_title=title, similarity=gate.dedup_similarity,
-            )
-            return json.dumps({
-                "status": "merged",
-                "existing_id": existing.id,
-                "title": existing.title,
-            })
-    if not gate.accepted:
-        return json.dumps({"status": "rejected", "issues": gate.issues})
+        gate = run_quality_gate(session, title, content, tag_list, "anti_pattern", source="llm")
+        # Dedup hit — fold into the existing anti-pattern instead of creating a twin.
+        if not gate.accepted and gate.merged:
+            existing = session.get(Memory, gate.merged_id)
+            if existing:
+                merge_duplicate(
+                    session, existing, content, tag_list,
+                    new_title=title, similarity=gate.dedup_similarity,
+                )
+                return json.dumps({
+                    "status": "merged",
+                    "existing_id": existing.id,
+                    "title": existing.title,
+                })
+        if not gate.accepted:
+            return json.dumps({"status": "rejected", "issues": gate.issues})
 
-    memory = Memory(
-        type=MemoryType.ANTI_PATTERN.value,
-        title=title,
-        content=f"Trigger: {trigger}\nConsequence: {consequence}\nAlternative: {alternative}",
-        tags=tag_list,
-    )
-    session.add(memory)
-    session.flush()
+        memory = Memory(
+            type=MemoryType.ANTI_PATTERN.value,
+            title=title,
+            content=f"Trigger: {trigger}\nConsequence: {consequence}\nAlternative: {alternative}",
+            tags=tag_list,
+        )
+        session.add(memory)
+        session.flush()
 
-    # MemoryTag index sync (v2.4.14).
-    from memee.engine.tag_index import sync_memory_tags
-    sync_memory_tags(session, memory)
+        # MemoryTag index sync (v2.4.14).
+        from memee.engine.tag_index import sync_memory_tags
+        sync_memory_tags(session, memory)
 
-    ap = AntiPattern(
-        memory_id=memory.id,
-        severity=severity,
-        trigger=trigger,
-        consequence=consequence,
-        alternative=alternative,
-    )
-    session.add(ap)
-    session.commit()
+        ap = AntiPattern(
+            memory_id=memory.id,
+            severity=severity,
+            trigger=trigger,
+            consequence=consequence,
+            alternative=alternative,
+        )
+        session.add(ap)
+        session.commit()
 
-    return json.dumps({
-        "status": "recorded",
-        "anti_pattern": {
-            "memory_id": memory.id,
-            "title": title,
-            "severity": severity,
-        },
-    })
+        return json.dumps({
+            "status": "recorded",
+            "anti_pattern": {
+                "memory_id": memory.id,
+                "title": title,
+                "severity": severity,
+            },
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 @mcp.tool()
@@ -668,33 +698,39 @@ async def antipattern_check(
     from memee.engine.search import search_anti_patterns
 
     session = _get_session()
-    tag_list = _parse_tags(tags) or None
+    try:
+        tag_list = _parse_tags(tags) or None
 
-    results = search_anti_patterns(session, context, tags=tag_list)
+        results = search_anti_patterns(session, context, tags=tag_list)
 
-    if not results:
-        return json.dumps({"status": "clear", "message": "No matching anti-patterns."})
+        if not results:
+            return json.dumps({"status": "clear", "message": "No matching anti-patterns."})
 
-    warnings = []
-    for r in results:
-        m = r["memory"]
-        ap = m.anti_pattern
-        if ap:
-            warnings.append({
-                "memory_id": m.id,
-                "title": m.title,
-                "severity": ap.severity,
-                "trigger": ap.trigger,
-                "consequence": ap.consequence,
-                "alternative": ap.alternative or "",
-                "confidence": m.confidence_score,
-            })
+        warnings = []
+        for r in results:
+            m = r["memory"]
+            ap = m.anti_pattern
+            if ap:
+                warnings.append({
+                    "memory_id": m.id,
+                    "title": m.title,
+                    "severity": ap.severity,
+                    "trigger": ap.trigger,
+                    "consequence": ap.consequence,
+                    "alternative": ap.alternative or "",
+                    "confidence": m.confidence_score,
+                })
 
-    return json.dumps({
-        "status": "warning",
-        "count": len(warnings),
-        "warnings": warnings,
-    })
+        return json.dumps({
+            "status": "warning",
+            "count": len(warnings),
+            "warnings": warnings,
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 # ── Autoresearch — REMOVED in v2.0.0 ──
@@ -726,8 +762,14 @@ async def get_briefing(
     from memee.engine.router import smart_briefing
 
     session = _get_session()
-    abs_path = str(Path(project_path).resolve()) if project_path else None
-    return smart_briefing(session, abs_path, task=task, token_budget=token_budget)
+    try:
+        abs_path = str(Path(project_path).resolve()) if project_path else None
+        return smart_briefing(session, abs_path, task=task, token_budget=token_budget)
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 @mcp.tool()
@@ -747,12 +789,18 @@ async def post_task_feedback(
     from memee.engine.feedback import post_task_review
 
     session = _get_session()
-    model_name = _detect_model(model)
-    result = post_task_review(
-        session, diff_text, project_path,
-        model=model_name or "", outcome=outcome,
-    )
-    return json.dumps(result)
+    try:
+        model_name = _detect_model(model)
+        result = post_task_review(
+            session, diff_text, project_path,
+            model=model_name or "", outcome=outcome,
+        )
+        return json.dumps(result)
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 # ── Analytics ──
@@ -770,33 +818,39 @@ async def learning_status() -> str:
     from memee.storage.models import Memory, Project
 
     session = _get_session()
+    try:
 
-    total = session.query(func.count(Memory.id)).scalar() or 0
-    if total == 0:
-        return json.dumps({"status": "empty", "message": "No memories recorded yet."})
+        total = session.query(func.count(Memory.id)).scalar() or 0
+        if total == 0:
+            return json.dumps({"status": "empty", "message": "No memories recorded yet."})
 
-    maturity_counts = dict(
-        session.query(Memory.maturity, func.count(Memory.id))
-        .group_by(Memory.maturity)
-        .all()
-    )
+        maturity_counts = dict(
+            session.query(Memory.maturity, func.count(Memory.id))
+            .group_by(Memory.maturity)
+            .all()
+        )
 
-    type_counts = dict(
-        session.query(Memory.type, func.count(Memory.id))
-        .group_by(Memory.type)
-        .all()
-    )
+        type_counts = dict(
+            session.query(Memory.type, func.count(Memory.id))
+            .group_by(Memory.type)
+            .all()
+        )
 
-    avg_confidence = session.query(func.avg(Memory.confidence_score)).scalar() or 0
-    project_count = session.query(func.count(Project.id)).scalar() or 0
+        avg_confidence = session.query(func.avg(Memory.confidence_score)).scalar() or 0
+        project_count = session.query(func.count(Project.id)).scalar() or 0
 
-    return json.dumps({
-        "total_memories": total,
-        "projects": project_count,
-        "avg_confidence": round(avg_confidence, 3),
-        "maturity_distribution": maturity_counts,
-        "type_distribution": type_counts,
-    })
+        return json.dumps({
+            "total_memories": total,
+            "projects": project_count,
+            "avg_confidence": round(avg_confidence, 3),
+            "maturity_distribution": maturity_counts,
+            "type_distribution": type_counts,
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 @mcp.tool()
@@ -810,19 +864,25 @@ async def canon_list(category: str = "", limit: int = 100) -> str:
     from memee.storage.models import MaturityLevel, Memory
 
     session = _get_session()
-    limit = _clamp_limit(limit, default=100, maxv=500)
+    try:
+        limit = _clamp_limit(limit, default=100, maxv=500)
 
-    q = session.query(Memory).filter(Memory.maturity == MaturityLevel.CANON.value)
+        q = session.query(Memory).filter(Memory.maturity == MaturityLevel.CANON.value)
 
-    if category:
-        q = q.filter(Memory.tags.contains(category))
+        if category:
+            q = q.filter(Memory.tags.contains(category))
 
-    canons = q.limit(limit).all()
+        canons = q.limit(limit).all()
 
-    return json.dumps({
-        "count": len(canons),
-        "canon": [_memory_to_dict(m) for m in canons],
-    })
+        return json.dumps({
+            "count": len(canons),
+            "canon": [_memory_to_dict(m) for m in canons],
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 # ── Auto-Propagation ──
@@ -842,17 +902,23 @@ async def propagate_patterns(
     from memee.engine.propagation import run_propagation_cycle
 
     session = _get_session()
-    stats = run_propagation_cycle(
-        session, confidence_threshold, max_propagations=max_propagations
-    )
+    try:
+        stats = run_propagation_cycle(
+            session, confidence_threshold, max_propagations=max_propagations
+        )
 
-    return json.dumps({
-        "status": "completed",
-        "memories_checked": stats["memories_checked"],
-        "memories_propagated": stats["memories_propagated"],
-        "new_links": stats["total_new_links"],
-        "projects_reached": stats["projects_reached"],
-    })
+        return json.dumps({
+            "status": "completed",
+            "memories_checked": stats["memories_checked"],
+            "memories_propagated": stats["memories_propagated"],
+            "new_links": stats["total_new_links"],
+            "projects_reached": stats["projects_reached"],
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 # ── Predictive Anti-Pattern Push ──
@@ -872,23 +938,29 @@ async def predict_warnings(
     from memee.storage.models import Project
 
     session = _get_session()
+    try:
 
-    if project_path:
-        abs_path = str(Path(project_path).resolve())
-        project = session.query(Project).filter_by(path=abs_path).first()
-    else:
-        project = session.query(Project).first()
+        if project_path:
+            abs_path = str(Path(project_path).resolve())
+            project = session.query(Project).filter_by(path=abs_path).first()
+        else:
+            project = session.query(Project).first()
 
-    if not project:
-        return json.dumps({"error": "Project not found. Register it first."})
+        if not project:
+            return json.dumps({"error": "Project not found. Register it first."})
 
-    warnings = scan_project_for_warnings(session, project)
+        warnings = scan_project_for_warnings(session, project)
 
-    return json.dumps({
-        "project": project.name,
-        "warning_count": len(warnings),
-        "warnings": warnings,
-    })
+        return json.dumps({
+            "project": project.name,
+            "warning_count": len(warnings),
+            "warnings": warnings,
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 # ── Memory Inheritance ──
@@ -909,24 +981,30 @@ async def inherit_knowledge(
     from memee.storage.models import Project
 
     session = _get_session()
-    abs_path = str(Path(project_path).resolve())
-    project = session.query(Project).filter_by(path=abs_path).first()
+    try:
+        abs_path = str(Path(project_path).resolve())
+        project = session.query(Project).filter_by(path=abs_path).first()
 
-    if not project:
-        return json.dumps({"error": f"Project not found at {project_path}"})
+        if not project:
+            return json.dumps({"error": f"Project not found at {project_path}"})
 
-    stats = inherit_memories(
-        session, project,
-        min_memory_confidence=min_confidence,
-        max_inherit=max_inherit,
-    )
+        stats = inherit_memories(
+            session, project,
+            min_memory_confidence=min_confidence,
+            max_inherit=max_inherit,
+        )
 
-    return json.dumps({
-        "project": project.name,
-        "similar_projects": stats["similar_projects"],
-        "memories_inherited": stats["memories_inherited"],
-        "by_type": stats["by_type"],
-    })
+        return json.dumps({
+            "project": project.name,
+            "similar_projects": stats["similar_projects"],
+            "memories_inherited": stats["memories_inherited"],
+            "by_type": stats["by_type"],
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 # ── Dream Mode ──
@@ -943,17 +1021,23 @@ async def run_dream() -> str:
     from memee.engine.dream import run_dream_cycle
 
     session = _get_session()
-    stats = run_dream_cycle(session)
+    try:
+        stats = run_dream_cycle(session)
 
-    return json.dumps({
-        "status": "completed",
-        "connections_created": stats["connections_created"],
-        "contradictions_found": stats["contradictions_found"],
-        "confidence_boosts": stats["confidence_boosts"],
-        "promotions": f"{stats['promotions_applied']}/{stats['promotions_proposed']}",
-        "meta_patterns": stats["meta_patterns"],
-        "aging": stats.get("aging", {}),
-    })
+        return json.dumps({
+            "status": "completed",
+            "connections_created": stats["connections_created"],
+            "contradictions_found": stats["contradictions_found"],
+            "confidence_boosts": stats["confidence_boosts"],
+            "promotions": f"{stats['promotions_applied']}/{stats['promotions_proposed']}",
+            "meta_patterns": stats["meta_patterns"],
+            "aging": stats.get("aging", {}),
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 # ── Code Review ──
@@ -976,14 +1060,20 @@ async def review_code(
     from memee.engine.review import review_diff
 
     session = _get_session()
-    result = review_diff(session, diff_text, project_path)
+    try:
+        result = review_diff(session, diff_text, project_path)
 
-    return json.dumps({
-        "warnings": result["warnings"],
-        "confirmations": result["confirmations"],
-        "suggestions": result["suggestions"],
-        "stats": result.get("stats", {}),
-    })
+        return json.dumps({
+            "warnings": result["warnings"],
+            "confirmations": result["confirmations"],
+            "suggestions": result["suggestions"],
+            "stats": result.get("stats", {}),
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 # ── CMAM (Claude Managed Agents Memory) sync ──
@@ -1020,16 +1110,22 @@ async def sync_to_cmam(
         redact=settings.cmam_redact,
     )
     session = _get_session()
-    result = _sync(session, cfg, dry_run=dry_run)
+    try:
+        result = _sync(session, cfg, dry_run=dry_run)
 
-    return json.dumps({
-        "store_id": cfg.store_id,
-        "backend": cfg.backend,
-        "pushed": result.pushed,
-        "updated": result.updated,
-        "rejected": len(result.rejected),
-        "store_count": result.store_count,
-        "store_bytes": result.store_bytes,
-        "warnings": result.warnings,
-        "dry_run": dry_run,
-    })
+        return json.dumps({
+            "store_id": cfg.store_id,
+            "backend": cfg.backend,
+            "pushed": result.pushed,
+            "updated": result.updated,
+            "rejected": len(result.rejected),
+            "store_count": result.store_count,
+            "store_bytes": result.store_bytes,
+            "warnings": result.warnings,
+            "dry_run": dry_run,
+        })
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
