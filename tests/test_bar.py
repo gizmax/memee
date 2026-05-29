@@ -192,6 +192,13 @@ def test_doctor_returns_ok_on_macos_with_deps(tmp_path, monkeypatch):
     expected-and-not-fatal)."""
     if sys.platform != "darwin":
         pytest.skip("doctor's ok-flag is only meaningful on macOS")
+    # The optional ``[bar]`` extra (rumps + watchdog) isn't installed in
+    # every dev / CI environment. Pre-v2.4.16 this test asserted
+    # ``ok=True`` even when rumps was missing — precisely the case
+    # ``diagnose()`` rightfully reports as not-ok. Skip when the deps
+    # the assertion depends on aren't actually importable.
+    pytest.importorskip("rumps")
+    pytest.importorskip("watchdog")
     monkeypatch.setenv("MEMEE_HOME", str(tmp_path))
     from memee.bar.doctor import diagnose
 

@@ -422,12 +422,15 @@ def search(query, memory_type, tags, limit):
 
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
 
-    results = search_memories(
-        session, query, tags=tag_list, memory_type=memory_type, limit=limit
+    results, event_id = search_memories(
+        session, query, tags=tag_list, memory_type=memory_type, limit=limit,
+        return_event_id=True,
     )
 
     if not results:
         click.echo("No memories found.")
+        if event_id:
+            click.echo(f"  query_event_id: {event_id}")
         return
 
     for i, r in enumerate(results, 1):
@@ -440,6 +443,17 @@ def search(query, memory_type, tags, limit):
         click.echo(f"     Type: {m.type} | Score: {score:.3f} | ID: {m.id[:8]}")
         if tags_str:
             click.echo(f"     Tags: {tags_str}")
+
+    # v2.4.16: surface the event id so `memee feedback <event_id> <memory_id>`
+    # is one keystroke away — the docstring on `feedback` already promises
+    # this id is "printed by memee search". Suppressed when telemetry is
+    # off (event_id is None) to avoid printing a confusing blank line.
+    if event_id:
+        click.echo(f"\n  query_event_id: {event_id}")
+        click.echo(
+            "  (use `memee feedback {event_id} {memory_id}` to mark which "
+            "you used)"
+        )
 
 
 # ── Suggest ──
@@ -632,7 +646,12 @@ def validate(memory_id, evidence, project):
 
     project_id = None
     if project:
-        proj = _get_or_create_project(session, project)
+        proj = _get_project_by_path(session, project)
+        if proj is None:
+            raise click.ClickException(
+                f"Project not registered: {project}. "
+                "Run `memee project add <path>` first."
+            )
         project_id = proj.id
 
     validation = MemoryValidation(
@@ -2529,8 +2548,16 @@ def _link_memory_to_project(session, memory, project_path: str):
         session.add(pm)
 
 
-def _get_or_create_project(session, project_path: str):
-    """Get project by path, or return None if not registered."""
+def _get_project_by_path(session, project_path: str):
+    """Look up a Project by absolute path. Returns ``None`` when not registered.
+
+    v2.4.16 rename. The previous name (``_get_or_create_project``) lied —
+    nothing ever got created, so callers that did ``proj.id`` after this
+    blew up with ``AttributeError: 'NoneType' object has no attribute 'id'``
+    for any unregistered path. The contract is now declared by the name:
+    you get the row or you get None, and the caller surfaces a clean
+    error to the user.
+    """
     from memee.storage.models import Project
 
     abs_path = str(Path(project_path).resolve())

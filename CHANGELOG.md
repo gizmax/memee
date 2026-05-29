@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.4.16] — 2026-05-29
+
+**Three CLI UX hygiene fixes bundled.**
+
+### Fixed
+
+* **`memee validate --project <unregistered>` no longer crashes.** The
+  helper was named `_get_or_create_project` but never created anything —
+  any unregistered path produced `AttributeError: 'NoneType' object has
+  no attribute 'id'`. Renamed to `_get_project_by_path` (honest
+  contract) and the caller now raises a clean `click.ClickException`
+  pointing at `memee project add`.
+
+* **`memee search` now prints `query_event_id`.** The `memee feedback`
+  docstring promises EVENT_ID is "printed by `memee search`", but
+  search never passed `return_event_id=True` and never printed it.
+  `search` now surfaces the event id (and a hint about the
+  `memee feedback` command) after the results, so the documented
+  retrieval-feedback loop is one keystroke away. Suppressed when
+  `MEMEE_TELEMETRY=0` to avoid an empty line.
+
+* **`test_doctor_returns_ok_on_macos_with_deps` skips without rumps.**
+  The test asserted `ok=True` even when the optional `[bar]` extra
+  wasn't installed — precisely the case `diagnose()` rightfully reports
+  as not-ok. Now `pytest.importorskip("rumps")` /
+  `pytest.importorskip("watchdog")` skip the test in those environments.
+
+### Migration
+
+None. Behavioural-only changes; no schema, no API.
+
 ## [2.4.15] — 2026-05-29
 
 **Alembic schema parity: `alembic upgrade head` now produces the same
