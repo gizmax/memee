@@ -384,6 +384,14 @@ def record(type, title, content, tags, project, is_authoritative):
         is_authoritative=bool(is_authoritative),
     )
     session.add(memory)
+    session.flush()  # need memory.id before sync_memory_tags
+
+    # Keep the MemoryTag index in sync. Without this the router's pinned
+    # "global policy" branch treats this row as scope-less (no MemoryTag
+    # entry) even though its JSON tags are populated — leaking a python-
+    # tagged pin into a react task. v2.4.14 fix.
+    from memee.engine.tag_index import sync_memory_tags
+    sync_memory_tags(session, memory)
 
     if project:
         _link_memory_to_project(session, memory, project)
@@ -1611,6 +1619,30 @@ def embed():
         click.echo("Install with: pip install memee[vectors]")
     else:
         click.echo(f"Embedded {count} memories. Hybrid search is now active.")
+
+
+@cli.command("reindex-tags")
+def reindex_tags():
+    """Rebuild the MemoryTag / ProjectTag index from JSON columns.
+
+    Pre-v2.4.14 ``memee record``, MCP ``memory_record``, and ``pack install``
+    saved ``Memory.tags`` JSON without populating the ``MemoryTag`` index.
+    The router's pinned-policy "global" branch reads that index, so a row
+    with tags but no MemoryTag entry leaked across stacks (a python-tagged
+    pin showed up on react tasks). v2.4.14 fixes the write paths; run this
+    once on an existing install to repair already-stored rows.
+    """
+    from memee.engine.tag_index import rebuild_all_tag_indexes
+    from memee.storage.database import get_session, init_db
+
+    engine = init_db()
+    session = get_session(engine)
+    click.echo("Rebuilding tag indexes...")
+    result = rebuild_all_tag_indexes(session)
+    click.echo(
+        f"Done. memory_tags: {result['memory_tags']} rows · "
+        f"project_tags: {result['project_tags']} rows."
+    )
 
 
 @cli.command()

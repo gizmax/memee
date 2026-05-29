@@ -8,6 +8,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.4.14] — 2026-05-29
+
+**MemoryTag index now stays in sync with `Memory.tags` JSON — pinned
+policies no longer leak across stacks.**
+
+### Fixed
+
+`memee record`, MCP `memory_record` / `decision_record` /
+`antipattern_record`, and `pack install` all wrote `Memory.tags` (JSON)
+without populating the `MemoryTag` index. The router's pinned-policy
+"global" branch used `not exists MemoryTag` to mean "global policy" — so
+a row with populated tags JSON but no MemoryTag entry was leaked into
+every task regardless of stack (a python-tagged pin showed up on a react
+task). Two layers of defence:
+
+* **Write side:** every Memory insert path now calls
+  `engine.tag_index.sync_memory_tags(session, memory)` after `flush()`,
+  so the index is never silently stale. Patched in `cli.py:record`,
+  `mcp_server.py:memory_record`/`decision_record`/`antipattern_record`,
+  and `engine/packs.py` pack install.
+* **Read side:** the router's "global" branch now reads `Memory.tags`
+  JSON directly via `func.json_array_length` — the source of truth —
+  instead of inferring "global" from the absence of MemoryTag rows.
+  Even with a stale index a tagged pin can no longer leak.
+
+### Added
+
+`memee reindex-tags` — admin command that wraps the existing
+`engine.tag_index.rebuild_all_tag_indexes` to repair already-stored rows
+on installs that ran any pre-v2.4.14 build.
+
+### Migration
+
+After upgrading, run once on existing installs:
+
+```bash
+memee reindex-tags
+```
+
+Output reports how many `memory_tags` and `project_tags` rows were
+re-written from the JSON columns. Skippable for fresh installs.
+
 ## [2.4.13] — 2026-05-29
 
 **`memee cite --confirm` closes the retrieval-feedback loop: hit@k /

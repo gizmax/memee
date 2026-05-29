@@ -23,7 +23,7 @@ import os
 import re
 from pathlib import Path
 
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from memee.storage.models import (
@@ -351,18 +351,25 @@ def smart_briefing(
                 .all()
             )
             seen = {m.id for m in overlap_rows}
-            # Global branch: pinned rows with NO tags at all. Cheap
-            # because we LEFT JOIN and keep only the NULL side.
+            # Global branch: pinned rows EXPLICITLY declared global —
+            # ``Memory.tags`` JSON is empty/null. Critically, do NOT
+            # gate this on ``not exists MemoryTag`` (the pre-v2.4.14
+            # rule): the MemoryTag index can be stale on a row whose
+            # ``Memory.tags`` JSON is populated, so absence in the index
+            # silently leaks a scoped pinned policy ("python") into
+            # unrelated tasks ("react") as if it were a global policy.
+            # The JSON column is the source of truth — the index is a
+            # cache the router rebuilds via ``memee reindex-tags``.
             remaining = max_pinned - len(overlap_rows)
             global_rows: list[Memory] = []
             if remaining > 0:
-                from sqlalchemy import not_, exists
                 global_rows = (
                     session.query(Memory)
                     .filter(
                         *base_filter,
-                        not_(
-                            exists().where(MemoryTag.memory_id == Memory.id)
+                        or_(
+                            Memory.tags.is_(None),
+                            func.json_array_length(Memory.tags) == 0,
                         ),
                     )
                     .order_by(Memory.confidence_score.desc())

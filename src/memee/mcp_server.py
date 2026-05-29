@@ -229,6 +229,11 @@ async def memory_record(
         is_authoritative=bool(is_authoritative),
     )
     session.add(memory)
+    session.flush()
+
+    # MemoryTag index sync — see cli.py:record for the leak this prevents.
+    from memee.engine.tag_index import sync_memory_tags
+    sync_memory_tags(session, memory)
 
     if project_path:
         abs_path = str(Path(project_path).resolve())
@@ -543,6 +548,10 @@ async def decision_record(
     session.add(memory)
     session.flush()
 
+    # MemoryTag index sync (v2.4.14).
+    from memee.engine.tag_index import sync_memory_tags
+    sync_memory_tags(session, memory)
+
     decision = Decision(
         memory_id=memory.id,
         chosen=chosen,
@@ -620,6 +629,10 @@ async def antipattern_record(
     )
     session.add(memory)
     session.flush()
+
+    # MemoryTag index sync (v2.4.14).
+    from memee.engine.tag_index import sync_memory_tags
+    sync_memory_tags(session, memory)
 
     ap = AntiPattern(
         memory_id=memory.id,

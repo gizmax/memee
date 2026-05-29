@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from memee import packs_format as pf
 from memee.engine.quality_gate import merge_duplicate, run_quality_gate
+from memee.engine.tag_index import sync_memory_tags
 from memee.storage.models import AntiPattern, Memory, MemoryType, Severity
 
 logger = logging.getLogger(__name__)
@@ -546,6 +547,11 @@ def install_pack(
             memory.organization_id = organization_id
         session.add(memory)
         session.flush()
+
+        # MemoryTag index sync (v2.4.14) — pack install would otherwise
+        # leave every imported row's tags unindexed, so the router would
+        # mis-classify every imported pinned policy as global.
+        sync_memory_tags(session, memory)
 
         # Specialised child rows.
         if mtype == MemoryType.ANTI_PATTERN.value:

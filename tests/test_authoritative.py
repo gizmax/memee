@@ -242,18 +242,23 @@ def test_pinned_memory_does_not_repeat_in_layer1(session, monkeypatch):
     monkeypatch.delenv("MEMEE_NO_PINNED", raising=False)
 
     # Pin a memory whose tags also match a strong search hit.
-    session.add(
-        Memory(
-            type=MemoryType.PATTERN.value,
-            title="Logging is always JSON",
-            content="logging logging logging — strong BM25 hit on the term",
-            tags=["logging", "observability"],
-            maturity=MaturityLevel.CANON.value,
-            confidence_score=0.9,
-            source_type="human",
-            is_authoritative=True,
-        )
+    pin = Memory(
+        type=MemoryType.PATTERN.value,
+        title="Logging is always JSON",
+        content="logging logging logging — strong BM25 hit on the term",
+        tags=["logging", "observability"],
+        maturity=MaturityLevel.CANON.value,
+        confidence_score=0.9,
+        source_type="human",
+        is_authoritative=True,
     )
+    session.add(pin)
+    session.flush()
+    # v2.4.14: production write paths sync the MemoryTag index. Mirror
+    # that here so the router's overlap branch (which JOINs on MemoryTag)
+    # can match this pinned row on the "logging" scope tag.
+    from memee.engine.tag_index import sync_memory_tags
+    sync_memory_tags(session, pin)
     session.commit()
 
     result = smart_briefing(session, task="set up logging in our service", token_budget=500)
