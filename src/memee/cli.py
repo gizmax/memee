@@ -2311,6 +2311,11 @@ def pack_install(source, from_url, unsigned, upgrade):
             allow_unsigned=unsigned,
             overwrite_version=upgrade,
             pack_filename=pack_filename,
+            # v2.4.18: remote (URL) installs go through the strict trust
+            # policy — unsigned or untrusted-key packs require explicit
+            # --unsigned. Local files keep the legacy warn-and-install
+            # flow so bundled seed packs still work without ceremony.
+            source_kind="remote" if from_url else "local",
         )
     except ValueError as e:
         raise click.ClickException(str(e))

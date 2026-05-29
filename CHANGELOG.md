@@ -8,6 +8,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.4.18] — 2026-05-29
+
+**Pack-signature trust anchor + strict source policy for remote installs.**
+
+### Fixed
+
+The pre-fix signature was decorative: `packs_format.verify_bundle`
+checked the signature against the pubkey bundled *inside* the archive,
+so an attacker shipping their own keypair always passed verification.
+Unsigned packs returned `(True, "unsigned")` from the same function, so
+`install_pack` accepted them by default even though `--unsigned`
+sounded like an explicit opt-in. The loudest hole was `--from-url` — a
+remote URL could deliver an attacker-keyed pack and it would install
+silently.
+
+Two new layers anchor signatures and gate remote installs:
+
+* **Trust store.** `MEMEE_PACK_TRUSTED_KEYS` is a whitespace- or
+  comma-separated list of SHA-256 hex fingerprints of ed25519 public
+  keys you endorse. `packs_format.pubkey_fingerprint` computes the
+  fingerprint over the *raw* 32-byte key (PEM whitespace is irrelevant);
+  `is_trusted_bundle(bundle)` returns True iff the bundled pubkey
+  fingerprint is in the allowlist. Empty / unset = no key is trusted.
+
+* **Source-aware install policy.** `install_pack` takes a new
+  `source_kind` parameter. `"remote"` (used by `--from-url`) refuses
+  **unsigned** packs and **signed-but-untrusted** packs unless
+  `allow_unsigned=True` is opted into. `"local"` (default) preserves
+  the legacy warn-and-install flow so the seed packs shipped in the
+  wheel (unsigned by design) continue to work without ceremony.
+
+### Added
+
+`tests/test_pack_trust_policy.py` — 10 tests cover:
+
+* fingerprint stability across PEM whitespace variation
+* trust store reads from env var, empty/unset = nothing trusted
+* unsigned bundles can never be "trusted"
+* remote install rejects unsigned, rejects signed-but-untrusted,
+  accepts signed-and-trusted, and bypasses with `--unsigned`
+* local install keeps legacy behaviour for both unsigned and
+  signed-untrusted (the trust gate only fires on remote sources)
+
+### Migration
+
+None for local seed-pack installs. **Remote installs** (`memee pack
+install --from-url ...`) of unsigned or untrusted packs will start
+failing — re-run with `--unsigned` to opt in explicitly, or add the
+publisher's fingerprint to `MEMEE_PACK_TRUSTED_KEYS`. Look up a
+fingerprint:
+
+```python
+from memee.packs_format import pubkey_fingerprint
+print(pubkey_fingerprint(open("pubkey.pem", "rb").read()))
+```
+
 ## [2.4.17] — 2026-05-29
 
 **Every MCP tool now closes the session it opens.**

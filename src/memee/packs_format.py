@@ -485,10 +485,16 @@ def verify_bundle(bundle: PackBundle) -> tuple[bool, str]:
     Returns ``(ok, reason)``. ``ok=True`` covers two cases:
       * Bundle is unsigned (no signature, no pubkey). Caller decides
         whether to refuse via ``--unsigned`` policy.
-      * Bundle is signed and the signature checks out.
+      * Bundle is signed and the signature checks out *cryptographically*.
 
     ``ok=False`` means a signature was claimed but invalid (tamper, wrong
     key, or ``cryptography`` not installed so we can't verify).
+
+    NB: a ``True`` here only proves the signature matches the bundled
+    ``pubkey.pem`` — the attacker can bundle their own keypair and still
+    produce ``ok=True``. The signature has *trust* only if the bundled
+    pubkey's fingerprint is in the operator's allowlist; see
+    :func:`is_trusted_bundle` and the v2.4.18 install-time source policy.
     """
     if bundle.signature is None and bundle.pubkey_pem is None:
         return True, "unsigned"
@@ -512,3 +518,69 @@ def verify_bundle(bundle: PackBundle) -> tuple[bool, str]:
     except InvalidSignature:
         return False, "signature does not match (tampered or wrong key)"
     return True, "valid"
+
+
+# ── Trust anchor (v2.4.18) ──────────────────────────────────────────────────
+
+
+def pubkey_fingerprint(pem_bytes: bytes) -> str:
+    """SHA-256 hex fingerprint of an ed25519 public key (PEM-encoded).
+
+    The fingerprint is computed over the raw 32-byte ed25519 key bytes,
+    not over the PEM envelope — so re-encoding (whitespace, line endings,
+    header variation) yields the same fingerprint. Lowercase hex string,
+    64 characters long. Returns ``""`` on parse failure or missing crypto
+    dep so callers can treat it as "no fingerprint, no trust".
+    """
+    if not pem_bytes or not _has_cryptography():
+        return ""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    try:
+        pub = serialization.load_pem_public_key(pem_bytes)
+    except Exception:
+        return ""
+    if not isinstance(pub, Ed25519PublicKey):
+        return ""
+    raw = pub.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _trusted_fingerprints() -> set[str]:
+    """Read the operator's allowlist of trusted ed25519 fingerprints.
+
+    Source: ``MEMEE_PACK_TRUSTED_KEYS`` environment variable, whitespace-
+    or comma-separated lowercase hex fingerprints. Empty / unset means
+    no signing key is "trusted" — bundle signatures are cryptographically
+    valid (proving the file wasn't tampered after signing) but carry no
+    endorsement. The install-time source policy refuses such packs from
+    *remote* sources by default; local files keep the unsigned-warn flow
+    so seed packs shipped in the wheel continue to work.
+    """
+    import os
+    raw = os.environ.get("MEMEE_PACK_TRUSTED_KEYS", "")
+    if not raw:
+        return set()
+    parts: list[str] = []
+    for chunk in raw.replace(",", " ").split():
+        parts.append(chunk.strip().lower())
+    return {p for p in parts if p}
+
+
+def is_trusted_bundle(bundle: PackBundle) -> bool:
+    """True iff the bundle's signing key is in the operator's allowlist.
+
+    Unsigned bundles are never "trusted" — there is no key to anchor
+    against. Validity (signature matches bundled pubkey) is a *separate*
+    question handled by :func:`verify_bundle`.
+    """
+    if bundle.pubkey_pem is None:
+        return False
+    fp = pubkey_fingerprint(bundle.pubkey_pem)
+    if not fp:
+        return False
+    return fp in _trusted_fingerprints()

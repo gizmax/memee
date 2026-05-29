@@ -420,6 +420,7 @@ def install_pack(
     overwrite_version: bool = False,
     ledger_path: Path | None = None,
     pack_filename: str | None = None,
+    source_kind: str = "local",
 ) -> InstallResult:
     """Install a ``.memee`` pack into ``session``'s DB.
 
@@ -430,6 +431,17 @@ def install_pack(
       * Same name + version already installed → no-op (idempotent).
       * Same name + different version + ``overwrite_version=False`` →
         raises ValueError so the CLI can prompt the user.
+
+    ``source_kind`` (v2.4.18): ``"local"`` (default) preserves the legacy
+    seed-pack flow — unsigned packs install with a warning. ``"remote"``
+    is strict: unsigned **or** signed-but-untrusted packs are refused
+    unless ``allow_unsigned=True`` is opted into. A pack is "trusted"
+    when its bundled pubkey fingerprint is in
+    ``MEMEE_PACK_TRUSTED_KEYS`` — see :func:`packs_format.is_trusted_bundle`.
+    The CLI passes ``source_kind="remote"`` for ``--from-url`` installs,
+    closing the v2.4.17-and-earlier hole where any URL could ship an
+    attacker-keyed pack and the bundled-pubkey signature would always
+    verify.
     """
     raw = _resolve_source(source)
     bundle = pf.read_pack_from_bytes(raw)
@@ -440,6 +452,26 @@ def install_pack(
             f"pack signature check failed: {reason}. "
             f"Re-run with --unsigned to install anyway."
         )
+
+    # v2.4.18 trust policy: remote sources must carry a signature whose
+    # signing key is in the operator's allowlist. A bundled pubkey that
+    # the operator has never endorsed is a self-signed cert in disguise —
+    # cryptographically valid, semantically empty. The local-file branch
+    # keeps the legacy "warn but install" flow so seed packs shipped in
+    # the wheel (unsigned by design) continue to work.
+    if source_kind == "remote" and not allow_unsigned:
+        if not bundle.signed:
+            raise ValueError(
+                "remote pack is unsigned. Re-run with --unsigned to "
+                "install anyway, or fetch a signed copy."
+            )
+        if not pf.is_trusted_bundle(bundle):
+            raise ValueError(
+                "remote pack is signed but its key is not in "
+                "MEMEE_PACK_TRUSTED_KEYS. Add the fingerprint to the "
+                "trust store, or re-run with --unsigned to install "
+                "anyway."
+            )
 
     manifest = pf.parse_manifest(bundle.manifest_bytes)
 
