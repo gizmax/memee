@@ -8,6 +8,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [2.4.15] — 2026-05-29
+
+**Alembic schema parity: `alembic upgrade head` now produces the same
+schema as `Base.metadata`.**
+
+### Fixed
+
+Three tables (`impact_events`, `search_ranking_snapshots`, `ltr_models`)
+and three columns (`search_events.ranker_version`,
+`search_events.ranker_model_id`, `memory_connections.expires_at`) had
+landed in the SQLAlchemy models over the v2.4.x series without their
+own Alembic migration. The OSS `init_db` bootstrap (idempotent
+`create_all` + per-column ALTERs) silently caught the drift on every
+install, so existing DBs are on the target schema; but a clean
+`alembic upgrade head` left the DB missing all three tables / columns.
+
+New migration `a7d2f415c8e6` (depends on `c3f9e8a1b4d2`) adds the
+missing tables and columns idempotently — every CREATE / ALTER guards
+on the inspector, so partial-migrated DBs converge without errors.
+Indexes match the `__table_args__` on the SQLAlchemy models so a fresh
+alembic-only install is index-identical to `init_db`.
+
+### Added
+
+`tests/test_alembic_schema_parity.py` — five regression tests prove
+this stays fixed:
+
+* `test_alembic_head_matches_metadata` — diff alembic head ↔ metadata
+  must be empty (excluding FTS5 virtual tables and `alembic_version`)
+* `test_alembic_downgrade_round_trips` — upgrade head → downgrade base →
+  upgrade head reproduces the same schema
+* `test_search_events_has_ranker_columns[ranker_version|ranker_model_id]`
+* `test_memory_connections_has_expires_at`
+
+### Migration
+
+No action required for existing installs. To verify your DB:
+
+```bash
+alembic upgrade head     # idempotent — no-op on already-correct DBs
+```
+
 ## [2.4.14] — 2026-05-29
 
 **MemoryTag index now stays in sync with `Memory.tags` JSON — pinned
